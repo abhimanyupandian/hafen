@@ -25,6 +25,9 @@
 //   POST /flaky?rate=0.9       /json, but the reply leaves out "refund" 1 - rate of the time
 //   POST /nocors               /json without CORS headers
 //   POST /login                { access_token }
+//   POST /auth/login           { user, password }: with the password qa-pass-1234, two cookies (Set-Cookie: sid, region)
+//                              and { csrf_token }; else 401
+//   POST /auth/chat            /json, behind that login: the sid cookie and x-csrf-token, or 401
 //   POST /systemone/v1/systemone   a System One API: noul 0.91 when the state asks "why", else 0.12; questions
 //                                  whose instructions say UNSURE answer 0.55 (confidence 0.1)
 //   GET  /systemone/v1/models
@@ -36,6 +39,8 @@ import { createServer } from "node:http";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+// The login behind /auth/chat: the password it takes, and the session and CSRF token it gives
+export const AUTH = { password: "qa-pass-1234", sid: "sess-5f2a9c71", csrf: "csrf-0b7e41d2" };
 const REFUND = "I'm sorry it arrived broken. Could you tell me why you want a refund for order 4417?";
 const replyFor = (message) => (/refund/i.test(message ?? "") ? REFUND : `You said: ${message ?? ""}`);
 
@@ -204,6 +209,13 @@ export function createMock({ delayMs = Number(process.env.MOCK_DELAY_MS ?? 0), c
         return json(res, 200, { data: { reply, order: { id: 4417 } } });
       case "/login":
         return json(res, 200, { access_token: "tok_mock_123" });
+      case "/auth/login":
+        if (body?.password !== AUTH.password) return json(res, 401, { error: { message: "wrong user or password" } });
+        res.writeHead(200, { "content-type": "application/json", "set-cookie": [`sid=${AUTH.sid}; Path=/; HttpOnly`, "region=eu; Path=/"] });
+        return res.end(JSON.stringify({ csrf_token: AUTH.csrf }));
+      case "/auth/chat":
+        if (!String(req.headers.cookie ?? "").includes(`sid=${AUTH.sid}`) || req.headers["x-csrf-token"] !== AUTH.csrf) return json(res, 401, { error: { message: "log in first" } });
+        return json(res, 200, { data: { reply } });
       case "/systemone/v1/models":
         return json(res, 200, { models: [{ name: "jev-mock" }] });
       case "/systemone/v1/systemone": {

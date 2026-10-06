@@ -6,10 +6,12 @@
 //
 //   engine → worker  { type: "load", id, source }                 → { type: "loaded", id, meta } | { type: "error", id, message }
 //                    { type: "call", id, method, args }           → send: { type: "event", id, event }…, { type: "done", id }
-//                                                                    check/judge: { type: "result", id, value }
+//                                                                    check/judge/setup: { type: "result", id, value }
 //                    { type: "abort", id }
 //                    { type: "fetch:res", fid, status, headers } { type: "fetch:chunk", fid, text } { type: "fetch:end", fid } { type: "fetch:error", fid, message }
 //   worker → engine  { type: "fetch", fid, id, request }
+
+const SECRET_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 export function servePlugin({ receive, send, importSource }) {
   let plugin = null;
@@ -108,11 +110,14 @@ export function servePlugin({ receive, send, importSource }) {
         const mod = await importSource(m.source);
         plugin = mod?.default ?? mod;
         if (!plugin || typeof plugin !== "object") throw new Error("its default export isn't a plugin");
-        if (!["provider", "check", "judge"].includes(plugin.kind)) throw new Error(`its kind is "${plugin.kind}": a plugin is a provider, a check or a judge`);
+        if (!["provider", "check", "judge", "fixture"].includes(plugin.kind)) throw new Error(`its kind is "${plugin.kind}": a plugin is a provider, a check, a judge or a fixture`);
         if (typeof plugin.name !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(plugin.name)) throw new Error("it has no name (letters, digits, '.', '-' and '_')");
-        const method = { provider: "send", check: "check", judge: "judge" }[plugin.kind];
+        const method = { provider: "send", check: "check", judge: "judge", fixture: "setup" }[plugin.kind];
         if (typeof plugin[method] !== "function") throw new Error(`a ${plugin.kind} plugin has ${method}()`);
-        send({ type: "loaded", id: m.id, meta: { kind: plugin.kind, name: plugin.name, version: String(plugin.version ?? "0.0.0"), hosts: Array.isArray(plugin.hosts) ? plugin.hosts.map(String) : [] } });
+        // A fixture's names: the values its setup() returns, which files and plugins use by name
+        const provides = plugin.kind === "fixture" && plugin.provides !== undefined ? plugin.provides : [];
+        if (!Array.isArray(provides) || provides.some((n) => typeof n !== "string" || !SECRET_NAME.test(n))) throw new Error("its provides is a list of names (letters, digits and '_', not starting with a digit)");
+        send({ type: "loaded", id: m.id, meta: { kind: plugin.kind, name: plugin.name, version: String(plugin.version ?? "0.0.0"), hosts: Array.isArray(plugin.hosts) ? plugin.hosts.map(String) : [], ...(plugin.kind === "fixture" ? { provides } : {}) } });
       } catch (err) {
         send({ type: "error", id: m.id, message: err?.message ?? String(err) });
       }

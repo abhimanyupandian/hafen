@@ -11,6 +11,11 @@
       "type": "string",
       "pattern": "^(http|websocket|openai-chat|openai-responses|anthropic-messages|gemini|ollama|plugin:[A-Za-z0-9@/._^~-]+)$"
     },
+    "fixture": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*(@.+)?$",
+      "description": "A fixture plugin to run before this provider's first request (a login): the values it gives are secrets for the run, used as ${env:NAME}, {{scope.NAME}}, or { secret: NAME } in a plugin. A version range may follow: acme-login@^1"
+    },
     "url": {
       "type": "string"
     },

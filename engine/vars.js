@@ -168,6 +168,8 @@ export function createScope({ layers = [], secrets = () => undefined, used = new
     variables,
     lookup,
     secretsUsed: used,
+    // A secret's value by its name, or undefined (what a plugin's { secret: NAME } is filled from)
+    secretValue: (name) => secrets(name),
     // A scope with another layer in front (extractions as a test goes on)
     // (what it adds isn't a file's: an extraction, a row, the run's own values)
     with: (layer) => createScope({ layers: [layer, ...layers], secrets, used, scope, trusted: trust }),

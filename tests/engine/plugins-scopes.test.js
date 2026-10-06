@@ -255,9 +255,10 @@ describe("new plugins' files", () => {
     const loaded = await loadPlugins(host, Object.keys(files));
     assert.deepEqual(loaded.problems, []);
     assert.deepEqual(Object.values(loaded.plugins).map((p) => [p.meta.name, p.meta.kind, p.meta.version]), [
-      ["my-provider", "provider", "1.0.0"], ["my-check", "check", "1.0.0"], ["my-judge", "judge", "1.0.0"],
+      ["my-provider", "provider", "1.0.0"], ["my-check", "check", "1.0.0"], ["my-judge", "judge", "1.0.0"], ["my-fixture", "fixture", "1.0.0"],
     ]);
     assert.deepEqual(loaded.plugins["my-provider"].meta.hosts, ["api.example.com"]);
+    assert.deepEqual(loaded.plugins["my-fixture"].meta.provides, ["EXAMPLE_COOKIE", "EXAMPLE_CSRF"]);
     assert.deepEqual(await loaded.plugins["my-check"].check({ value: "Yes, please", params: {} }), { status: "pass", reason: 'says "please"' });
     assert.equal((await loaded.plugins["my-judge"].judge({ input: "short", question: "q" })).value, 0.3);
     loaded.close();

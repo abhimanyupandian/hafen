@@ -6,7 +6,8 @@
 // where, sha256?(text) }. onEvent(event) reports progress for a UI or a CLI (see EVENTS below).
 
 import { isJudged, runRule, typeOf, describe, valuesOf } from "./checks/index.js";
-import { loadPlugins, PLUGIN_FILE, pluginNames, versionProblems } from "./plugins.js";
+import { createFixtures } from "./fixtures.js";
+import { fixtureProvides, loadPlugins, PLUGIN_FILE, pluginNames, versionProblems } from "./plugins.js";
 import { problemsFor, SIMULATE_NOT_BUILT, turnNotBuilt } from "./files/suite-file.js";
 import { first } from "./jsonpath.js";
 import { runJudged } from "./judges/index.js";
@@ -80,6 +81,9 @@ export async function runSuites({ suites, host, options = {}, onEvent: emit = ()
   const runSignal = anySignal([signal, stopper.signal]);
   const secretsUsed = new Set();
   const redactor = createRedactor({ secrets: secretsUsed, patterns: options.redact ?? [] });
+  // A scope's secrets: what its providers' fixtures gave in this run (a login's cookie), then the host's
+  const fixtures = createFixtures({ used: secretsUsed });
+  const secretsFor = (envName) => (name) => fixtures.value(name, envName) ?? host.secrets(name, { env: envName });
   // Every event as it goes out redacted, as the run file is (a check's reason, a message, a streamed
   // reply, a step's name can hold a secret): a CI log or the page never sees one. (The run's end is
   // the run, redacted already.)
@@ -119,7 +123,7 @@ export async function runSuites({ suites, host, options = {}, onEvent: emit = ()
   const folderFor = async (envName) => {
     if (!folderPlugins.has(envName)) {
       const files = host.list ? (await host.list()).filter((f) => PLUGIN_FILE.test(f)) : [];
-      folderPlugins.set(envName, await loadPlugins(host, files, null, { secrets: (name) => host.secrets(name, { env: envName }), used: secretsUsed, transport: host.transport }));
+      folderPlugins.set(envName, await loadPlugins(host, files, null, { secrets: secretsFor(envName), used: secretsUsed, transport: host.transport }));
     }
     return folderPlugins.get(envName);
   };
@@ -132,9 +136,8 @@ export async function runSuites({ suites, host, options = {}, onEvent: emit = ()
   for (const s of suites) {
     const envName = options.env ?? Object.keys(s.data?.environments ?? {})[0];
     const scope = await scopeFor(envName);
-    problems.push(...(scope?.errors ?? []), ...problemsFor(s, options.vars ?? {}, (name) => host.secrets(name, { env: envName }), scope));
     const loaded = (s.data?.plugins ?? []).length
-      ? await loadPlugins(host, s.data.plugins, s.file, { secrets: (name) => host.secrets(name, { env: envName }), used: secretsUsed, transport: host.transport })
+      ? await loadPlugins(host, s.data.plugins, s.file, { secrets: secretsFor(envName), used: secretsUsed, transport: host.transport })
       : { plugins: {}, problems: [], close: () => {} };
     suitePlugins.set(s.file, loaded);
     const missing = [...pluginNames(s)].filter((name) => !loaded.plugins[name] && !plugins[name]);
@@ -147,6 +150,9 @@ export async function runSuites({ suites, host, options = {}, onEvent: emit = ()
       }
     }
     problems.push(...loaded.problems, ...versionProblems(s, { ...plugins, ...loaded.plugins }));
+    // (a name a provider's fixture gives is set, though only once the fixture has run)
+    const given = fixtureProvides(Object.values(s.providers ?? {}), { ...plugins, ...loaded.plugins });
+    problems.push(...(scope?.errors ?? []), ...problemsFor(s, options.vars ?? {}, (name) => (given.has(name) ? "(a fixture's)" : secretsFor(envName)(name)), scope));
     // Load mode (many requests at once, ramped up, with percentiles: spec US11) isn't built: a load
     // test asked to run (--load) would be sent once, as any test, and look like a load test that
     // passed. Said instead, before anything is sent.
@@ -174,7 +180,7 @@ export async function runSuites({ suites, host, options = {}, onEvent: emit = ()
         if (runSignal.aborted) break;
         try {
           await runSuite(suite, {
-            run, host, options, onEvent, signal: runSignal, spans, parent: runSpan, redactor, secretsUsed, spend, scopeFor,
+            run, host, options, onEvent, signal: runSignal, spans, parent: runSpan, redactor, secretsUsed, spend, scopeFor, fixtures, secretsFor,
             plugins: { ...plugins, ...(suitePlugins.get(suite.file)?.plugins ?? {}) },
             stop: (why) => { stoppedBy ??= why; stopper.abort(); },
           });
@@ -240,11 +246,22 @@ async function runSuite(suite, ctx) {
   const base = createScope({
     layers: fileLayers,
     trusted: fileLayers,
-    secrets: (name) => host.secrets(name, { env: envName }),
+    secrets: ctx.secretsFor(envName),
     used: ctx.secretsUsed,
     scope: chosenScope,
   });
   const suiteSpan = spans.start("suite", suite.name, { parent, ref: { suite: suite.file } });
+  const tests = (data.tests ?? []).map((test, index) => ({ test, index })).filter(({ test }) => selected(test, options));
+  // The fixtures of the providers its tests use (a login), before its setup steps, which can use what
+  // they give too. Each runs once in the run, however many suites use it.
+  for (const config of new Set(tests.map(({ index }) => suite.providers[`test:${index}`] ?? suite.provider))) {
+    try {
+      await ctx.fixtures.ensure(config, { plugins: ctx.plugins, scope: base, envName, spans, parent: suiteSpan, signal });
+    } catch (err) {
+      spans.end(suiteSpan, "error");
+      throw Object.assign(new Error(`${suite.file}: ${err.message}`), { setup: true });
+    }
+  }
   const setupVars = {};
   for (const [i, step] of (data.setup ?? []).entries()) {
     const out = await runStep(step, { ...ctx, scope: base.with({ ...setupVars }), parent: suiteSpan, kind: "setup", label: step.name ?? `setup ${i + 1}` });
@@ -255,7 +272,6 @@ async function runSuite(suite, ctx) {
     }
   }
   const scope = base.with(setupVars);
-  const tests = (data.tests ?? []).map((test, index) => ({ test, index })).filter(({ test }) => selected(test, options));
   // The tests by group: a group's one after another, in the file's order; the groups at once
   const started = new Set();
   await Promise.all(byGroup(tests, ({ test }) => test.group).map(async (members) => {

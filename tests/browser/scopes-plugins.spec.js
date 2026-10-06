@@ -259,3 +259,56 @@ test("Settings → Plugins: a new check plugin from its starting file, used by a
   await page.click("#plugin-says-sorry-delete");
   await expect(page.locator("#pluginsEmpty")).toBeVisible();
 });
+
+test("Settings → Plugins: a fixture (a login) from its starting file; a provider naming one has it run before the conversation's first message, its value a secret", async ({ app: { page, servers } }) => {
+  // A new fixture from its starting file: what it gives, and how a provider uses it
+  await page.click("#openSettings");
+  await page.click("#settings-tab-plugins");
+  await page.selectOption("#newPluginKind", "fixture");
+  await page.fill("#newPluginName", "my-login");
+  await page.click("#newPluginForm button[type=submit]");
+  await expect(page.locator("#plugin-my-login")).toContainText("my-login · fixture · 1.0.0");
+  await expect(page.locator("#plugin-my-login-provides")).toHaveText("Gives EXAMPLE_COOKIE, EXAMPLE_CSRF, for the run");
+  await expect(page.locator("#plugin-my-login")).toContainText("Any provider in the folder can use it: fixture: my-login");
+  expect(await fileText(page, "plugins/my-login.js")).toContain('kind: "fixture"');
+  await page.click("#settingsClose");
+  // One that logs in to the mock (a token: a browser can't send or read cookies), and a provider naming it
+  await writeFile(page, "plugins/token-login.js", `export default {
+  kind: "fixture",
+  name: "token-login",
+  version: "1.0.0",
+  hosts: ["127.0.0.1"],
+  provides: ["ACME_TOKEN"],
+  async setup({ settings, transport, signal }) {
+    const res = await transport.fetch({ url: settings.login_url, method: "POST", body: { user: "qa-bot" }, signal });
+    return { ACME_TOKEN: (await res.json()).access_token };
+  },
+};
+`);
+  await writeFile(page, "providers/behind-login.yml", `kind: http
+fixture: token-login
+url: "${servers.mock.url}/json"
+login_url: "${servers.mock.url}/login"
+headers: { x-token: "\${env:ACME_TOKEN}" }
+body: { message: "{{user}}" }
+response: { text: $.data.reply }
+`);
+  await page.click("#openFolder");
+  await fetch(`${servers.mock.url}/_log`, { method: "DELETE" });
+  await page.selectOption("#convProvider", "providers/behind-login.yml");
+  for (const [i, message] of ["hello", "again"].entries()) {
+    await page.fill("#input", message);
+    await page.press("#input", "Enter");
+    await expect(page.locator(`#turn-${i}-reply .msg-body`)).toContainText(`You said: ${message}`);
+  }
+  const log = await mockLog(servers);
+  expect(log.filter((x) => x.path === "/login")).toHaveLength(1);
+  expect(log.filter((x) => x.path === "/json").map((x) => x.headers["x-token"])).toEqual(["tok_mock_123", "tok_mock_123"]);
+  await expect(page.locator(".timeline-bar[data-kind='fixture']")).toHaveCount(1);
+  expect(await page.content()).not.toContain("tok_mock_123");
+  // Settings → Secrets doesn't ask for what a fixture gives
+  await page.click("#openSettings");
+  await page.click("#settings-tab-secrets");
+  await expect(page.locator("#secretsFromFixtures")).toHaveText("Given by a provider's fixture when a run starts, so not set here: ACME_TOKEN");
+  await expect(page.locator("#secret-ACME_TOKEN")).toHaveCount(0);
+});

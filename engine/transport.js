@@ -3,19 +3,25 @@
 // same way everywhere.
 //
 //   transport.send(request, { signal }) → response
-//     request:  { url, method, headers: {name: value}, body?: string }
+//     request:  { url, method, headers: {name: value}, body?: string, redirect?: "follow" | "manual" | "error" }
 //     response: { status, headers: {lowercase name: value}, body: ReadableStream | AsyncIterable }
+//               (set-cookie: a list, one per cookie, where the platform lets it be read: not in a browser)
 
 import { abortError, iterate, sleep } from "./util.js";
 
-const headersObject = (headers) => Object.fromEntries([...headers.entries()].map(([k, v]) => [k.toLowerCase(), v]));
+const headersObject = (headers) => {
+  const out = Object.fromEntries([...headers.entries()].map(([k, v]) => [k.toLowerCase(), v]));
+  const cookies = typeof headers.getSetCookie === "function" ? headers.getSetCookie() : [];
+  if (cookies.length) out["set-cookie"] = cookies;
+  return out;
+};
 
 // A transport over fetch: Node's, a Worker's, a page's. With `relay` (the browser build's server,
 // `hafen serve`), every call goes through it.
 export function fetchTransport({ fetch: fetchImpl = globalThis.fetch, relay = null } = {}) {
   return {
     async send(request, { signal } = {}) {
-      const init = { method: request.method ?? "POST", headers: request.headers ?? {}, body: request.body, signal };
+      const init = { method: request.method ?? "POST", headers: request.headers ?? {}, body: request.body, signal, ...(request.redirect ? { redirect: request.redirect } : {}) };
       let res;
       try {
         res = relay

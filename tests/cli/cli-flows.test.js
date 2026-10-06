@@ -1074,3 +1074,56 @@ describe("serve", () => {
     }
   });
 });
+
+describe("fixtures", () => {
+  // A login (the mock's /auth/login): its cookies and CSRF token, for an HTTP provider as ${env:…}
+  const files = {
+    "plugins/acme-login.js": `export default {
+  kind: "fixture",
+  name: "acme-login",
+  version: "1.0.0",
+  hosts: ["127.0.0.1"],
+  provides: ["ACME_COOKIE", "ACME_CSRF"],
+  async setup({ settings, transport, signal }) {
+    const res = await transport.fetch({ url: settings.login_url, method: "POST", body: { user: "qa-bot", password: { secret: "ACME_PASSWORD" } }, signal });
+    if (res.status >= 400) throw new Error("login failed: " + res.status);
+    const { csrf_token } = await res.json();
+    return { ACME_COOKIE: [res.headers["set-cookie"]].flat().map((c) => c.split(";")[0]).join("; "), ACME_CSRF: csrf_token };
+  },
+};
+`,
+    "providers/acme.yml": `kind: http
+fixture: acme-login
+url: "{{base_url}}/auth/chat"
+login_url: "{{base_url}}/auth/login"
+headers: { cookie: "\${env:ACME_COOKIE}", x-csrf-token: "\${env:ACME_CSRF}" }
+body: { message: "{{user}}" }
+response: { text: $.data.reply }
+`,
+    "s.hafen.yml": `version: 1
+provider: providers/acme.yml
+environments:
+  local: { base_url: "MOCK_URL" }
+tests:
+  - name: behind the login
+    turns: [ { user: hello, expect: [ { type: status, equals: 200 }, { contains: "You said: hello" } ] } ]
+`,
+  };
+
+  it("a provider's fixture logs in first; the names it gives count as set for validate and run; their values are redacted", async () => {
+    const dir = await project(files);
+    const env = { ACME_PASSWORD: "qa-pass-1234" };
+    const valid = await cli(dir, ["validate", "s.hafen.yml", "--env-check"], { env });
+    assert.equal(valid.code, 0, said(valid));
+    const r = await cli(dir, ["run", "s.hafen.yml", "--report", "run:out/run.json"], { env });
+    assert.equal(r.code, 0, said(r));
+    const run = await readJSON(dir, "out/run.json");
+    assert.equal(run.spans.find((s) => s.kind === "fixture")?.status, "ok");
+    const text = JSON.stringify(run) + r.all;
+    for (const secret of ["sess-5f2a9c71", "csrf-0b7e41d2", "qa-pass-1234"]) assert.ok(!text.includes(secret), `${secret} is redacted`);
+    // Without the password: the run is a setup error (exit 2), saying why
+    const failed = await cli(dir, ["run", "s.hafen.yml"], { env: { ACME_PASSWORD: "wrong" } });
+    assert.equal(failed.code, 2, said(failed));
+    assert.match(failed.all, /the fixture "acme-login" failed: login failed: 401/);
+  });
+});

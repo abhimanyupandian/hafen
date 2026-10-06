@@ -12,7 +12,7 @@ import { KEYS, store } from "../lib/store.js";
 import { audit } from "../lib/audit.js";
 import { askSystemPermission, notifySettings, onNotifySettings, setNotifySettings, systemPermission, tryNotification } from "../lib/notifications.js";
 import { notify } from "../design/toast.jsx";
-import { app, clearConversations, clearRuns, deleteConversation, deleteRun, reconfigure, refreshSecrets, scopeNames } from "../state.js";
+import { app, clearConversations, clearRuns, deleteConversation, deleteRun, engineCall, reconfigure, refreshSecrets, scopeNames } from "../state.js";
 import { EnvironmentsPane } from "./environments.jsx";
 import { PluginsPane } from "./plugins.jsx";
 import { ProvidersPane } from "./providers.jsx";
@@ -38,6 +38,23 @@ function secretNames(suites, providers) {
     if (DEFAULT_KEYS[p.config?.kind] && p.config?.api_key === undefined) names.add(DEFAULT_KEYS[p.config.kind]);
   }
   return [...names].sort();
+}
+
+// The names the open providers' fixtures give (a login's cookie): set when a run starts, not here.
+// Their plugins are loaded (as Settings → Plugins does) only when a provider names a fixture.
+function useFixtureNames(state, suites, providers) {
+  const [given, setGiven] = useState([]);
+  const configs = [...suites.flatMap((s) => Object.values(s.providers ?? {})), ...providers.map((p) => p.config)];
+  const fixtures = [...new Set(configs.map((c) => (typeof c?.fixture === "string" ? c.fixture.split("@")[0] : null)).filter(Boolean))];
+  const key = fixtures.join(",");
+  useEffect(() => {
+    if (!state.opened || !fixtures.length) {
+      setGiven([]);
+      return;
+    }
+    engineCall("plugins", {}).then((list) => setGiven(list.filter((p) => p.meta?.kind === "fixture" && fixtures.includes(p.meta.name)).flatMap((p) => p.meta.provides ?? [])), () => setGiven([]));
+  }, [state.opened, key]);
+  return given;
 }
 
 // Which secret names have a value in `env` ("" holds values for every environment): { NAME: true }
@@ -72,7 +89,8 @@ function SecretsPane() {
   const [env, setEnv] = useState("");  // every scope, unless one is chosen
   const [set, setSet] = useState({});  // name -> "here" (a value for this environment) or "all" (for every one)
   const [error, setError] = useState("");
-  const referenced = secretNames(suites, providers);
+  const given = useFixtureNames(state, suites, providers);
+  const referenced = secretNames(suites, providers).filter((n) => !given.includes(n));
   // The names the files use, and every name that has a value (your own ones included)
   // (System One's key is in its own pane, Connection → System One)
   const names = [...new Set([...referenced, ...Object.keys(set)])].filter((n) => n !== JEV).sort();
@@ -115,6 +133,7 @@ function SecretsPane() {
           {names.map((name) => <SecretRow key={`${env}-${name}`} name={name} kept={set[name]} used={referenced.includes(name)} onSave={(v) => save(name, v)} />)}
         </ul>
       ) : <p className="note placeholder" id="secretsEmpty">The open suites don't reference any secrets yet.</p>}
+      {given.length > 0 && <p className="hint" id="secretsFromFixtures">{`Given by a provider's fixture when a run starts, so not set here: ${[...new Set(given)].sort().join(", ")}`}</p>}
       <AddSecret onSave={save} />
       <p className="hint">{"Use one in a suite or provider as ${env:NAME}. In CI, set them as the job's environment variables."}</p>
     </>

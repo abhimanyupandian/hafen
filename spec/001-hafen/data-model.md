@@ -204,7 +204,7 @@ running ───┼──────────► error        (setup or con
 |---|---|---|
 | `_id` | string | |
 | `parent` | string \| null | The span it's part of |
-| `kind` | SpanKind | `run`, `suite`, `test`, `repeat`, `row`, `turn`, `setup`, `teardown`, `request`, `first_byte`, `thinking`, `tool_call`, `tool_result`, `answer`, `check`, `judge_call`, `retry`, `error`, `user_sim` (a simulated user's message) |
+| `kind` | SpanKind | `run`, `suite`, `test`, `repeat`, `row`, `turn`, `setup`, `teardown`, `request`, `first_byte`, `thinking`, `tool_call`, `tool_result`, `answer`, `check`, `judge_call`, `retry`, `error`, `user_sim` (a simulated user's message), `fixture` (a provider's fixture running: under the suite in a run, under the turn in a conversation; its metrics' `provides`, the names it gave) |
 | `name` | string | What the timeline shows: `lookup_order`, `contains 4417` |
 | `start`, `end` | number | Milliseconds from the run's start, from a monotonic clock; `end` absent while running |
 | `status` | `"running"` \| `"ok"` \| `"pass"` \| `"fail"` \| `"unsure"` \| `"skipped"` \| `"error"` | Steps are `ok` or `error`; checks use check results |

@@ -160,6 +160,25 @@ end: { idle_ms: 5000 }     # or a rule with done: true
 In a browser, a WebSocket can't carry headers: put credentials in the address or a subprotocol, or
 use the relay.
 
+## Logging in first
+
+For an endpoint behind a login, name a [fixture](plugins.md#fixtures) in the provider file: a small
+plugin that logs in before the provider's first request, and gives cookies or tokens by name for
+the run. The provider's headers then use them like any secret:
+
+```yaml
+kind: http
+fixture: acme-login
+url: "{{scope.base_url}}/chat"
+login_url: "{{scope.base_url}}/login"     # the provider's other fields reach the fixture as settings
+headers: { cookie: "${env:ACME_COOKIE}", x-csrf-token: "${env:ACME_CSRF}" }
+body: { message: "{{user}}" }
+response: { text: $.data.reply }
+```
+
+A provider plugin names them instead: `headers: { cookie: { secret: "ACME_COOKIE" } }`. Either way
+the values are redacted wherever they'd show.
+
 ## Presets
 
 A preset is an HTTP provider already filled in for a known API. Anything it sets can be overridden.

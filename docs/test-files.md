@@ -179,7 +179,7 @@ test's teardown still runs.
 | `{{row.col}}` | The data file's current row |
 | `{{scope.NAME}}` | The chosen scope ([Scopes](#scopes)) |
 | `{{run.id}}`, `{{test.name}}`, `{{turn.index}}`, `{{repeat}}` | The run |
-| `${env:NAME}` | A secret: the process's environment in CI, or the app's stored secrets |
+| `${env:NAME}` | A secret: what a provider's [fixture](plugins.md#fixtures) gave in this run, then the process's environment in CI, or the app's stored secrets |
 
 A variable nothing sets stops the run before anything is sent. Set one from the command line with
 `--var name=value`.

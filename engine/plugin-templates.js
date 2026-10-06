@@ -59,10 +59,41 @@ export default {
 };
 `;
 
+const FIXTURE = (name) => `// A fixture plugin, run in a worker of its own before a provider's first request: a login, say.
+// Name it in a provider file as  fixture: ${name}  and what setup() returns is kept for the run, as
+// secrets: a provider plugin names them ({ secret: "EXAMPLE_COOKIE" }), a provider file uses
+// \${env:EXAMPLE_COOKIE}. Each is redacted wherever it would show.
+export default {
+  kind: "fixture",
+  name: "${name}",
+  version: "1.0.0",
+  // The only hosts it may reach
+  hosts: ["auth.example.com"],
+  // The names it gives
+  provides: ["EXAMPLE_COOKIE", "EXAMPLE_CSRF"],
+  // settings: the provider file's fields (login_url and user, say)
+  async setup({ settings, transport, signal }) {
+    const res = await transport.fetch({
+      url: settings.login_url ?? "https://auth.example.com/login",
+      method: "POST",
+      // A secret by its name, in a body too: the engine fills it in, so the fixture never holds it
+      body: { user: settings.user ?? "qa-bot", password: { secret: "EXAMPLE_PASSWORD" } },
+      signal,
+    });
+    if (res.status >= 400) throw new Error(\`login failed: \${res.status}\`);
+    // One entry per cookie (the desktop app and the CLI: a browser doesn't let a page read them)
+    const cookies = [res.headers["set-cookie"] ?? []].flat().map((c) => c.split(";")[0]);
+    const { csrf_token } = await res.json();
+    return { EXAMPLE_COOKIE: cookies.join("; "), EXAMPLE_CSRF: csrf_token };
+  },
+};
+`;
+
 export const PLUGIN_KINDS = [
   { id: "provider", label: "Provider", template: PROVIDER, use: (name) => `kind: plugin:${name}` },
   { id: "check", label: "Check", template: CHECK, use: (name) => `{ type: ${name} }` },
   { id: "judge", label: "Judge", template: JUDGE, use: (name) => `judges: { mine: { kind: plugin, plugin: ${name} } }` },
+  { id: "fixture", label: "Fixture", template: FIXTURE, use: (name) => `fixture: ${name}` },
 ];
 
 export const pluginTemplate = (kind, name) => PLUGIN_KINDS.find((k) => k.id === kind).template(name);

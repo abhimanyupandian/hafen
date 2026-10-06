@@ -2,6 +2,7 @@
 // mode, with the same turns, events, spans and metrics as a test. Saved as a test, its messages
 // become turns (files/suite-file.js, editText).
 
+import { createFixtures } from "./fixtures.js";
 import { createProvider } from "./providers/index.js";
 import { createRedactor } from "./redact.js";
 import { newRun, summarize } from "./runner.js";
@@ -13,6 +14,8 @@ import { createScope } from "./vars.js";
 // seed: a conversation's run to carry on (one kept by the app): its turns are the history the next
 // message goes with, and its spans come first on the timeline, the new ones after them.
 // scopeValues: the chosen scope ({ name, values }, or null), for {{scope.NAME}} (setScope changes it)
+// A provider with a fixture (a login: engine/fixtures.js) has it run before the first message, and
+// again for another scope; what it gives is kept for this conversation only.
 export function createConversation({ host, providerConfig, variables = {}, environment = {}, envName, prices = {}, plugins = {}, onEvent: emit = () => {}, history: historyMode = "live", seed = null, scopeValues = null }) {
   let chosen = scopeValues;
   const run = newRun({ mode: "explore", host, settings: { env: envName ?? null, provider: providerConfig?.kind } });
@@ -32,18 +35,21 @@ export function createConversation({ host, providerConfig, variables = {}, envir
   spans.adopt(seed?.spans);
   run.spans = spans.list;
   run.settings.redact = redactor.rules();
+  const fixtures = createFixtures({ used: secretsUsed, retry: true });
+  let config = providerConfig;
   let provider = createProvider(providerConfig, { plugins });
   let price = providerConfig.price ?? prices[providerConfig.model];
   let configText = JSON.stringify(providerConfig);
   // A provider whose file changed: the next message goes with its new configuration (the conversation
   // so far stays)
-  function setProvider(config) {
-    const text = JSON.stringify(config);
+  function setProvider(next) {
+    const text = JSON.stringify(next);
     if (text === configText) return;
-    provider = createProvider(config, { plugins });
-    price = config.price ?? prices[config.model];
+    provider = createProvider(next, { plugins });
+    price = next.price ?? prices[next.model];
+    config = next;
     configText = text;
-    run.settings.provider = config.kind;
+    run.settings.provider = next.kind;
   }
   // What later messages are sent with: each earlier turn's message and reply (and what its provider
   // kept to replay)
@@ -51,10 +57,11 @@ export function createConversation({ host, providerConfig, variables = {}, envir
   let session;
 
   async function send(message, { signal } = {}) {
+    const env = chosen?.name ?? envName;
     const scope = createScope({
       layers: [Object.assign({}, ...records.map((r) => r.variables ?? {})), variables, environment],
       trusted: [variables, environment],
-      secrets: (name) => host.secrets(name, { env: chosen?.name ?? envName }),
+      secrets: (name) => fixtures.value(name, env) ?? host.secrets(name, { env }),
       used: secretsUsed,
       scope: chosen,
     });
@@ -67,7 +74,16 @@ export function createConversation({ host, providerConfig, variables = {}, envir
     // (what the page is shown as it starts: redacted, as everything it's shown is)
     onEvent({ type: "turn:start", index, user: redactor.text(message) });
     const history = records.map((r) => (historyMode === "none" ? null : { user: r.user, reply: r.reply, raw: r.raw_blocks?.at(-1) })).filter(Boolean);
-    const out = await executeTurn({ provider, message, history, scope, transport: host.transport, signal, session, spans, parent: turnSpan, price, now: host.now, onEvent, index });
+    // The provider's fixture first (once; again after it failed, or for another scope)
+    let failed = null;
+    try {
+      await fixtures.ensure(config, { plugins, scope, envName: env, spans, parent: turnSpan, signal });
+    } catch (err) {
+      failed = err.message;
+    }
+    const out = failed
+      ? { record: { user: message, error: failed, events: [], reply: "", thinking: [], tool_calls: [], metrics: {} }, error: failed, session }
+      : await executeTurn({ provider, message, history, scope, transport: host.transport, signal, session, spans, parent: turnSpan, price, now: host.now, onEvent, index });
     session = out.session;
     spans.end(turnSpan, out.error ? (out.stopped ? "skipped" : "error") : "ok", out.record.metrics);
     const record = { ...out.record, index, results: [], ...(typed !== message ? { user_template: typed } : {}) };

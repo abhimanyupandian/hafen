@@ -15,6 +15,7 @@ import {
 } from "../engine/index.js";
 import { problemsFor } from "../engine/files/suite-file.js";
 import { secretsNeeded } from "../engine/files/suite-file.js";
+import { suiteFixtureNames } from "../engine/plugins.js";
 import { fromRoot, nodeHost, VERSION } from "./node-host.js";
 
 const EXIT = { ok: 0, failed: 1, setup: 2, stopped: 3 };
@@ -209,7 +210,12 @@ async function run(paths, values) {
 
   const suites = [];
   for (const file of files) suites.push(await loadSuite(host, file));
-  const problems = suites.flatMap((s) => problemsFor(s, options.vars, (name) => process.env[name]));
+  // (a name a provider's fixture gives is set: the fixture sets it when the run starts)
+  const problems = [];
+  for (const s of suites) {
+    const given = await suiteFixtureNames(host, s);
+    problems.push(...problemsFor(s, options.vars, (name) => (given.has(name) ? "(a fixture's)" : process.env[name])));
+  }
   if (problems.length) {
     for (const p of problems) err(`${red(location(p))}  ${p.message}`);
     err(red(`\n${problems.length} problem${problems.length === 1 ? "" : "s"}: nothing was sent.`));
@@ -401,7 +407,8 @@ async function validate(paths, values) {
     const vars = parseVars(values.var);
     errors.push(...(suite.missing ?? []).filter((m) => !(m.variable in vars)));
     if (values["env-check"] && suite.data) {
-      for (const name of secretsNeeded(suite)) if (!process.env[name]) errors.push({ file, message: `\${env:${name}} isn't set` });
+      const given = await suiteFixtureNames(host, suite);
+      for (const name of secretsNeeded(suite)) if (!process.env[name] && !given.has(name)) errors.push({ file, message: `\${env:${name}} isn't set` });
     }
     for (const e of errors) err(`${red(location(e) || file)}  ${e.message}`);
     for (const w of suite.warnings) err(dim(`${location(w)}  ${w.message}`));

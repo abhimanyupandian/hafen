@@ -15,7 +15,7 @@ of files.
 
 - **Any chat endpoint.** Plain HTTP (one JSON reply, SSE or NDJSON streams), WebSocket, or presets
   for OpenAI (Chat Completions and Responses), Anthropic Messages, Gemini and Ollama. Anything else
-  takes a small plugin.
+  takes a small plugin, and an endpoint behind a login takes a fixture that logs in first.
 - **See what really happened.** Each reply shows its thinking, tool calls, text, timings and a badge
   for every check, live as it streams. The timeline draws every step of the run as a bar: requests,
   thinking, tool calls, the answer, judge calls.
@@ -66,13 +66,12 @@ step of the run.
   <img alt="A suite of three tests, two passed and one failed, with each test's bar on the suite's timeline" src="docs/screenshots/suite-light.png">
 </picture>
 
-## One engine, three ways to use it
+## One engine, two ways to use it
 
 | | Start it | For |
 |---|---|---|
 | **Desktop app** | `npm run app` | Exploring endpoints, building tests and reading results. The engine runs in a background process, so endpoints that refuse web pages still work |
 | **Command line** | `node cli/hafen.js run tests/` | CI. Runs suite files unchanged, exits `0`/`1`/`2`/`3`, writes reports, compares with a baseline |
-| **Browser build** | `npm run build`, then `node cli/hafen.js serve --allow-endpoint <url>` | The same app in a browser, with a relay for endpoints that refuse web pages |
 
 ## A test, in a file
 

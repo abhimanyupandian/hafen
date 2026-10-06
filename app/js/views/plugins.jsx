@@ -1,6 +1,6 @@
 // Settings → Configurations → Plugins (contracts/ui.md, Settings): the folder's plugins (plugins/*.js,
-// and any a suite names), each loaded to show what it is (a provider, a check or a judge, its version,
-// the hosts it may reach) and which suites use it; a new one from a starting file (a provider one with
+// and any a suite names), each loaded to show what it is (a provider, a check, a judge or a fixture,
+// its version, the hosts it may reach, the names a fixture gives) and which suites use it; a new one from a starting file (a provider one with
 // a provider file, so it's in Providers at once); edited, its JavaScript in colour; deleted. Any suite
 // in the folder may use the folder's plugins by name. A plugin runs in a worker of its own, and never
 // holds a secret's value.
@@ -55,8 +55,9 @@ export function PluginsPane() {
                 <div className="settings-row-text">
                   <span className="settings-row-name">{p.meta ? `${p.meta.name} · ${p.meta.kind} · ${p.meta.version}` : p.file}</span>
                   <span className="hint">{[p.file, p.meta?.hosts?.length ? `reaches ${p.meta.hosts.join(", ")}` : p.meta ? "reaches no hosts" : null].filter(Boolean).join(" · ")}</span>
+                  {p.meta?.kind === "fixture" && <span className="hint" id={`plugin-${id}-provides`}>{p.meta.provides?.length ? `Gives ${p.meta.provides.join(", ")}, for the run` : "Gives the values its setup() returns, for the run"}</span>}
                   {p.error && <span className="hint error" role="alert">{p.error}</span>}
-                  {p.meta && <span className="hint">{`Any suite in the folder can use it: ${pluginUse(p.meta.kind, p.meta.name)}`}</span>}
+                  {p.meta && <span className="hint">{`Any ${p.meta.kind === "fixture" ? "provider" : "suite"} in the folder can use it: ${pluginUse(p.meta.kind, p.meta.name)}`}</span>}
                   <span className="hint plugin-used" id={`plugin-${id}-used`}>{p.usedBy.length ? `Used by ${p.usedBy.join(", ")}` : "Used by no suite yet"}</span>
                 </div>
                 {!p.package && <button className="btn" type="button" id={`plugin-${id}-edit`} onClick={async () => setEditing({ file: p.file, value: await readFile(p.file) })}>edit</button>}

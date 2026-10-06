@@ -15,7 +15,7 @@ import { stringify as stringifyYaml } from "yaml";
 import { compareRuns } from "./compare.js";
 import { hideSeenSecrets } from "./redact.js";
 import { listScopes, readScope } from "./scopes.js";
-import { loadPlugins, PLUGIN_FILE, pluginNames } from "./plugins.js";
+import { fixtureProblems, fixtureRef, loadPlugins, PLUGIN_FILE, pluginNames } from "./plugins.js";
 import { runSuites } from "./runner.js";
 import { validateProviderSchema } from "./schema.js";
 import { describeKind } from "./providers/index.js";
@@ -324,18 +324,26 @@ export function servePort(port, makeHost) {
           if (!config) config = suite.provider;
         }
         if (!config) throw new Error("choose a provider first");
-        // A plugin's provider: the plugins of the suite giving the context, and the folder's own
+        // A plugin's provider, or a provider with a fixture: the plugins of the suite giving the
+        // context, and the folder's own
         let pluginSet = null;
-        if (typeof config.kind === "string" && config.kind.startsWith("plugin:")) {
+        const isPlugin = typeof config.kind === "string" && config.kind.startsWith("plugin:");
+        if (isPlugin || config.fixture !== undefined) {
           const files = (await host.list()).filter((f) => PLUGIN_FILE.test(f));
           const suiteData = suiteFile ? parseText(await host.files.read(suiteFile), suiteFile).data : null;
           const entries = [...new Set([...(suiteData?.plugins ?? []).map((e) => (/^(\.{1,2}\/|\/)/.test(e) || /\.m?js$/i.test(e) ? joinPath(suiteFile, e) : e)), ...files])];
           pluginSet = await loadPlugins(host, entries, null, { secrets: (name) => host.secrets(name, { env }), transport: host.transport });
           // (Another plugin in the folder that doesn't load doesn't stop this one)
-          const wanted = config.kind.slice("plugin:".length).split("@")[0];
-          if (!pluginSet.plugins[wanted]) {
+          const wanted = isPlugin ? config.kind.slice("plugin:".length).split("@")[0] : null;
+          if (wanted && !pluginSet.plugins[wanted]) {
             pluginSet.close();
             throw new Error(pluginSet.problems.find((p) => p.message.includes(wanted))?.message ?? `the provider plugin "${wanted}" isn't in the folder's plugins, or the suite's`);
+          }
+          const fixture = fixtureProblems(config, pluginSet.plugins)[0];
+          if (fixture) {
+            pluginSet.close();
+            const name = fixtureRef(config)?.name;
+            throw new Error((name && pluginSet.problems.find((p) => p.message.includes(name))?.message) ?? fixture);
           }
         }
         try {

@@ -14,6 +14,8 @@ turns what comes back into [TurnEvents](../data-model.md#turnevent).
 | `openai-chat`, `openai-responses`, `anthropic-messages`, `gemini`, `ollama` | Presets: an `http` provider filled in for that API |
 | `plugin:<name>` | A code plugin |
 
+Any kind can name a [fixture](#fixtures) (`fixture: acme-login`): a plugin that runs first, to log in.
+
 ## An HTTP provider
 
 ```yaml
@@ -244,7 +246,7 @@ export default {
 | `variables` | The test's variables as they are (the environment's, the suite's, `--var`'s, the data row's as `row`, extractions, `run`/`test`/`repeat`), and the chosen scope's plain values as `scope`: no secrets (a `${env:…}` in one stays as written) |
 | `attachments` | `{ name, type, bytes }[]` |
 | `settings` | The provider's configuration from the suite, its `{{name}}`s filled from those variables (`url: "{{base_url}}/chat"`, `{{scope.region}}`; a whole `{{name}}` keeps its type). Never a secret: a `${env:…}` or a scope's secret stays as written (a header names a secret instead: below) |
-| `transport` | `fetch(request)` → `{ status, headers, body, json(), text(), lines(), sse() }`; `websocket(url, options)`. Headers can name a secret (`{ secret, prefix? }`), which the host fills in; the plugin never sees its value. Requests outside `hosts` are refused |
+| `transport` | `fetch(request)` → `{ status, headers, body, json(), text(), lines(), sse() }`; `websocket(url, options)`. Headers, and values in a JSON body (an object with only `secret` and `prefix?`), can name a secret (`{ secret, prefix? }`), which the host fills in from the turn's scope (a fixture's values first); the plugin never sees its value. Requests outside `hosts` are refused |
 | `signal` | Aborts when the run stops or the turn times out |
 
 It yields [TurnEvents](../data-model.md#turnevent) (without `t`: the engine stamps the time) and
@@ -273,3 +275,64 @@ every suite, used by name: `kind: plugin:acme` (in a suite, or a provider file i
 name more, in `plugins: [./plugins/acme-provider.js]` (a path from the suite) or as a package name.
 A plugin that can't be found or loaded, or whose `version` doesn't satisfy a suite's
 `plugin:acme@^1`, is a setup error.
+
+## Fixtures
+
+A provider can name a fixture: a plugin (`kind: "fixture"`) that runs before the provider's first
+request, to log in, say, and gives values by name (a session cookie, a CSRF token). Any kind of
+provider can name one.
+
+```yaml
+# providers/acme.yml
+kind: plugin:acme          # or http, websocket, a preset
+fixture: acme-login        # or acme-login@^1
+url: "{{scope.base_url}}/chat"
+login_url: "{{scope.base_url}}/login"
+```
+
+```js
+// plugins/acme-login.js
+export default {
+  kind: "fixture",
+  name: "acme-login",
+  version: "1.0.0",
+  hosts: ["auth.acme.example"],
+  provides: ["ACME_COOKIE", "ACME_CSRF"],
+  async setup({ settings, variables, transport, signal }) {
+    const res = await transport.fetch({ url: settings.login_url, method: "POST",
+      body: { user: "qa-bot", password: { secret: "ACME_PASSWORD" } }, signal });
+    const cookies = [res.headers["set-cookie"] ?? []].flat().map((c) => c.split(";")[0]);
+    return { ACME_COOKIE: cookies.join("; "), ACME_CSRF: (await res.json()).csrf_token };
+  },
+};
+```
+
+| `setup` gets | What |
+|---|---|
+| `settings` | The provider's other fields, as a provider plugin's `settings` are: `{{name}}`s filled in, never a secret |
+| `variables` | As a provider plugin's |
+| `transport` | As a provider plugin's. A request's `redirect` (`follow`, `manual`, `error`) is passed on; a response's `set-cookie` is a list, one per cookie, where the platform lets it be read (Node: the desktop app and the CLI; a browser doesn't) |
+| `signal` | Aborts when the run stops, or after the provider's `timeout_ms` (default 60 s) |
+
+It returns `{ NAME: text }`: every name in `provides`, and no other (with no `provides`, any names).
+Names are letters, digits and `_`, not starting with a digit; a value is text (or a number or
+boolean, made text), never empty.
+
+What it gives is kept for the run (or the conversation), as secrets of the scope it ran for: files
+use them as `${env:NAME}` and `{{scope.NAME}}` (before the host's secrets of the same name), plugins
+name them (`{ secret: "NAME" }`, in a header or a JSON body), and each value is redacted wherever it
+would show. Nothing is written: the next run logs in again.
+
+- **A run:** each fixture runs once per run and scope, at the start of the first suite whose chosen
+  tests use a provider naming it, before that suite's setup steps; it's a `fixture` span under the
+  suite. It fails (it throws, times out, or gives the wrong names) as a setup step does: the suite is
+  a setup error, nothing more of it is sent, and the CLI exits `2`. Every suite using it after that
+  fails the same way.
+- **A conversation:** it runs before the first message (a `fixture` span under that turn), again for
+  another scope, and again after it failed (that message's turn is an error saying why).
+- **Before a run:** the names in a fixture's `provides` count as set (`validate --env-check`, and the
+  checks before anything is sent). A fixture that isn't in the folder's or the suite's plugins, a
+  plugin that isn't a fixture, or a version outside the range, is a setup error.
+
+A fixture holds what it reads from its login's response: the one place a plugin sees a secret's
+value. Like any plugin, it reaches only its `hosts`, and the secrets it sends (a password) it names.

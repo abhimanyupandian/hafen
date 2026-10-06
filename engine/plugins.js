@@ -1,8 +1,9 @@
-// Plugins (contracts/provider.md, Code plugins; contracts/checks.md, Plugins): ES modules that add a
-// provider, a check or a judge. A suite names them (`plugins: [./plugins/acme.js]`, a path from the
-// suite, or a package name, in Node), and each runs in a worker of its own (engine/plugin-worker-core.js):
-// a Web Worker in the browser build, worker_threads with no environment in Node. A plugin reaches the
-// network only through the engine, to the hosts it names; a header can name a secret
+// Plugins (contracts/provider.md, Code plugins and Fixtures; contracts/checks.md, Plugins): ES modules
+// that add a provider, a check, a judge or a fixture (a provider's login: engine/fixtures.js). A suite
+// names them (`plugins: [./plugins/acme.js]`, a path from the suite, or a package name, in Node), and
+// each runs in a worker of its own (engine/plugin-worker-core.js): a Web Worker in the browser build,
+// worker_threads with no environment in Node. A plugin reaches the network only through the engine, to
+// the hosts it names; a header, or a value in a JSON body, can name a secret
 // ({ secret: "ACME_KEY", prefix: "Bearer " }), which the engine fills in, so the plugin never holds a
 // secret's value. A plugin is one module: it can't import other files (bundle it if it needs to).
 //
@@ -75,22 +76,25 @@ export async function startPlugin(host, { file, source }) {
       }
       const allowed = (meta.hosts ?? []).some((h) => h === hostName || (h.startsWith("*.") && (hostName === h.slice(2) || hostName.endsWith(h.slice(1)))));
       if (!allowed) throw new Error(`${hostName} isn't one of the plugin's hosts (${(meta.hosts ?? []).join(", ") || "it names none"})`);
+      // A secret it names, filled in (and remembered, to be redacted)
+      const secretOf = (ref) => {
+        const value = w?.opts?.secrets?.(ref.secret);
+        if (value === undefined || value === null || value === "") throw new Error(`the secret ${ref.secret} isn't set`);
+        w?.opts?.used?.add(String(value));
+        return `${ref.prefix ?? ""}${value}`;
+      };
       const headers = {};
       for (const [k, v] of Object.entries(request.headers ?? {})) {
-        if (v && typeof v === "object" && typeof v.secret === "string") {
-          const value = w?.opts?.secrets?.(v.secret);
-          if (value === undefined || value === null || value === "") throw new Error(`the secret ${v.secret} isn't set`);
-          w?.opts?.used?.add(String(value));
-          headers[k] = `${v.prefix ?? ""}${value}`;
-        } else headers[k] = String(v);
+        headers[k] = v && typeof v === "object" && typeof v.secret === "string" ? secretOf(v) : String(v);
       }
       let body = request.body;
       if (body !== undefined && body !== null && typeof body !== "string") {
-        body = JSON.stringify(body);
+        body = JSON.stringify(fillSecrets(body, secretOf));
         if (!Object.keys(headers).some((h) => h.toLowerCase() === "content-type")) headers["content-type"] = "application/json";
       }
       const transport = w?.opts?.transport ?? host.transport;
-      const res = await transport.send({ url: request.url, method: request.method ?? (body === undefined ? "GET" : "POST"), headers, body }, { signal: w?.opts?.signal });
+      const redirect = ["follow", "manual", "error"].includes(request.redirect) ? request.redirect : undefined;
+      const res = await transport.send({ url: request.url, method: request.method ?? (body === undefined ? "GET" : "POST"), headers, body, ...(redirect ? { redirect } : {}) }, { signal: w?.opts?.signal });
       reply({ type: "fetch:res", status: res.status, headers: res.headers ?? {} });
       for await (const text of textChunks(res.body)) reply({ type: "fetch:chunk", text });
       reply({ type: "fetch:end" });
@@ -169,7 +173,11 @@ function adapter(running, defaults) {
             variables: scope?.variables?.() ?? {},
             attachments: [],
             settings: scope?.plain ? scope.plain(config) : config,
-          }, { signal, transport: transport ?? defaults.transport, secrets: defaults.secrets, used: defaults.used, onEvent: push })
+          }, {
+            signal, transport: transport ?? defaults.transport, onEvent: push,
+            // (its { secret: NAME }s from the turn's scope: the run's or the conversation's, a fixture's values first)
+            secrets: scope?.secretValue ?? defaults.secrets, used: scope?.secretsUsed ?? defaults.used,
+          })
             .then(() => { finished = true; push(null); }, (err) => { failure = err; finished = true; push(null); });
           // Its events are its stream: each is kept as a raw line too (as a JSON-lines endpoint's would be),
           // and the reply is assembled from them for `on: response` checks
@@ -188,6 +196,9 @@ function adapter(running, defaults) {
   }
   if (meta.kind === "check") {
     return { ...base, check: (args, opts = {}) => running.call("check", args, { ...defaults, ...opts }) };
+  }
+  if (meta.kind === "fixture") {
+    return { ...base, setup: (args, opts = {}) => running.call("setup", args, { ...defaults, ...opts }) };
   }
   return {
     ...base,
@@ -219,13 +230,21 @@ export async function loadPlugins(host, entries = [], fromFile = null, defaults 
   return { plugins, problems, close: () => { for (const p of running) p.close(); } };
 }
 
-// The plugins a suite uses by name: its providers' (kind: plugin:acme), its judges' (kind: plugin),
-// and its checks' types that aren't Hafen's own
+// A provider's fixture (fixture: acme-login, or acme-login@^1): { name, range } or null
+export function fixtureRef(config) {
+  const m = typeof config?.fixture === "string" && config.fixture.match(/^([^@]+)(?:@(.+))?$/);
+  return m ? { name: m[1], range: m[2] } : null;
+}
+
+// The plugins a suite uses by name: its providers' (kind: plugin:acme) and their fixtures
+// (fixture: acme-login), its judges' (kind: plugin), and its checks' types that aren't Hafen's own
 export function pluginNames(suite) {
   const names = new Set();
   for (const config of Object.values(suite.providers ?? {})) {
     const m = typeof config?.kind === "string" && config.kind.match(/^plugin:([^@]+)/);
     if (m) names.add(m[1]);
+    const fixture = fixtureRef(config);
+    if (fixture) names.add(fixture.name);
   }
   for (const judge of Object.values(suite.data?.judges ?? {})) if (judge?.kind === "plugin" && judge.plugin) names.add(judge.plugin);
   for (const test of Array.isArray(suite.data?.tests) ? suite.data.tests : []) {
@@ -246,5 +265,49 @@ export function versionProblems(suite, plugins) {
     else if (plugin.kind !== "provider") out.push({ file: suite.file, message: `the plugin "${m[1]}" is a ${plugin.kind}, not a provider` });
     else if (m[2] && !satisfies(plugin.meta.version, m[2])) out.push({ file: suite.file, message: `the plugin "${m[1]}" is version ${plugin.meta.version}, not ${m[2]}` });
   }
+  for (const config of Object.values(suite.providers ?? {})) out.push(...fixtureProblems(config, plugins).map((message) => ({ file: suite.file, message })));
   return out;
+}
+
+// What's wrong with a provider's fixture, given the plugins there are: [messages]
+export function fixtureProblems(config, plugins) {
+  const ref = fixtureRef(config);
+  if (!ref) return config?.fixture !== undefined ? ["a provider's fixture is the name of a fixture plugin (fixture: acme-login)"] : [];
+  const plugin = plugins[ref.name];
+  if (!plugin) return [`the fixture "${ref.name}" isn't in the folder's plugins/ or the suite's plugins`];
+  if (plugin.kind !== "fixture") return [`the plugin "${ref.name}" is a ${plugin.kind}, not a fixture`];
+  if (ref.range && !satisfies(plugin.meta.version, ref.range)) return [`the fixture "${ref.name}" is version ${plugin.meta.version}, not ${ref.range}`];
+  return [];
+}
+
+// The names the fixtures of these providers give (their plugins' provides): a Set
+export function fixtureProvides(configs, plugins) {
+  const names = new Set();
+  for (const config of configs) {
+    const plugin = plugins[fixtureRef(config)?.name];
+    if (plugin?.kind === "fixture") for (const n of plugin.meta.provides ?? []) names.add(n);
+  }
+  return names;
+}
+
+// The names a suite's fixtures give, for checking its ${env:…}s before a run (when a fixture is what
+// sets them): its providers' fixtures, loaded from its plugins and the folder's, then closed
+export async function suiteFixtureNames(host, suite) {
+  const configs = Object.values(suite.providers ?? {}).filter((c) => fixtureRef(c));
+  if (!configs.length) return new Set();
+  const own = await loadPlugins(host, suite.data?.plugins ?? [], suite.file);
+  const folder = await loadPlugins(host, host.list ? (await host.list()).filter((f) => PLUGIN_FILE.test(f)) : [], null);
+  const names = fixtureProvides(configs, { ...folder.plugins, ...own.plugins });
+  own.close();
+  folder.close();
+  return names;
+}
+
+// Values in a JSON body that name a secret ({ secret: "NAME", prefix? }: only those keys), filled in
+function fillSecrets(value, secretOf) {
+  if (Array.isArray(value)) return value.map((v) => fillSecrets(v, secretOf));
+  if (!value || typeof value !== "object") return value;
+  const keys = Object.keys(value);
+  if (typeof value.secret === "string" && keys.every((k) => k === "secret" || k === "prefix")) return secretOf(value);
+  return Object.fromEntries(keys.map((k) => [k, fillSecrets(value[k], secretOf)]));
 }
