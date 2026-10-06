@@ -21,7 +21,8 @@
     "test:browser": "vite build && playwright test tests/browser",
     "test:visual": "vite build && playwright test tests/visual",
     "mock": "node tests/fixtures/mock-endpoint.mjs --port 8791",
-    "icons": "node desktop/icons/make.mjs"
+    "icons": "node desktop/icons/make.mjs",
+    "screenshots": "vite build && node docs/screenshots/make.mjs"
   },
   "dependencies": {
     "ajv": "^8.20.0",

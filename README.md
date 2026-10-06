@@ -32,6 +32,40 @@ of files.
   stores them encrypted by the system. They're redacted from every run file and report, and plugins
   never see their values.
 
+## Screenshots
+
+The images follow your GitHub theme, light or dark.
+
+**A test after its run.** Each reply shows its thinking, tool calls and text, a stats line, and a
+badge for every check. The panel shows the selected turn's checks, and the timeline shows every
+step of the run.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/test-dark.png">
+  <img alt="A test after its run: two turns with thinking, tool calls and check badges, the turn's checks in the panel, and the run's timeline" src="docs/screenshots/test-light.png">
+</picture>
+
+**Exploring an endpoint.** Send messages to try an endpoint, then save the conversation as a test.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/explore-dark.png">
+  <img alt="A conversation with a support bot, its totals and response tree in the panel, and its steps on the timeline" src="docs/screenshots/explore-light.png">
+</picture>
+
+**A judged check.** A System One check's value, confidence and reason, with the judge's full answer.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/check-dark.png">
+  <img alt="A System One check selected: its YAML, its result of 0.91 with confidence 0.82, and the judge's details" src="docs/screenshots/check-light.png">
+</picture>
+
+**A suite.** Every test's last result, with the whole run's timeline.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/suite-dark.png">
+  <img alt="A suite of three tests, two passed and one failed, with each test's bar on the suite's timeline" src="docs/screenshots/suite-light.png">
+</picture>
+
 ## One engine, three ways to use it
 
 | | Start it | For |

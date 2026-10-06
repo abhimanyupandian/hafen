@@ -13,26 +13,13 @@ To package the desktop app (a `.app` on macOS, an installer on Windows, an AppIm
 
 ## The layout
 
-```
-┌─ sidebar ─────────────┬─ work area ─────────────────────────────────┬─ panel ──────────────────┐
-│ logo     [staging ▾]  │ title                            ▷  status  │ what's selected       ×  │
-├───────────────────────┼─────────────────────────────────────────────┼──────────────────────────┤
-│ ▾ CONVERSATIONS       │                                       user  │ fields, facts,           │
-│ ▾ SUITES        + …   │   I want a refund for 4417                  │ the JSON tree, …         │
-│   ▾ refunds.hafen.yml │                                             │                          │
-│     ▾ refund for… 2/3 │   acme-support                              │                          │
-│        turn 1     6/6 │   + thinking · summary · 1.8 s              │                          │
-│ ▸ CHECKS              │   ↳ lookup_order · 0.4 s                    │                          │
-│ ▾ RUNS                │   I'm sorry it arrived broken…              │                          │
-│   refund for… failed  │   0.62 s to first token · 2.2 s · …         │                          │
-│                       │   ● status 200  ● contains 4417  ● noul 0.91│                          │
-│                       ├─────────────────────────────────────────────┤                          │
-│                       │ message box                          SEND   │                          │
-│                       ├─────────────────────────────────────────────┴──────────────────────────┤
-│                       │ ▾ TIMELINE   fit                                                       │
-│ ⚙                     │ ▸ CONSOLE                                                              │
-└───────────────────────┴────────────────────────────────────────────────────────────────────────┘
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="screenshots/test-dark.png">
+  <img alt="The app: the sidebar with suites and runs, a test's conversation with check badges, the turn's panel on the right, and the timeline below" src="screenshots/test-light.png">
+</picture>
+
+The sidebar is on the left, the conversation is in the middle, the panel is on the right, and the
+timeline and the console run along the bottom.
 
 ### Sidebar
 

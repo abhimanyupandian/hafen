@@ -43,6 +43,18 @@ npm run app:build      # packages in release/: a .app on macOS, an NSIS installe
 npm run icons          # icon.png, icon.icns and icon.ico from desktop/icons/source.svg
 ```
 
+## Screenshots
+
+The README's screenshots are in `docs/screenshots/`, each in light and dark. After a change to the UI,
+make them again:
+
+```sh
+npm run screenshots
+```
+
+This builds the app, runs it in Chromium against a demo support bot and the mock endpoint's judges,
+and saves each screen in both themes. It needs no keys and makes no network calls.
+
 The app is called **Hafen** wherever it's seen. Inside, it's **Hafen Lab**: the name of its data
 folder, its keychain entry and its package id (`dev.hafen.lab`).
 
