@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en" class="loading">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hafen</title>
+<link rel="icon" href="icons/favicon.ico" sizes="any">
+<link rel="icon" href="icons/hafen-h.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<script>/* the theme, and in the desktop app its window's look (frame.css), set before the page draws */ try { if (window.hafen) document.documentElement.classList.add("app-window", `app-${window.hafen.platform}`); const t = localStorage.getItem("eval.theme") ?? "light"; document.documentElement.dataset.theme = t === "dark" || (t === "system" && matchMedia("(prefers-color-scheme: dark)").matches) ? "dark" : "light"; } catch {}</script>
+<link rel="stylesheet" href="./css/tokens.css">
+<link rel="stylesheet" href="./css/components.css">
+<link rel="stylesheet" href="./css/frame.css">
+<link rel="stylesheet" href="./css/eval.css">
+<script type="module" src="./js/main.jsx"></script>
+</head>
+<body>
+<div class="loader" id="loader" role="status" aria-label="Loading"><img class="loader-mark" src="icons/hafen-h-black.svg" alt=""></div>
+<div class="app" id="app"></div>
+</body>
+</html>

@@ -1,0 +1,23 @@
+# The mock endpoint's SSE scenarios (tests/fixtures/mock-endpoint.mjs): {type, delta} events
+kind: http
+url: "{{base_url}}/{{scenario}}"
+body: { message: "{{user}}" }
+stream: sse
+events:
+  - when: { $.type: text_delta }
+    text: $.delta
+  - when: { $.type: thinking_delta, $.visibility: summary }
+    thinking: $.delta
+    thinking_visibility: summary
+  - when: { $.type: thinking_delta, $.visibility: omitted }
+    thinking: $.delta
+    thinking_visibility: omitted
+  - when: { $.type: thinking_delta }
+    thinking: $.delta
+  - when: { $.type: tool_call }
+    tool_call: { id: $.id, name: $.name, args: $.args }
+  - when: { $.type: tool_result }
+    tool_result: { id: $.id, name: $.name, result: $.result }
+  - when: { $.type: usage }
+    usage: { input: $.input_tokens, output: $.output_tokens, thinking: $.thinking_tokens }
+price: { input: 1, output: 2 }

@@ -1,0 +1,11 @@
+# Dependencies, builds, test output
+node_modules/
+app/dist/
+release/
+# The development copy of Electron named Hafen (desktop/start.js)
+.electron-dev/
+test-results/
+playwright-report/
+# Runs written by the desktop app or the CLI by default
+.hafen/
+out/

@@ -1,0 +1,41 @@
+{
+  "name": "hafen",
+  "productName": "Hafen",
+  "version": "0.1.0",
+  "private": true,
+  "description": "End-to-end tests for chat endpoints: a desktop app, a browser build and a command-line runner for CI, running the same test files",
+  "type": "module",
+  "main": "desktop/main.js",
+  "bin": {
+    "hafen": "cli/hafen.js"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "app": "vite build && node desktop/start.js",
+    "app:build": "vite build && electron-builder --config desktop/builder.json",
+    "test": "node --test \"tests/engine/*.test.js\" \"tests/cli/*.test.js\"",
+    "test:browser": "vite build && playwright test tests/browser",
+    "test:visual": "vite build && playwright test tests/visual",
+    "mock": "node tests/fixtures/mock-endpoint.mjs --port 8791",
+    "icons": "node desktop/icons/make.mjs"
+  },
+  "dependencies": {
+    "ajv": "^8.20.0",
+    "json-p3": "^3.0.0",
+    "marked": "^18.0.14",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "yaml": "^2.9.1"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.63.0",
+    "@vitejs/plugin-react": "^6.1.1",
+    "electron": "^44.5.1",
+    "electron-builder": "^26.15.3",
+    "vite": "^8.3.1"
+  }
+}

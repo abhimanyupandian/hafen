@@ -1,0 +1,11 @@
+# The mock endpoint's one-JSON-reply scenarios
+kind: http
+url: "{{base_url}}/json"
+body: { message: "{{user}}", session_id: "{{session}}" }
+history: session
+session:
+  extract: $.session_id
+response:
+  text: $.data.reply
+  usage: { input: $.usage.input_tokens, output: $.usage.output_tokens }
+price: { input: 1, output: 2 }

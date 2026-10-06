@@ -1,0 +1,10 @@
+{
+  "appId": "dev.hafen.lab",
+  "productName": "Hafen Lab",
+  "directories": { "output": "release" },
+  "files": ["desktop/**", "!desktop/icons/{make.mjs,source.svg}", "engine/**", "cli/**", "app/dist/**", "package.json", "node_modules/yaml/**", "node_modules/ajv/**", "node_modules/json-p3/**", "node_modules/fast-deep-equal/**", "node_modules/fast-uri/**", "node_modules/json-schema-traverse/**", "node_modules/require-from-string/**"],
+  "mac": { "category": "public.app-category.developer-tools", "icon": "desktop/icons/icon.icns", "extendInfo": { "CFBundleName": "Hafen", "CFBundleDisplayName": "Hafen" } },
+  "win": { "target": "nsis", "icon": "desktop/icons/icon.ico" },
+  "nsis": { "shortcutName": "Hafen" },
+  "linux": { "target": "AppImage", "category": "Development", "icon": "desktop/icons/icon.png" }
+}

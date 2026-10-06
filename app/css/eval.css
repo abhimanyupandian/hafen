@@ -1,0 +1,536 @@
+/* The app's own rules (spec/001-hafen/contracts/ui.md), and the design system's Additions
+   (spec/design/components.md, Additions): check badges, reply parts, the selected-message marker, the
+   JSON tree, the timeline dock and small charts. Tokens only. */
+
+/* ---------- scrollbars: thin and quiet, everywhere ---------- */
+
+/* Every scrolling part of the app (lists, panels, Settings, editors, the console): a thin bar, its thumb
+   faint until it's pointed at, no arrows or track (Windows draws wide grey ones of its own otherwise).
+   Chromium and the desktop app draw these; the standard scrollbar-width and scrollbar-color would turn
+   them off there, so those are only for browsers that have no ::-webkit-scrollbar (Firefox). */
+::-webkit-scrollbar { width: 8px; height: 8px; background: transparent; }
+::-webkit-scrollbar-track, ::-webkit-scrollbar-corner { background: transparent; }
+::-webkit-scrollbar-button { display: none; width: 0; height: 0; }
+::-webkit-scrollbar-thumb { background: color-mix(in srgb, var(--fg) 16%, transparent); background-clip: padding-box; border: 2px solid transparent; border-radius: 8px; min-height: 24px; }
+::-webkit-scrollbar-thumb:hover { background-color: color-mix(in srgb, var(--fg) 32%, transparent); }
+::-webkit-scrollbar-thumb:active { background-color: color-mix(in srgb, var(--fg) 45%, transparent); }
+/* The chat's: thinner still */
+#scroller::-webkit-scrollbar { width: 5px; }
+#scroller::-webkit-scrollbar-thumb { border-width: 1px; min-height: 32px; }
+@supports not selector(::-webkit-scrollbar) {
+  * { scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--fg) 20%, transparent) transparent; }
+}
+
+/* ---------- sidebar sections that hold lists (as the design system's list sections) ---------- */
+
+/* (Conversations too: a section squeezed by the others scrolls what it has, rather than spill it over the
+   next one) */
+:is(#suitesBody, #runsBody, #providersBody, #conversationsBody) { overflow-y: auto; padding: 0 8px 12px; }
+:is(#suitesBody, #runsBody, #providersBody, #checksBody, #conversationsBody) > .note { padding: 0 8px; }
+:is(#suitesBody, #runsBody, #providersBody) > .hint { padding: 0 8px; }
+#suitesSection.open { min-height: 180px; }
+#runsSection.open, #conversationsSection.open { min-height: 140px; }
+#providersSection.open { flex: 0 1 auto; }
+#providersSection.open .list { max-height: calc(6 * var(--control)); overflow-y: auto; }
+#checksSection.open { flex: 0 1 auto; }
+#checksBody { overflow-y: auto; gap: 18px; }
+/* The scope button: its icon and the scope chosen; it opens Settings → Environments */
+.scope-button { max-width: 160px; gap: 6px; padding: 0 6px; }
+.scope-button .scope-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+
+/* Statuses colour a row's size (spec/design/patterns.md, Status) */
+.list-row:is([data-status="passed"], [data-status="pass"], [data-status="done"]) .list-size { color: var(--ok); }
+.list-row:is([data-status="failed"], [data-status="fail"], [data-status="error"], [data-status="interrupted"]) .list-size { color: var(--danger); }
+.list-row:is([data-status="running"]) .list-size { color: var(--run); }
+.list-row:is([data-status="unsure"], [data-status="queued"], [data-status="unchecked"]) .list-size { color: var(--wait); }
+.list-row.has-problems .list-size { color: var(--danger); }
+
+/* ---------- check badge (Additions: Check badge) ---------- */
+
+/* A small card: its edge, fill and text in the colour of how the check went, its dot kept (filled once
+   it's run) */
+.check-badge {
+  --tone: var(--muted); --tone-soft: var(--bg); --tone-line: var(--line);
+  height: 22px; padding: 0 7px; gap: 6px; max-width: 100%;
+  color: var(--tone); background: var(--tone-soft); border-color: var(--tone-line);
+}
+.check-badge[data-status="pass"] { --tone: var(--ok); --tone-soft: var(--ok-soft); --tone-line: var(--ok-line); }
+.check-badge:is([data-status="fail"], [data-status="error"]) { --tone: var(--danger); --tone-soft: var(--bad-soft); --tone-line: var(--bad-line); }
+.check-badge[data-status="unsure"] { --tone: var(--wait); --tone-soft: var(--wait-soft); --tone-line: var(--wait-line); }
+.check-badge[data-status="running"] { --tone: var(--run); --tone-soft: var(--run-soft); --tone-line: var(--run-line); }
+.check-badge .badge-dot { width: 6px; height: 6px; }
+.check-badge:is([data-status="pass"], [data-status="fail"], [data-status="unsure"], [data-status="running"]) .badge-dot { background: currentColor; }
+.check-badge[data-status="running"] .badge-dot { animation: blink 1s steps(1) infinite; }
+.check-badge[data-status="off"] .badge-text { text-decoration: line-through; }
+.check-badge:hover, .check-badge:focus-visible { color: var(--tone); border-color: var(--tone); }
+.check-badge:is([data-status="skipped"], [data-status="off"], [data-status=""]):is(:hover, :focus-visible) { color: var(--fg); border-color: var(--fg); }
+.check-badge.selected { border-color: var(--tone); box-shadow: inset 0 0 0 1px var(--tone); }
+.msg-checks { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+
+/* ---------- reply parts (Additions: Reply parts) ---------- */
+
+.msg-thinking { margin: 0 0 8px; }
+.msg-thinking pre { max-height: 240px; }
+.msg-tool { display: block; width: fit-content; margin: 0 0 6px; padding: 0; background: none; border: 0; cursor: pointer; text-align: left; }
+.msg-tool:hover, .msg-tool:focus-visible { color: var(--fg); outline: none; }
+.msg-body.error { color: var(--danger); }
+.msg > .label .hint { margin-left: 8px; text-transform: none; letter-spacing: 0; }
+.msg.bot { cursor: inherit; }
+
+/* ---------- the selected message (Additions: Selected message) ---------- */
+
+.msg { position: relative; }
+.msg.selected::before { content: ""; position: absolute; left: -12px; top: 0; bottom: 0; width: 2px; background: var(--fg); }
+
+/* ---------- JSON tree (Additions: JSON tree) ---------- */
+
+.json-tree { max-height: none; padding: 6px 0; }
+.json-row { display: flex; align-items: center; min-height: 20px; padding-right: 10px; white-space: nowrap; cursor: default; }
+.json-row:hover { background: var(--bg); }
+.json-row.selected { box-shadow: inset 2px 0 0 var(--fg); background: var(--bg); }
+.json-row .tree-toggle { width: 20px; height: 20px; }
+.json-key { color: var(--muted); }
+.json-value { color: var(--fg); min-width: 0; overflow: hidden; text-overflow: ellipsis; cursor: pointer; }
+.json-fold { color: var(--muted); }
+/* An open object's or array's closing bracket, on its own row */
+.json-row.json-end:hover { background: none; }
+.json-path { display: flex; align-items: center; gap: 8px; margin: 0 0 4px; }
+.json-path code { flex: 1; min-width: 0; font: 11px/1.4 var(--mono); color: var(--fg); overflow-wrap: anywhere; }
+.path-form { display: flex; gap: 6px; margin: 6px 0 4px; }
+.path-form .select { flex: none; width: 112px; }
+.path-form .input { flex: 1; min-width: 0; }
+.path-form .btn { flex: none; }
+
+/* ---------- the timeline dock (Additions: Timeline) ---------- */
+
+.timeline-body {
+  position: relative; height: var(--timeline-h, 240px); display: flex; overflow: hidden;
+  background: var(--bg); font: 11px/1 var(--mono);
+}
+.timeline:not(.open) .console-resizer { display: none; }
+.timeline-labels { flex: none; width: var(--timeline-labels, 200px); overflow: hidden; border-right: 1px solid var(--line); position: relative; }
+.timeline-labels-inner { position: absolute; left: 0; right: 0; }
+/* Scrolls both ways without scrollbars: the wheel or trackpad, or Space and drag */
+.timeline-chart { flex: 1; min-width: 0; overflow: auto; position: relative; scrollbar-width: none; }
+.timeline-chart::-webkit-scrollbar { display: none; }
+.timeline-axis {
+  position: sticky; top: 0; z-index: 2; height: 24px; background: var(--bg); border-bottom: 1px solid var(--line);
+}
+.timeline-axis span { position: absolute; top: 7px; color: var(--muted); transform: translateX(3px); white-space: nowrap; }
+.timeline-grid { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--line); }
+.timeline-row { position: absolute; left: 0; right: 0; height: 24px; }
+.timeline-row.selected { background: var(--soft); }
+.timeline-label {
+  position: absolute; left: 0; right: 0; height: 24px; display: flex; align-items: center; gap: 2px;
+  padding-right: 8px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer;
+}
+.timeline-label .label { color: var(--fg); }
+.timeline-label.selected { background: var(--soft); color: var(--fg); }
+.timeline-label .tree-toggle { height: 24px; }
+.timeline-bar {
+  position: absolute; top: 5px; height: 14px; min-width: 2px; padding: 0;
+  background: var(--soft); border: 1px solid var(--line); cursor: pointer;
+}
+.timeline-bar:is([data-status="pass"], [data-status="ok"][data-kind="test"]) { background: var(--ok-soft); border-color: var(--ok-line); }
+.timeline-bar:is([data-status="fail"], [data-status="error"]) { background: var(--bad-soft); border-color: var(--bad-line); }
+.timeline-bar[data-status="unsure"] { background: var(--wait-soft); border-color: var(--wait-line); }
+.timeline-bar[data-status="running"] { background: var(--run-soft); border-color: var(--run-line); }
+.timeline-bar[data-status="skipped"] { opacity: .55; }
+.timeline-bar[data-kind="thinking"] { background-image: linear-gradient(90deg, var(--line) 1px, transparent 1px); background-size: 4px 100%; }
+.timeline-bar.selected { border-color: var(--fg); box-shadow: inset 2px 0 0 var(--fg); }
+.timeline-bar:focus-visible { outline: 1px solid var(--fg); outline-offset: 1px; }
+.timeline-duration { position: absolute; top: 7px; color: var(--muted); white-space: nowrap; pointer-events: none; }
+.timeline-now { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--run); pointer-events: none; }
+/* With no steps, the dock is as tall as its note, which sits in the middle of it (and it isn't resized).
+   (.no-steps, not .empty: that's the thread's placeholder) */
+.timeline-body.no-steps { height: auto; }
+.timeline-body.no-steps .timeline-labels { display: none; }
+.timeline.no-steps .console-resizer { display: none; }
+.timeline-empty { margin: 0; padding: 14px 16px; text-align: center; }
+.timeline-labels-resizer { position: absolute; z-index: 6; top: 0; bottom: 0; width: 6px; cursor: col-resize; touch-action: none; }
+.timeline-labels-resizer:hover, .timeline-labels-resizer:focus-visible { box-shadow: inset -2px 0 0 var(--muted); outline: none; }
+
+/* ---------- small charts (Additions: Small charts) ---------- */
+
+.chart { display: block; width: 100%; height: 64px; overflow: visible; }
+.chart .chart-edge { stroke: var(--line); stroke-width: 1; }
+.chart .chart-line { fill: none; stroke: var(--fg); stroke-width: 1.5; }
+.chart .chart-line.second { stroke: var(--muted); }
+.chart .chart-point { fill: var(--fg); }
+.chart .chart-point.failed { fill: var(--danger); }
+.chart text { font: 11px var(--mono); fill: var(--muted); }
+.chart text.latest { fill: var(--fg); }
+.chart-label { display: flex; justify-content: space-between; margin: 10px 0 2px; }
+
+/* ---------- check cards (Additions: Check card): a turn's checks, a check's last result ---------- */
+
+/* The palette's card, its left edge, icon, label and status in the colour of how the check went */
+.check-cards { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.check-card {
+  --status: var(--line);
+  display: flex; flex-direction: column; gap: 6px; padding: 10px 12px;
+  background: var(--bg); border: 1px solid var(--line); box-shadow: inset 2px 0 0 var(--status);
+}
+.check-card[data-status="pass"] { --status: var(--ok); }
+.check-card:is([data-status="fail"], [data-status="error"]) { --status: var(--danger); }
+.check-card[data-status="unsure"] { --status: var(--wait); }
+.check-card[data-status="running"] { --status: var(--run); }
+.check-card:is([data-status="pass"], [data-status="fail"], [data-status="error"], [data-status="unsure"], [data-status="running"]) :is(.block-label, .check-card-status) { color: var(--status); }
+.check-card.openable { cursor: pointer; }
+.check-card.openable:hover { border-color: var(--fg); }
+.check-card-head { display: flex; align-items: center; gap: 8px; min-height: 20px; }
+.check-card-head .block-label { flex: 1; min-width: 0; }
+.check-card-head .block-label .label { overflow: hidden; text-overflow: ellipsis; }
+.check-card-status { flex: none; font: 11px/1 var(--mono); color: var(--muted); }
+.check-card-on { height: 20px; gap: 6px; font: 400 11px/1 var(--mono); color: var(--muted); }
+.check-card-on input { width: 13px; height: 13px; }
+.check-card .list-del { flex: none; height: 20px; padding: 0 4px; opacity: 1; color: var(--muted); }
+.check-card .list-del:hover { color: var(--fg); }
+.check-card .list-del.confirm { color: var(--danger); }
+.check-card-text { padding: 0; border: 0; background: none; text-align: left; font: 12px/1.5 var(--mono); color: var(--fg); overflow-wrap: anywhere; }
+button.check-card-text { cursor: pointer; }
+button.check-card-text:focus-visible { outline: 1px solid var(--fg); outline-offset: 2px; }
+.check-card-reason { font-size: 12.5px; line-height: 1.45; color: var(--muted); overflow-wrap: anywhere; }
+/* Turned off: greyed, its check struck through */
+.check-card[data-status="off"] :is(.block-label, .check-card-text) { opacity: .5; }
+.check-card[data-status="off"] .check-card-text { text-decoration: line-through; }
+.panel-body .field-head .hint.error { color: var(--danger); }
+.problems { margin: 0; padding: 0 0 0 14px; font: 11px/1.4 var(--mono); color: var(--danger); }
+.problems li + li { margin-top: 4px; }
+
+/* ---------- load runs, empty states ---------- */
+
+.thread .trace-facts { margin-top: 12px; }
+
+/* The panel's body scrolls rather than squash what's in it */
+.panel-body > * { flex-shrink: 0; }
+
+/* ---------- the test's run button, in the top bar ---------- */
+
+/* The top bar hides its icon buttons (the menu's, shown on small screens); this one always shows */
+.topbar .btn-icon.topbar-run { display: inline-flex; flex: none; margin-left: 0; color: var(--fg); }
+.topbar .topbar-run.stop { color: var(--run); }
+
+/* ---------- Settings: a pane with a list and one item opened (Providers) ---------- */
+
+.settings-back { display: flex; margin: -4px 0 0 -8px; }
+/* Its fields keep their height (the content is a column that scrolls) */
+.settings-content > *, .settings-form > * { flex-shrink: 0; }
+.settings-content .hint a { color: var(--fg); text-decoration: underline; text-underline-offset: 2px; }
+.settings-form { display: flex; flex-direction: column; gap: 6px; }
+.settings-form .controls { margin-top: 6px; }
+
+/* ---------- a row's own actions (a suite's + that adds a test), shown as × is ---------- */
+
+.list-row .list-add { flex: none; width: 24px; height: 24px; opacity: 0; color: var(--muted); }
+.list-row .list-add:hover { color: var(--fg); }
+.list-row:hover .list-add, .list-add:focus-visible { opacity: 1; }
+@media (hover: none) { .list-row .list-add { opacity: 1; } }
+
+/* ---------- the collapsed sidebar: its sections as icons ---------- */
+
+.nav-rail { display: none; }
+@media (min-width: 861px) {
+  .nav-collapsed .nav-rail { display: flex; flex-direction: column; border-top: 1px solid var(--line); }
+  .nav-collapsed .nav-rail .btn-icon { width: 100%; height: var(--foot); color: var(--muted); }
+  .nav-collapsed .nav-rail .btn-icon:hover, .nav-collapsed .nav-rail .btn-icon:focus-visible { color: var(--fg); }
+}
+
+/* ---------- the sidebar's Checks, by group; a card is clicked (or Enter) to add its check ---------- */
+
+.palette-group { display: flex; flex-direction: column; gap: 8px; }
+.palette-heading { margin: 0; font: 600 11px/1.4 var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+.palette-item { cursor: pointer; }
+.palette-item[aria-disabled="true"] { cursor: default; }
+
+/* ---------- a turn's icon (a box with a tick), coloured by how the turn went ---------- */
+
+.turn-icon { display: inline-flex; flex: none; vertical-align: -3px; color: var(--muted); }
+.turn-icon[data-status="running"] { color: var(--run); }
+.turn-icon:is([data-status="passed"], [data-status="done"]) { color: var(--ok); }
+.turn-icon:is([data-status="failed"], [data-status="error"]) { color: var(--danger); }
+/* (unchecked: a turn with no checks, nothing saying it's right) */
+.turn-icon:is([data-status="unsure"], [data-status="unchecked"]) { color: var(--wait); }
+.list-open .turn-icon { margin-right: 8px; }
+
+/* ---------- the thread: each turn a group (and, for a suite, each test) ---------- */
+
+/* A group reads as one thing: a faint background on hover, the list's selected background when it's
+   selected (its user message a step darker, to stay apart from it) */
+:root { --row-hover: color-mix(in srgb, var(--soft) 55%, var(--bg)); }
+.turn-group { position: relative; margin: 0 -14px; padding: 14px 14px 18px; cursor: pointer; }
+.turn-group + .turn-group { margin-top: 6px; }
+.turn-group:hover { background: var(--row-hover); }
+.turn-group.selected { background: var(--soft); }
+.turn-group.selected .msg.user .msg-body { background: color-mix(in srgb, var(--fg) 7%, var(--bg)); }
+.turn-group :is(pre, .msg-body) { cursor: auto; }
+.turn-group > .msg + .msg { margin-top: 16px; }
+.turn-head { display: flex; align-items: center; gap: 10px; min-height: 24px; margin-bottom: 12px; }
+.turn-head > .label { color: var(--fg); }
+.turn-summary { white-space: nowrap; }
+.turn-summary[data-status="passed"] { color: var(--ok); }
+.turn-summary:is([data-status="failed"], [data-status="error"]) { color: var(--danger); }
+.turn-summary:is([data-status="unsure"], [data-status="unchecked"]) { color: var(--wait); }
+.turn-summary[data-status="running"] { color: var(--run); }
+.turn-actions { display: flex; align-items: center; gap: 2px; margin-left: auto; }
+/* A turn's ▷ and ×: shown when it's pointed at, selected or focused (and on touch screens); ▷ always
+   while it's the stop of a run going on */
+.turn-run { flex: none; width: 24px; height: 24px; color: var(--muted); opacity: 0; }
+.turn-del { flex: none; height: 24px; padding: 0 8px; font-size: 13px; color: var(--muted); opacity: 0; }
+.turn-group:hover :is(.turn-del, .turn-run), .turn-group.selected :is(.turn-del, .turn-run), :is(.turn-del, .turn-run):focus-visible, .turn-del.confirm, .turn-run.stop { opacity: 1; }
+.turn-group:hover .turn-run:disabled, .turn-group.selected .turn-run:disabled { opacity: .35; }
+.turn-del:hover { color: var(--fg); }
+.turn-del.confirm { font-size: 11px; color: var(--danger); }
+@media (hover: none) { .turn-del, .turn-run { opacity: 1; } .turn-run:disabled { opacity: .35; } }
+.turn-run:hover, .turn-run:focus-visible { color: var(--fg); }
+.turn-run.stop { color: var(--run); }
+.suite-test-name { min-width: 0; padding: 0; border: 0; background: none; font: 500 14px/1.4 var(--sans); color: var(--fg); text-align: left; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.suite-test-name:hover, .suite-test-name:focus-visible { text-decoration: underline; text-underline-offset: 3px; outline: none; }
+.suite-turns { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.suite-turn { display: flex; align-items: baseline; gap: 10px; width: 100%; padding: 6px 0; border: 0; background: none; color: var(--fg); font: 13px/1.5 var(--sans); text-align: left; cursor: pointer; }
+.suite-turn:hover .suite-turn-text, .suite-turn:focus-visible .suite-turn-text { text-decoration: underline; text-underline-offset: 3px; }
+.suite-turn:focus-visible { outline: none; }
+.suite-turn { align-items: center; }
+.suite-turn > .turn-icon { vertical-align: 0; }
+.suite-turn-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ---------- the user's messages at the right, as in a chat ---------- */
+
+.msg.user { display: flex; flex-direction: column; align-items: flex-end; }
+.msg.user > .label { text-align: right; }
+.msg.user .msg-body { max-width: 85%; text-align: left; }
+
+/* ---------- list rows: a faint background on hover, as a turn has ---------- */
+
+.list-row:not(.active):hover { background: var(--row-hover); }
+/* Conversations, one under another, with a line between them */
+#conversationList > .list-row + .list-row { border-top: 1px solid var(--line); }
+
+/* ---------- the context menu (Additions: Context menu) ---------- */
+
+.context-menu {
+  position: fixed; z-index: 60; min-width: 240px; padding: 4px 0;
+  background: var(--bg); border: 1px solid var(--line); box-shadow: 0 10px 28px rgba(0, 0, 0, .14);
+}
+.context-menu-item {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 18px; width: 100%;
+  padding: 7px 12px; border: 0; background: none; color: var(--fg); font: 13px/1.4 var(--sans); text-align: left; cursor: pointer;
+}
+.context-menu-item:hover, .context-menu-item:focus-visible { background: var(--soft); outline: none; }
+.context-menu-item:disabled { color: var(--muted); cursor: default; }
+.context-menu-item:disabled:hover { background: none; }
+.context-menu-item .hint { white-space: nowrap; }
+.context-menu-item.danger, .context-menu-item.confirm { color: var(--danger); }
+.context-menu-line { height: 1px; margin: 4px 0; background: var(--line); }
+
+/* ---------- panels: a row of buttons wraps rather than run out of the panel ---------- */
+
+.panel-body .controls { flex-wrap: wrap; }
+.panel-body .controls > .btn { flex: 1 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.panel-body { overflow-x: hidden; }
+
+/* A panel's back button, before its icon; its icon and label next to it (the × at the far end) */
+.panel-head .panel-back { margin-left: -8px; margin-right: 2px; color: var(--fg); }
+.panel-head > .block-label { margin-right: auto; }
+
+/* ---------- the top bar: an icon for what's open ---------- */
+
+.topbar-icon { display: inline-flex; flex: none; color: var(--muted); margin-right: -2px; }
+
+/* ---------- a closed sidebar section shows its icon where the arrow is ---------- */
+
+/* (14px wide, in the arrow's 6px place: the label stays where it is, open or closed) */
+.section-icon { display: inline-flex; flex: none; width: 14px; height: 14px; margin: 0 -4px; color: var(--muted); }
+.collapsible-toggle:hover .section-icon { color: var(--fg); }
+
+/* ---------- a reply: its stats and "copy" under it, and its Markdown ---------- */
+
+.msg-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; margin-top: 8px; }
+.msg-foot > .msg-stats { margin-top: 0; }
+.msg-copy { height: 20px; padding: 0 6px; gap: 4px; font: 11px/1 var(--mono); color: var(--muted); opacity: 0; text-transform: none; letter-spacing: 0; }
+.turn-group:hover .msg-copy, .turn-group.selected .msg-copy, .msg-copy:focus-visible { opacity: 1; }
+.msg-copy:hover { color: var(--fg); }
+@media (hover: none) { .msg-copy { opacity: 1; } }
+
+/* The reply's Markdown stays inside the message: long words wrap, and only a code block or a table
+   (wider than the message) scrolls sideways, on its own */
+.msg.bot { min-width: 0; }
+.msg-body.md { white-space: normal; overflow-wrap: anywhere; min-width: 0; max-width: 100%; }
+.md > :first-child { margin-top: 0; }
+.md > :last-child { margin-bottom: 0; }
+.md :is(p, ul, ol, pre, blockquote, table, h1, h2, h3, h4, h5, h6) { margin: 0 0 10px; }
+.md :is(h1, h2, h3, h4, h5, h6) { font-size: 15px; font-weight: 600; line-height: 1.4; }
+.md h1 { font-size: 17px; }
+.md h2 { font-size: 16px; }
+.md :is(ul, ol) { padding-left: 22px; }
+.md li + li { margin-top: 2px; }
+/* A wash of --fg, not --soft: it shows on any turn, the selected one (--soft) included */
+.md code { font: 12.5px/1.5 var(--mono); background: color-mix(in srgb, var(--fg) 7%, transparent); padding: 1px 4px; }
+.md pre { max-width: 100%; overflow-x: auto; padding: 10px 12px; background: color-mix(in srgb, var(--fg) 7%, transparent); }
+.md pre code { padding: 0; background: none; white-space: pre; overflow-wrap: normal; }
+.md table { display: block; max-width: 100%; overflow-x: auto; border-collapse: collapse; font-size: 13px; }
+.md :is(th, td) { padding: 4px 10px; border: 1px solid var(--line); text-align: left; overflow-wrap: normal; white-space: nowrap; }
+.md th { background: color-mix(in srgb, var(--fg) 7%, transparent); font-weight: 600; }
+.md blockquote { padding-left: 12px; border-left: 2px solid var(--line); color: var(--muted); }
+.md a { color: var(--fg); text-decoration: underline; text-underline-offset: 2px; }
+.md hr { border: 0; border-top: 1px solid var(--line); margin: 12px 0; }
+.md img { max-width: 100%; }
+
+/* ---------- a field's problem (an unknown {{scope.NAME}}), right under it ---------- */
+
+.field-problem { margin: 4px 0 0; color: var(--danger); overflow-wrap: anywhere; }
+
+/* ---------- Settings → Plugins: a plugin's row ---------- */
+
+.plugin-row { align-items: flex-start; padding: 8px 0; }
+.plugin-used { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; }
+.plugin-suite { display: inline-flex; align-items: center; gap: 2px; color: var(--fg); }
+.plugin-suite .list-del { opacity: 1; height: 20px; padding: 0 4px; }
+.plugin-use { margin-top: 4px; max-width: 280px; }
+
+/* ---------- placeholders: what an empty container says, in its middle ---------- */
+
+.placeholder { text-align: center; }
+/* An open sidebar section's: in the middle of the room it has */
+:is(#suitesBody, #runsBody, #conversationsBody) > .placeholder { margin: auto 0; padding: 16px 8px; }
+.panel-body > .placeholder { margin-top: 12px; padding: 14px 8px; }
+.settings-content > .placeholder { padding: 16px 8px; }
+.turn-group .placeholder { padding: 6px 0; }
+/* The conversation's: in the middle of the space the conversation would fill */
+.thread:has(> .empty) { min-height: 100%; display: flex; flex-direction: column; justify-content: center; }
+.thread > .empty { margin: 0; }
+
+/* ---------- Settings: its groups' headings bold, in capitals; the storage used ---------- */
+
+.settings-group { font: 600 11px/1.4 var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--fg); }
+.settings-usage { gap: 2px; }
+.settings-usage-value { color: var(--fg); }
+
+/* ---------- the panel's spacing: a label 6px over what it names; 18px from one thing to the next label ---------- */
+
+.panel-body > .field-head { margin: 18px 0 6px; }
+.panel-body > .field-head:first-child { margin-top: 0; }
+.panel-body > .trace-facts { margin-top: 14px; }
+.panel-body > .controls { margin-top: 14px; }
+.panel-body > .field-head + .controls { margin-top: 0; }
+/* (Nothing's spaced from the top of the panel's body: its padding is) */
+.panel-body > :first-child { margin-top: 0; }
+/* A number field's label (Repeat, Pass rate), 6px over it as a field head is */
+.panel-body .controls > .grow > label.hint { display: block; margin-bottom: 6px; }
+/* A group's hint, under its field: what follows is spaced from it as from the field */
+.panel-body > :is(#suiteGroupHint, #testGroupHint) { margin-bottom: 0; }
+.panel-body > .panel-check { margin-top: 10px; }
+.panel-foot { margin-top: 24px; }
+/* The request and the raw stream: folded, each on a row of its own */
+.panel-body > .panel-template { margin-top: 14px; }
+.panel-body > .panel-template + .panel-template { margin-top: 6px; }
+.panel-template > summary { display: flex; align-items: center; min-height: 24px; list-style: none; font: 11px/1.4 var(--mono); color: var(--muted); }
+.panel-template > summary::-webkit-details-marker { display: none; }
+.panel-template > summary::before { content: "+"; width: 14px; }
+.panel-template[open] > summary::before { content: "−"; }
+.panel-template > summary:hover, .panel-template[open] > summary { color: var(--fg); }
+.panel-template[open] > summary { margin-bottom: 6px; }
+
+/* ---------- a part that couldn't be drawn says so, in its own place ---------- */
+
+.crash { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 24px 16px; min-height: 80px; }
+.crash.panel { border-left: 1px solid var(--line); }
+
+/* ---------- small screens: the panel over the thread only when something's selected (or asked for) ---------- */
+
+@media (max-width: 860px) {
+  .panel { z-index: 8; }  /* under the drawer (10) and its scrim (9) */
+  .panel:not(.shown) { display: none; }
+  .topbar .topbar-panel { margin-left: 0; color: var(--muted); }
+  .topbar .topbar-panel[aria-expanded="true"] { color: var(--fg); }
+}
+
+/* ---------- the top bar's status: an error in the danger colour (#status's own grey is by id) ---------- */
+
+#status.error { color: var(--danger); }
+
+/* ---------- a tool call's line wraps a long argument rather than widen the thread ---------- */
+
+.msg-tool { max-width: 100%; overflow-wrap: anywhere; }
+
+/* ---------- a System One call's request, all of it (the step's panel, a check's) ---------- */
+
+.judge-request-url { margin: 0 0 2px; overflow-wrap: anywhere; }
+.panel-output.judge-request { max-height: 480px; }
+.judge-asking { color: var(--run); }
+
+/* ---------- code editor (Additions: Code editor): a plugin's JavaScript, in colour ---------- */
+
+/* The text (see-through, its caret and selection shown) over its colours, the two laid out alike so
+   each character sits on its colour; they scroll together */
+.code-edit { position: relative; flex: 1; min-width: 0; min-height: 0; display: flex; }
+.code-edit-colors, .code-edit-text {
+  margin: 0; padding: 9px 12px; border: 1px solid transparent;
+  font: 12px/18px var(--mono); tab-size: 2; white-space: pre; overflow-wrap: normal; word-break: normal;
+}
+.code-edit-colors { position: absolute; inset: 0; overflow: hidden; color: var(--fg); background: var(--bg); pointer-events: none; }
+.code-edit-text { position: relative; flex: 1; min-height: 0; overflow: auto; resize: none; color: transparent; background: transparent; caret-color: var(--fg); border-color: var(--line); }
+.code-edit-text:focus { border-color: var(--fg); }
+.code-edit-text::selection { color: transparent; background: color-mix(in srgb, var(--run) 28%, transparent); }
+.tok-comment { color: var(--muted); }
+.tok-string { color: var(--ok); }
+.tok-number { color: var(--wait); }
+.tok-keyword { color: var(--run); }
+.tok-fn { color: var(--danger); }
+
+/* ---------- group and repeat badges, the spinner (Additions: Group badge, Repeat badge, Spinner) ---------- */
+
+/* Eight group colours (G9 is G1's again), one each for light and dark */
+:root {
+  --group-1: #2563eb; --group-2: #2f7d4f; --group-3: #a15c07; --group-4: #7c3aed;
+  --group-5: #0f766e; --group-6: #be185d; --group-7: #4d7c0f; --group-8: #475569;
+}
+:root[data-theme="dark"] {
+  --group-1: #8fb3ff; --group-2: #86d1a3; --group-3: #f0b866; --group-4: #c4a7ff;
+  --group-5: #5fd4c4; --group-6: #f59ac3; --group-7: #b5d96b; --group-8: #a3b1c6;
+}
+.group-badge, .repeat-badge {
+  display: inline-flex; flex: none; align-items: center; height: 16px; padding: 0 4px;
+  font: 500 10px/1 var(--mono); letter-spacing: 0; text-transform: none; white-space: nowrap; border: 1px solid;
+}
+.group-badge { --g: var(--muted); color: var(--g); border-color: color-mix(in srgb, var(--g) 45%, transparent); background: color-mix(in srgb, var(--g) 10%, var(--bg)); }
+.group-badge[data-group="1"] { --g: var(--group-1); }
+.group-badge[data-group="2"] { --g: var(--group-2); }
+.group-badge[data-group="3"] { --g: var(--group-3); }
+.group-badge[data-group="4"] { --g: var(--group-4); }
+.group-badge[data-group="5"] { --g: var(--group-5); }
+.group-badge[data-group="6"] { --g: var(--group-6); }
+.group-badge[data-group="7"] { --g: var(--group-7); }
+.group-badge[data-group="8"] { --g: var(--group-8); }
+.repeat-badge { color: var(--muted); border-color: var(--line); background: var(--bg); }
+/* In a list row: after the name, which is cut first */
+.list-open.has-extra { display: flex; align-items: center; gap: 6px; }
+.list-open.has-extra > .group-badge:first-of-type { margin-left: 2px; }
+/* In the top bar, after the title */
+.topbar-badges { display: inline-flex; flex: none; align-items: center; gap: 4px; margin-left: -4px; }
+.topbar-icon[data-running] { color: var(--run); }
+/* A circle going round */
+.spinner { display: block; animation: spin .9s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .spinner { animation-duration: 3s; } }
+/* (with badges, the title is as wide as its text, the badges beside it, and the status still at the right) */
+.topbar:has(> .topbar-badges) > .title { flex: 0 1 auto; }
+.topbar > .topbar-badges + .model-status { margin-left: auto; }
+
+/* ---------- search fields (Additions: Search field): the Suites' and Conversations' ---------- */
+
+/* (it stays at the top of its section as the list under it scrolls) */
+.search-field { position: sticky; top: 0; z-index: 1; flex: none; display: flex; align-items: center; margin: 0; padding: 0 0 6px; background: var(--bg); }
+.search-icon { position: absolute; left: 9px; top: 7px; display: flex; color: var(--muted); pointer-events: none; }
+.search-input { height: 28px; padding: 0 28px 0 29px; font-size: 11px; }
+.search-input::-webkit-search-cancel-button { display: none; }
+.search-clear { position: absolute; right: 2px; top: 2px; width: 24px; height: 24px; }
+
+/* ---------- a toast that opens what it's about, when clicked ---------- */
+
+.toast.clickable { cursor: pointer; }
+.toast.clickable:hover .toast-title { text-decoration: underline; text-underline-offset: 2px; }
+
+/* ---------- Settings → Notifications ---------- */
+
+.notify-outcomes { display: flex; flex-wrap: wrap; gap: 8px 18px; }

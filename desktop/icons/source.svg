@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <!-- Hafen's app icon (icon.png, icon.icns and icon.ico are made from it: npm run icons). On
+       macOS's icon grid (an 824 px rounded plate in 1024, with its shadow), the design system's "h",
+       as the app's own logo shows it in light mode: white on a black tile. hafen's own icon is the
+       same, black on white, so the two apps tell apart in the Dock. -->
+  <defs>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="125%">
+      <feDropShadow dx="0" dy="10" stdDeviation="12" flood-color="#000000" flood-opacity="0.28"/>
+    </filter>
+  </defs>
+  <rect x="100" y="100" width="824" height="824" rx="185" ry="185" fill="#0a0a0a" filter="url(#shadow)"/>
+  <rect x="100.5" y="100.5" width="823" height="823" rx="184.5" ry="184.5" fill="none" stroke="#ffffff" stroke-opacity="0.12"/>
+  <polygon fill="#ffffff" transform="translate(-26.3 195.3) scale(1.583)"
+           points="240,80 300,80 300,160 405,160 440,195 440,320 380,320 380,220 300,220 300,320 240,320"/>
+</svg>

@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hafen · design system</title>
+<script>try { const t = new URLSearchParams(location.search).get("theme") ?? localStorage.getItem("eval.theme") ?? "light"; document.documentElement.dataset.theme = t === "dark" ? "dark" : "light"; } catch {}</script>
+<link rel="stylesheet" href="./css/tokens.css">
+<link rel="stylesheet" href="./css/components.css">
+<link rel="stylesheet" href="./css/frame.css">
+<link rel="stylesheet" href="./css/eval.css">
+<style>
+  /* The gallery's own layout (not part of the design system) */
+  body { overflow: auto; }
+  .gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 24px; padding: 24px; }
+  .gallery > section { border: 1px solid var(--line); padding: 16px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+  .gallery > section > h2 { margin: 0 0 4px; }
+  .gallery .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .gallery .frame { height: 420px; border: 1px solid var(--line); display: flex; position: relative; overflow: hidden; }
+</style>
+<script type="module" src="./js/gallery.jsx"></script>
+</head>
+<body>
+<div id="gallery"></div>
+</body>
+</html>

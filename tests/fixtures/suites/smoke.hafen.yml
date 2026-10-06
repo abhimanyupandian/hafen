@@ -1,0 +1,27 @@
+# yaml-language-server: $schema=../../../spec/001-hafen/contracts/suite.schema.json
+version: 1
+name: Smoke
+provider: providers/mock-json.yml
+
+environments:
+  local: { base_url: "http://127.0.0.1:8791" }
+
+variables:
+  customer: Priya
+
+tests:
+  - name: refund for a broken item
+    id: t_smoke001
+    tags: [smoke]
+    turns:
+      - user: "Hi, I'm {{customer}}. I want a refund for order 4417"
+        extract:
+          session: $.session_id
+        expect:
+          - { type: status, equals: 200 }
+          - { path: $.data.reply, contains: "4417" }
+          - { path: $.data.order.id, equals: 4417 }
+          - { type: latency, max_ms: 5000 }
+      - user: "It arrived broken"
+        expect:
+          - { contains: "refund" }   # fails by design: the mock's second reply doesn't mention it

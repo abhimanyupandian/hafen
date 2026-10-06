@@ -1,0 +1,66 @@
+/* Design tokens (from hafen's design system: spec/design/tokens.md): colours, type and sizes. Components
+   and layout only use these. The theme is <html data-theme>: light unless it's "dark" (Settings →
+   Appearance: light, dark, or the system's). */
+
+:root {
+  --bg: #ffffff;
+  --fg: #0a0a0a;
+  --muted: #737373;
+  --line: #e5e5e5;
+  --soft: #f5f5f5;
+  --danger: #c62828;
+  /* Run states, kept mild: waiting (yellow), running (blue), done (green), failed (red) */
+  --wait: #8a6a00; --wait-soft: #fffbea; --wait-line: #ecd889;
+  --run: #2563eb;  --run-soft: #f3f7ff;  --run-line: #b9cdf8;
+  --ok: #2f7d4f;   --ok-soft: #f3faf5;   --ok-line: #b7dcc4;
+  --bad-soft: #fdf4f4; --bad-line: #efc4c4;
+  /* Connector lines between cards: light, so the cards stand out; the logo tile's edge */
+  --arrow: #b4b4b4;
+  --logo-line: #000000;
+  /* The console and long output: on the page's white here, a terminal in dark */
+  --log-bg: #ffffff; --log-fg: #404040; --log-cmd: #0a0a0a; --log-dim: #737373; --log-err: #c62828;
+
+  --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
+  --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+
+  /* One height for every control (buttons, inputs, selects, list rows), one for the composer. */
+  --control: 32px;
+  --control-lg: 44px;
+  --control-font: 12px;
+  --control-pad: 10px;
+
+  --bar: 52px;      /* top bars (the sidebar's head, the top bar, panel heads, modal heads) */
+  --foot: 40px;     /* the console's head and the sidebar's foot */
+  --rail: 52px;     /* the collapsed sidebar */
+  --gutter: 16px;   /* page edge padding */
+
+  color-scheme: light;
+}
+
+:root[data-theme="dark"] {
+  --bg: #0a0a0a;
+  --fg: #ededed;
+  --muted: #8f8f8f;
+  --line: #262626;
+  --soft: #151515;
+  --danger: #ff6b6b;
+  --wait: #e2c15c; --wait-soft: #1e1909; --wait-line: #5e4c16;
+  --run: #8fb3ff;  --run-soft: #111a2b;  --run-line: #2c4675;
+  --ok: #86d1a3;   --ok-soft: #101d16;   --ok-line: #2a5a3d;
+  --bad-soft: #241314; --bad-line: #6b3133;
+  --arrow: #8f8f8f;
+  --logo-line: #262626;
+  --log-bg: #0b0b0b; --log-fg: #c8c8c8; --log-cmd: #ffffff; --log-dim: #7a7a7a; --log-err: #ff6b6b;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font: 15px/1.6 var(--sans);
+  -webkit-font-smoothing: antialiased;
+}
+button, select, textarea, input { font: inherit; color: inherit; }
+[hidden] { display: none !important; }
