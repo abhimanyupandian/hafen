@@ -7,7 +7,7 @@
 //   views/    the sidebar's sections, the thread, the message box, the panel, settings
 //   state.js  what's open and selected; the engine's commands; runs
 //   host.js   the engine: a Web Worker (browser) or the desktop app's utility process
-//   ../../engine/  the engine itself (no DOM): the same code the CLI runs
+//   hafen/engine/  the engine itself (no DOM; the hafen package, packages/hafen): the code the CLI runs
 
 import { flushSync } from "react-dom";
 import { createRoot } from "react-dom/client";
@@ -27,7 +27,7 @@ import { Tooltip } from "./design/tooltip.jsx";
 import { $, closeDrawer, pageReady } from "./lib/dom.js";
 import { attachLog, say } from "./lib/log.js";
 import { onRouteChange, readRoute } from "./lib/url.js";
-import { app, liveForSuite, liveForTest, liveIn, openConversation, openRun, runForTest, runSelection, runTests, select, start, stopRun, stopSending, suiteOf, suiteRunFor, testOf, threadMode } from "./state.js";
+import { app, liveForSuite, liveForTest, liveIn, openConversation, openRun, runForTest, runSelection, runTests, select, setShowFixtures, start, stopRun, stopSending, suiteOf, suiteRunFor, testOf, threadMode } from "./state.js";
 import { isRunKey, RUN_KEY } from "./lib/keys.js";
 import { Composer } from "./views/composer.jsx";
 import { Panel } from "./views/panel.jsx";
@@ -37,15 +37,22 @@ import { Thread } from "./views/thread.jsx";
 import { repeatOf, testResult, testStatusText } from "./views/derive.js";
 import { ago, sec } from "./lib/format.js";
 
-// The scope chosen (stage, prod…: its variables and secrets fill {{scope.NAME}}; a suite's environment
-// of that name applies too): a button that names it and opens Settings → Environments, where it's chosen
+// The scope chosen (stage, prod…: its values fill {{env.NAME}} and its secrets {{secret.NAME}}; a
+// suite's environment of that name applies too): a button that names it and opens Settings →
+// Environments, where it's chosen. With none chosen, its icon alone, greyed out, with "!" at its
+// corner (spec/design/components.md, Additions: Scope button); its name says so.
 function ScopeButton() {
   const { env } = useStore(app);
-  const label = env ? `Scope: ${env}` : "Scope: none chosen";
+  const label = env ? `Scope: ${env}. Choose a scope` : "No scope chosen: choose one";
   return (
-    <button id="scopeButton" className="btn btn-ghost scope-button" type="button" aria-haspopup="dialog" aria-label={`${label}. Choose a scope`}
-            title={`${label}: its variables and secrets fill {{scope.NAME}}. Click to choose one, or edit them`} onClick={() => openSettings("environments")}>
-      <Icon name="scope" /><span className="scope-name">{env || "no scope"}</span>
+    <button id="scopeButton" className={`btn btn-ghost scope-button${env ? "" : " none"}`} type="button" aria-haspopup="dialog" aria-label={label}
+            title={env ? `Scope: ${env}: its values fill {{env.NAME}}, its secrets {{secret.NAME}}. Click to choose another, or edit them` : "No scope chosen: choose one"}
+            data-scope={env ?? ""} onClick={() => openSettings("environments")}>
+      <span className="scope-icon" id="scopeIcon">
+        <Icon name="scope" />
+        {!env && <span className="scope-alert" id="scopeAlert" aria-hidden="true">!</span>}
+      </span>
+      {env && <span className="scope-name" id="scopeName">{env}</span>}
     </button>
   );
 }
@@ -146,16 +153,46 @@ function NavRail() {
   );
 }
 
+// Show or hide the fixtures: their steps on the timeline, their lines in the console (one choice)
+function FixturesToggle({ id }) {
+  const { showFixtures } = useStore(app);
+  return (
+    <button className="btn btn-ghost when-open fixtures-toggle" id={id} type="button" aria-pressed={!showFixtures}
+            title={showFixtures ? "Hide the providers' fixtures (and their calls)" : "Show the providers' fixtures (and their calls)"}
+            onClick={() => setShowFixtures(!showFixtures)}>{showFixtures ? "hide fixtures" : "show fixtures"}</button>
+  );
+}
+
+// The spans, without the fixtures' (and what's under them)
+function withoutFixtures(spans) {
+  const gone = new Set(spans.filter((s) => s.kind === "fixture").map((s) => s._id));
+  if (!gone.size) return spans;
+  let grew = true;
+  while (grew) {
+    grew = false;
+    for (const s of spans) if (!gone.has(s._id) && gone.has(s.parent)) { gone.add(s._id); grew = true; }
+  }
+  return spans.filter((s) => !gone.has(s._id));
+}
+
+function ConsolePane() {
+  const { showFixtures, providers, suites } = useStore(app);
+  // (the toggle once the folder's providers have fixtures)
+  const any = [...providers.map((p) => p.config), ...suites.flatMap((s) => Object.values(s.providers ?? {}))].some((c) => c?.fixtures);
+  return <Console hide={showFixtures ? [] : ["fixture"]} actions={any || !showFixtures ? <FixturesToggle id="consoleFixtures" /> : null} />;
+}
+
 function Timeline() {
   const state = useStore(app);
-  const { selection, conversation, lives, openRun: run } = state;
+  const { selection, conversation, lives, openRun: run, showFixtures } = state;
   const mode = threadMode();
   const source = mode === "explore" ? conversation?.run : mode === "run" ? run : mode === "suite" ? suiteRunFor(selection.file) : runForTest(selection.file, selection.test);
   const running = mode === "explore" ? !!conversation?.sending : lives.some((l) => l.run === source);
   const suiteView = mode === "suite";
   return (
     // A suite's view: its last whole run, at the suite's and its tests' level (a test opens to its steps)
-    <TimelineDock spans={source?.spans ?? []} running={running} selected={selection.span}
+    <TimelineDock spans={showFixtures ? source?.spans ?? [] : withoutFixtures(source?.spans ?? [])} running={running} selected={selection.span}
+                  actions={source?.spans?.some((s) => s.kind === "fixture") ? <FixturesToggle id="timelineFixtures" /> : null}
                   show={suiteView ? ["suite"] : []} collapse={suiteView ? ["test"] : []}
                   empty={suiteView ? "Run the suite to see its tests here." : undefined}
                   onSelect={(span) => {
@@ -178,6 +215,23 @@ function Timeline() {
                     select({ ...selection, kind: "step", span: span._id, explore: mode === "explore" || undefined, in: mode, turn: turn ? turn.index ?? span.ref.turn : selection.turn, run: source?._id }, { route: false });
                   }} />
   );
+}
+
+// Where toasts go: the thread's top right, 8px under the top bar and 16px in from its right edge (the
+// panel's), so a toast never covers the top bar's, the panel's or the docks' controls. A panel over
+// the thread (a small screen) leaves it the room to its left, or, when that's too narrow, the thread's
+// whole width. While a modal is open: the window's corner, as the design system has them.
+function toastArea() {
+  if (document.querySelector("dialog:modal")) return null;
+  const thread = document.getElementById("scroller")?.getBoundingClientRect();
+  if (!thread?.width) return null;
+  let right = thread.right;
+  const panel = document.getElementById("panel");
+  if (panel?.classList.contains("shown") && getComputedStyle(panel).position === "absolute") {
+    const over = panel.getBoundingClientRect();
+    if (over.left - thread.left >= 240 + 32) right = over.left;
+  }
+  return { top: thread.top + 8, right: window.innerWidth - right + 16, width: Math.min(340, right - thread.left - 32) };
 }
 
 function EvalApp() {
@@ -206,12 +260,12 @@ function EvalApp() {
           <Guard what="The panel" id="panelCrash" fallbackClass="panel"><Panel /></Guard>
         </div>
         <Guard what="The timeline"><Timeline /></Guard>
-        <Console />
+        <ConsolePane />
       </main>
       <Tooltip />
       <ContextMenu />
       <SettingsModal />
-      <Toasts />
+      <Toasts area={toastArea} />
     </>
   );
 }

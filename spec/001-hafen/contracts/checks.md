@@ -103,8 +103,8 @@ Declared in the suite and named by checks:
 
 ```yaml
 judges:
-  default:   { kind: systemone }                             # TypeSafe's hosted Jev; key from ${env:JEV_API_KEY}
-  selfhosted: { kind: systemone, endpoint: "http://judge.internal:8080", api_key: "${env:JUDGE_KEY}" }
+  default:   { kind: systemone }                             # TypeSafe's hosted Jev; key: the secret JEV_API_KEY
+  selfhosted: { kind: systemone, endpoint: "http://judge.internal:8080", api_key: "{{secret.JUDGE_KEY}}" }
   rubric:    { kind: llm, provider: claude-judge, samples: 3 }
 ```
 
@@ -117,8 +117,8 @@ Any check takes `enabled` (default `true`). With `enabled: false` it's turned of
 at (its variables aren't resolved, a judge it names isn't asked, a plugin isn't called) and its
 result is `skipped`, reason `turned off (enabled: false)`. Skipped, it doesn't fail its turn or test,
 and isn't counted in accuracy (as any skipped check). So that a check that won't run can't stop a
-run, loading a suite doesn't check a turned-off check's variables, `{{scope.…}}`s, `${env:…}`s, paths
-or judge, and the schema is all it must meet. The same holds for a test's `expect_conversation` and
+run, loading a suite doesn't check a turned-off check's variables, `{{env.…}}`s, `{{secret.…}}`s (or
+an old spelling, `{{scope.…}}` or `${env:…}`), paths or judge, and the schema is all it must meet. The same holds for a test's `expect_conversation` and
 a setup or teardown step's `expect` (a step whose checks are all off goes by its status, as one with
 none does).
 
@@ -151,7 +151,7 @@ export default {
   name: "polite",
   version: "1.0.0",
   // params: the check's fields from the suite. value: what on/path selected.
-  async check({ value, turn, conversation, params, transport, signal }) {
+  async check({ value, turn, conversation, params, env, transport, signal }) {
     const rude = /\b(stupid|idiot)\b/i.test(String(value));
     return { status: rude ? "fail" : "pass", reason: rude ? "found an insult" : "no insults" };
   },
@@ -165,9 +165,9 @@ export default {
   name: "house",
   version: "2.1.0",
   hosts: ["judge.acme.example"],
-  async judge({ input, question, params, transport, signal }) {
+  async judge({ input, question, params, env, transport, signal }) {
     const res = await transport.fetch({ url: "https://judge.acme.example/v1", method: "POST",
-      headers: { authorization: { secret: "HOUSE_JUDGE_KEY", prefix: "Bearer " } }, body: { input, question }, signal });
+      headers: { authorization: "Bearer {{secret.HOUSE_JUDGE_KEY}}" }, body: { input, question }, signal });
     const { score, certainty, why } = await res.json();
     return { value: score, confidence: certainty, reason: why, usage: { input: 0, output: 0 } };
   },
@@ -178,6 +178,12 @@ A check plugin returns `{ status, reason, value?, confidence?, actual?, expected
 plugin `{ value, confidence?, reason, usage?, raw? }`, and the check that uses it (`type: judge`
 with `judge: <name>` naming `{ kind: plugin, plugin: house }`) applies `min`, `max` and
 `unsure_below`.
+
+A check plugin's `check` gets `{ value, turn, conversation, params, env }` and a judge plugin's
+`judge` gets `{ input, question, params, env }`, each with `transport` and `signal`: `env` is the
+chosen environment's values (the values passed, over the suite's `environments.<name>`), never a
+secret. A request's `{{secret.NAME}}` is filled in by the engine as it leaves
+([provider.md](provider.md#code-plugins)).
 
 Suites use a check plugin by its name as the `type` (`{ type: polite }`): the folder's plugins
 (`plugins/*.js`) need no naming in the suite's `plugins`. Plugins run in a worker and never see secret

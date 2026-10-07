@@ -232,7 +232,7 @@ test("searching Suites by name, tag and when it last ran; searching Conversation
   await files(page, servers.mock.url, 50);
   await openFolder(page);
   const search = page.locator("#suitesSearch");
-  await expect(search).toHaveAttribute("placeholder", "Search by name or last run");
+  await expect(search).toHaveAttribute("placeholder", "Search by name, status or last run");
   // By a suite's name: it, whole
   await search.fill("green");
   await expect(suiteRow(page, "green.hafen.yml")).toBeVisible();

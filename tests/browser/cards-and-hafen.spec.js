@@ -252,27 +252,28 @@ test("an editor opened from Settings goes back to Settings: Cancel, Esc and Save
   await page.click("#settings-tab-environments");
   await page.fill("#newScopeName", "stage");
   await page.click("#newScopeForm button[type=submit]");
-  await expect(page.locator("#envYaml")).toBeEnabled();
+  await expect(page.locator("#envText")).toBeEnabled();
   // Cancel
-  await page.click("#envYaml");
+  await page.click("#envText");
   await expect(page.locator("#editorText")).toBeVisible();
   await page.click("#editorCancel");
   await expect(page.locator("#editorText")).toHaveCount(0);
   await expect(page.locator("#settingsModal")).toBeVisible();
   await expect(page.locator("#settingsTitle")).toHaveText("Environments");
   // Esc
-  await page.click("#envYaml");
+  await page.click("#envText");
   await expect(page.locator("#editorText")).toBeVisible();
   await page.keyboard.press("Escape");
   await expect(page.locator("#editorText")).toHaveCount(0);
   await expect(page.locator("#settingsModal")).toBeVisible();
-  // Save: saved, and back in Settings
-  await page.click("#envYaml");
-  await page.fill("#editorText", "base_url: http://stage.example\n");
+  // Save: saved (the scope's values, as a .env file's text), and back in Settings
+  await page.click("#envText");
+  await page.fill("#editorText", "base_url=http://stage.example\n");
   await page.click("#editorSave");
   await expect(page.locator("#editorText")).toHaveCount(0);
   await expect(page.locator("#settingsModal")).toBeVisible();
-  await expect.poll(() => fileText(page, "environments/stage.yml")).toBe("base_url: http://stage.example\n");
+  await expect(page.locator("#envVar-base_url input")).toHaveValue("http://stage.example");
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem("eval.scope.stage")))).toEqual({ base_url: "http://stage.example" });
   // A field's large editor in Settings (a provider's YAML): the same
   await page.click("#settings-tab-providers");
   await page.click("#provider-mock-json-open");
@@ -380,7 +381,10 @@ test("the panels' spacing: a label 6px over its field; 14px to facts and buttons
   await page.locator(`#suiteList .list-row[data-file="${SUITE}"] .list-open`).first().click();
   const gap = async (upper, lower) => { const [a, b] = [await box(upper), await box(lower)]; return Math.round(b.y - (a.y + a.height)); };
   expect(await gap(page.locator("#panel .field-head", { hasText: "Name (in reports)" }), page.locator("#suiteName"))).toBe(6);
-  expect(await gap(page.locator("#suiteProvider").locator(".."), page.locator("#suiteGroup").locator("../.."))).toBe(14);
+  // (the provider's Fixtures field between: a field as any other, 18px under the one before)
+  expect(await gap(page.locator("#suiteProvider").locator(".."), page.locator("#suiteProviderFixturesEdit").locator(".."))).toBe(18);
+  expect(await gap(page.locator("#suiteProviderFixturesEdit").locator(".."), page.locator("#suiteProviderFixturesNone"))).toBe(6);
+  expect(await gap(page.locator("#suiteProviderFixturesNone"), page.locator("#suiteGroup").locator("../.."))).toBe(14);
   expect(await gap(page.locator("label[for=suiteGroup]"), page.locator("#suiteGroup"))).toBe(6);
   expect(await gap(page.locator("#suiteGroupHint"), page.locator("#suiteFacts"))).toBe(14);
   expect(await gap(page.locator("#suiteFacts"), page.locator("#suiteRun").locator(".."))).toBe(14);
@@ -400,7 +404,7 @@ test("the panels' spacing: a label 6px over its field; 14px to facts and buttons
   expect(Math.round(facts.y - body.y)).toBe(12);
 });
 
-test("an empty timeline is as tall as its note (and isn't resized); with steps, as tall as it's set", async ({ app: { page } }) => {
+test("an empty timeline is as tall as its note (and isn't resized); with steps, as tall as it's set (a fifth of the window by default)", async ({ app: { page } }) => {
   await openFolder(page);
   const body = page.locator("#timelineBody");
   await expect(page.locator("#timelineEmpty")).toBeVisible();
@@ -409,7 +413,7 @@ test("an empty timeline is as tall as its note (and isn't resized); with steps, 
   await expect(page.locator("#timelineFit")).toHaveCount(0);
   await runSmoke(page);
   await expect(page.locator("#timelineFit")).toBeVisible();
-  expect(Math.round((await box(body)).height)).toBe(240);
+  expect(Math.round((await box(body)).height)).toBe(180);
   expect(await page.locator("#timelineResizer").evaluate((el) => getComputedStyle(el).display)).not.toBe("none");
 });
 

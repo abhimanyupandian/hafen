@@ -5,7 +5,7 @@
 // shown as its × is; no large-editor button on the message box.
 
 import { parse } from "yaml";
-import { pluginTemplate } from "../../engine/plugin-templates.js";
+import { pluginTemplate } from "hafen/engine/plugin-templates.js";
 import { expect, fileText, test } from "./fixtures.js";
 
 const SUITE = "smoke.hafen.yml";
@@ -103,7 +103,7 @@ test("a provider plugin made in Settings → Plugins comes with its provider fil
   // Listed among the providers, as plugin:acme; nothing left waiting for a provider file
   await page.click("#settings-tab-providers");
   await expect(page.locator("#provider-acme-2")).toContainText("plugin:acme · providers/acme-2.yml");
-  await expect(page.locator("#provider-acme")).toContainText("json · providers/acme.yml");
+  await expect(page.locator("#provider-acme")).toContainText("http (json) · providers/acme.yml");
   await expect(page.locator("[id^='provider-plugin-']")).toHaveCount(0);
   // A check plugin isn't a provider: none made for it
   await page.click("#settings-tab-plugins");

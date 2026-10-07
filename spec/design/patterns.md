@@ -30,8 +30,18 @@ While anything runs on a page, `<html>` has `data-running`.
   something, asking `delete every <thing>?`.
 - **The selected thing:** a ghost `Delete <thing>` at the panel's foot, asking `delete this
   <thing>?`, `--danger` on hover.
+- **Forgetting a kept value** (a secret, a key) is a delete: a ghost `forget` ConfirmButton,
+  asking `forget it?`.
+- **Writing secrets out in plain text** (a secrets file's export) asks first, as a delete does: a
+  ConfirmButton whose question says so (`write them in plain text?`), with a `.hint` beside it saying
+  where the file goes and to keep it out of version control.
 - Deleting something that's in use says why it can't, in the console (`stop the run before
   deleting it`), and doesn't delete it.
+- **Edits that can't be saved** (YAML that doesn't parse) are never thrown away on one action: what
+  would leave them (closing Settings, another option, back) asks first, as a delete does: the first
+  try is refused, says why where they are, and the close button asks `discard edits?`; the second
+  goes. An action that only uses them (**Try it**) is refused, and says why, every time. Edits that
+  can be saved are saved as they're left.
 
 ## Remembered state
 
@@ -43,7 +53,7 @@ What the user sets up stays as they left it, in localStorage under the project's
 | `<app>.section.<id>` | Each collapsible section and dock, open or closed |
 | `<app>.navCollapsed`, `<app>.navWidth` | The sidebar collapsed (wide screens), its width |
 | `<app>.consoleHeight` (and each dock's height) | The console's height |
-| `<app>.theme` | Light, dark or system |
+| `<app>.theme` | Light, dark or system (unset: the system's) |
 | `<app>.active…` | What was open |
 
 A remembered size that equals the default is removed rather than stored. Storage that fails
@@ -90,6 +100,16 @@ A remembered size that equals the default is removed rather than stored. Storage
 
 - **Empty:** a `.note` where the content would be, saying what goes there and how to add it. A
   `clear all` hides when there's nothing to clear.
+- **The first step is a control, not only words** (eval): where the note's way to start is an
+  action (open a folder), the thread's note has it as a primary button under it, and a section's
+  note has it as a link in its text (`.inline-link`). Something that needs a step first (a provider
+  needs an open folder) offers that step rather than a form that can't be saved.
+- **Placeholders say what's missing**, never something that looks like a value (`No tags yet`, not
+  `smoke, refunds`).
+- **Nothing chosen** (eval): a control that shows a choice the page needs (the scope), with none made,
+  shows no words: its icon alone, greyed out as a disabled field is, with a small `!` badge over the
+  icon's top right corner ([Scope button](components.md#scope-button)). It still opens the choice, and
+  its `title` and `aria-label` say that nothing's chosen.
 - **Loading the page:** the loader, for at least a second, so every load looks the same.
 - **Waiting on work:** the progress cursor (`whileBusy`), a blinking badge dot, a status line
   (`#status`) or a row's status.
@@ -101,8 +121,13 @@ A remembered size that equals the default is removed rather than stored. Storage
 
 - What went wrong is said where it happened, in `--danger`: a field's note (`.hint.error`, with
   `role="alert"`), a status line, an output block, a row's status.
-- The console gets the details (`say(text, "err")`).
+- The console gets the details (`say(text, "err")`), once per change: a file read again with the
+  same problems doesn't log them again.
 - An error never leaves the page stuck: work that fails is recorded as far as it got.
+- **Nothing typed is lost** (eval): a message that couldn't be sent stays in the box, the reason
+  under it ([Message box problems](components.md#message-box-problems)). A problem known before
+  sending (a provider whose fixture isn't there) is said in the panel, by the provider, before you
+  send, and Send is off.
 
 ## Addresses
 

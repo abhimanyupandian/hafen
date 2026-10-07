@@ -91,7 +91,7 @@ The engine and its interfaces are covered by tests written before the code they 
 - **Stack:** React 19 and Vite for the UI; Electron for the desktop app; Node 22 or newer for the
   CLI, the relay and tests.
 - **Default environments:** the desktop app and CI. The browser build is supported where the
-  endpoints allow it (CORS), or through the project's own relay (`hafen serve`).
+  endpoints allow it (CORS), or through the project's own relay (`npm run serve`).
 - **Accessibility and automation:** every control has an `id` and an accessible name; rows and
   regions have ids made from what they show; state that matters (running, selected, status) is in
   the DOM as attributes.

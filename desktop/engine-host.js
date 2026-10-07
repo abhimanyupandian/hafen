@@ -1,13 +1,13 @@
-// The engine in the desktop app: an Electron utility process running engine/serve-port.js in Node, as
+// The engine in the desktop app: an Electron utility process running hafen/engine/serve-port.js in Node, as
 // the CLI does (research §5). The main process sends it a port to the page (one per page load) and the
 // secrets it keeps; files are read and written here, under the folder the page opened, and each run is
 // also written to <folder>/.hafen/runs/ (git-ignored).
 
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { nodeHost } from "../cli/node-host.js";
-import { servePort } from "../engine/serve-port.js";
-import { runFileName, serializeRun } from "../engine/reports/run-file.js";
+import { nodeHost } from "hafen/cli/node-host.js";
+import { servePort } from "hafen/engine/serve-port.js";
+import { runFileName, serializeRun } from "hafen/engine/reports/run-file.js";
 
 let secrets = {};  // env -> {NAME: value}; "" holds values for every environment
 

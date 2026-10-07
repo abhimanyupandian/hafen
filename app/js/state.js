@@ -3,9 +3,10 @@
 // runs kept in this browser. Views read `app` (a store) and call the actions here; nothing here
 // parses, checks or times anything: the engine does (constitution II).
 
-import { parseRun, runFileName, serializeRun } from "../../engine/reports/run-file.js";
-import { RUN_KIND } from "../../engine/run-kind.js";
-import { testId } from "../../engine/util.js";
+import { parseRun, runFileName, serializeRun } from "hafen/engine/reports/run-file.js";
+import { RUN_KIND } from "hafen/engine/run-kind.js";
+import { fixturesOf } from "hafen/engine/fixture-lists.js";
+import { freeTestName, testId } from "hafen/engine/util.js";
 import { createStore } from "./design/hooks.js";
 import { connectEngine, newToken } from "./host.js";
 import { invoke, isApp } from "./lib/app.js";
@@ -16,6 +17,7 @@ import { say } from "./lib/log.js";
 import { audit, auditCall, auditEngineLog, auditEvent } from "./lib/audit.js";
 import { pairTurns, turnsOf } from "./views/derive.js";
 import { KEYS, store } from "./lib/store.js";
+import * as kept from "./lib/scope-store.js";
 import { setRoute } from "./lib/url.js";
 import { notify } from "./design/toast.jsx";
 import { inFront, runEndActions } from "./lib/notifications.js";
@@ -30,7 +32,7 @@ export const app = createStore({
   canWrite: true,        // files can be saved in place (a folder); else they're downloaded
   suites: [],
   providers: [],
-  env: store.get(KEYS.env),
+  env: kept.keptNames().includes(store.get(KEYS.env)) ? store.get(KEYS.env) : null,  // the scope chosen (null: none): one the app keeps
   selection: { kind: "conversation" },
   panelOpen: false,      // small screens: the panel shown over the thread (something selected, or asked for)
   conversation: null,    // { id, token, provider, run, title, sending, error }: id is its key where it's kept
@@ -40,12 +42,45 @@ export const app = createStore({
   lastRuns: {},          // test key -> its latest run (whole)
   lastSuiteRuns: {},     // suite file -> its latest run of the whole suite
   conversations: [],     // the conversations kept here: { _id, title, provider, started, updated, turns, size }
-  scopes: [],            // the folder's scopes with files: [{ name, file, values, errors }] (environments/<scope>.yml)
+  scopes: kept.keptScopes(),  // the app's scopes and their environment values: [{ name, values }] (lib/scope-store.js)
   secretScopes: [],      // the scopes that have secrets kept ("" is every scope's)
   scopeSecrets: {},      // scope → the names of its secrets (for the chosen scope, and ""): checked in fields
-  relay: null,           // the relay's address, when served by `hafen serve`
+  relay: null,           // the relay's address, when served by `npm run serve`
+  plugins: [],           // the folder's plugins, loaded to say what each is: [{ file, name, kind, version, provides, error }]
+  problems: {},          // suite file → what stops a run of it, as a run checks before sending anything (problemsOf)
+  warnings: {},          // suite file → what that check warns of, beyond the file's own (warningsOf)
+  showFixtures: store.get(KEYS.fixtures) !== "hidden",  // the fixtures' steps (timeline) and lines (console) shown
   error: null,
 });
+
+// The providers a picker offers: the folder's provider files, less one whose kind names a plugin that
+// isn't a provider (a fixture, a check, a judge: not something to send messages to)
+export function providerChoices({ providers, plugins = [] }) {
+  const kinds = new Map(plugins.filter((p) => p.name).map((p) => [p.name, p.kind]));
+  return providers.filter((p) => {
+    const named = String(p.config?.kind ?? "").match(/^plugin:([^@]+)/)?.[1];
+    return !named || !kinds.has(named) || kinds.get(named) === "provider";
+  });
+}
+
+// A provider file's fixtures (the Fixtures field): its lists, written in its file in place (comments
+// kept); null, the key goes
+export async function setProviderFixtures(file, lists) {
+  const had = get().providers.find((p) => p.file === file)?.config?.fixtures !== undefined;
+  if (lists === null && !had) return;
+  // (a list names each fixture once: never written twice)
+  const twice = lists === null ? null : fixturesOf({ fixtures: lists }).duplicates[0];
+  if (twice) throw new Error(twice.message);
+  await engine.call("editFile", { file, edits: [lists === null ? { op: "delete", path: ["fixtures"] } : { op: "set", path: ["fixtures"], value: lists }] });
+  await reload();
+  audit("provider.fixtures", { file, fixtures: lists === null ? "none" : Object.entries(lists).filter(([, l]) => l.length).map(([k, l]) => `${k}:${l.join("+")}`).join(",") || "none" });
+}
+
+// Show or hide the fixtures, on the timeline and in the console (one choice, remembered)
+export function setShowFixtures(show) {
+  store.set(KEYS.fixtures, show ? "shown" : "hidden");
+  set({ showFixtures: show });
+}
 
 let engine = null;
 let browserOpen = null;  // what the browser build opened: { handle } or { files }
@@ -69,11 +104,20 @@ export async function start() {
   }
   // (Settings → Running's "tests at once" is gone: groups in the files say what runs at once)
   store.remove("eval.concurrency");
+  // (a folder's scope files, the old way, aren't offered for import any more: what was answered goes)
+  store.remove("eval.legacyScopes");
   await loadRuns();
   await loadConversations();
-  // The scopes that have secrets (and the one chosen last), known before a folder is open: a
-  // conversation can use them, and Settings → Environments choose among them
+  // The scopes that have secrets, and the names of the chosen one's, known before a folder is open: a
+  // conversation's fields are checked against them
   await refreshSecrets().catch(() => {});
+  // (another tab or window changed the scopes' values: this one follows; the scope chosen here, deleted
+  // or renamed there, isn't chosen any more)
+  window.addEventListener("storage", (e) => {
+    if (e.key !== null && e.key !== KEYS.scopes && !e.key.startsWith(KEYS.scope(""))) return;
+    scopesChanged();
+    if (get().env && !scopeNames().includes(get().env)) set({ env: null });
+  });
   if (isApp) {
     const root = store.get(KEYS.root);
     if (root) await openRoot(root).catch((err) => say(`couldn't open ${root}: ${err.message}`, "err"));
@@ -134,15 +178,16 @@ export async function openFiles(fileList) {
   setLoaded(loaded, { root: null, canWrite: false });
 }
 
-function setLoaded({ suites, providers, scopes = [] }, { root, canWrite }) {
-  const envs = scopeNames({ suites, scopes, secretScopes: get().secretScopes });
-  const env = envs.includes(get().env) ? get().env : envs[0] ?? null;
+function setLoaded({ suites, providers, plugins = [] }, { root, canWrite }) {
+  const envs = scopeNames();
+  // (none chosen on purpose stays none; one never chosen: the first there is)
+  const env = envs.includes(get().env) ? get().env : store.get(KEYS.env) === "" ? null : envs[0] ?? null;
   const before = get();
   const fresh = before.opened && before.root !== root;  // another folder: nothing carries over
   if (fresh) changes.length = 0;
   const sel = before.selection;
   const was = !fresh && sel.file !== undefined && sel.test !== undefined ? testOf(sel.file, sel.test) : null;
-  set({ opened: true, root, canWrite, suites, providers, env, scopes });
+  set({ opened: true, root, canWrite, suites, providers, env, plugins });
   refreshSecrets().catch(() => {});
   // The selection, where it is now: its test found by id (a file edited as a whole, or elsewhere,
   // may have moved it), its suite, or nothing
@@ -155,13 +200,93 @@ function setLoaded({ suites, providers, scopes = [] }, { root, canWrite }) {
   // A conversation (or the remembered provider) whose provider file is gone
   const conversation = get().conversation;
   if (fresh || (conversation?.provider && !providers.some((p) => p.file === conversation.provider))) {
-    if (conversation?.token) engine.call("reset", { token: conversation.token }).catch(() => {});
+    letGo(conversation?.token);
     set({ conversation: null });
   }
   if (store.get(KEYS.provider) && !providers.some((p) => p.file === store.get(KEYS.provider))) store.remove(KEYS.provider);
   emit("suites:changed");
   say(`${root ? `${root}: ` : ""}${suites.length} suite${suites.length === 1 ? "" : "s"}, ${providers.length} provider${providers.length === 1 ? "" : "s"}`, "log");
-  for (const s of suites) for (const e of s.errors ?? []) say(`${e.file}${e.line ? `:${e.line}:${e.column}` : ""}  ${e.message}`, "err");
+  // (each suite's problems are logged once each, as the check finds them, not again with every read)
+  if (fresh) logged.clear();
+  set({ problems: Object.fromEntries(Object.entries(fresh ? {} : get().problems).filter(([file]) => suites.some((s) => s.file === file))) });
+  for (const file of [...logged.keys()]) if (!suites.some((s) => s.file === file)) logged.delete(file);
+  checkSuites(suites.map((s) => s.file));
+}
+
+/* ---------- a suite's problems, before it's run ---------- */
+
+// Each suite is checked as a run checks it before sending anything (engine/runner.js, preflight: what
+// `hafen validate` lists), a moment after it's read or edited, and when another scope is chosen: so a
+// check type that isn't one (contians) shows in its Problems before it's run. One check at a time;
+// files asked for meanwhile go in the next.
+const toCheck = new Set();
+let checkTimer = null;
+let checking = false;
+let checkedEnv;  // the scope (and its values) the last check was for
+function checkSuites(files) {
+  for (const f of files) toCheck.add(f);
+  clearTimeout(checkTimer);
+  checkTimer = setTimeout(runChecks, 150);
+}
+async function runChecks() {
+  if (checking || !toCheck.size || !engine) return;
+  const files = [...toCheck].filter((f) => suiteOf(f));
+  toCheck.clear();
+  if (!files.length) return;
+  checking = true;
+  checkedEnv = scopeKey();
+  try {
+    const out = await engine.call("preflight", { files, ...scopeArgs() });
+    const problems = { ...get().problems };
+    const warnings = { ...get().warnings };
+    for (const { file, problems: found, warnings: warned } of out) {
+      if (!suiteOf(file)) continue;
+      problems[file] = found;
+      if (warned) warnings[file] = warned;
+      logProblems(file, found);
+    }
+    set({ problems, warnings });
+  } catch {
+    // (it couldn't be checked: its file's own problems, as read, are what's known)
+    for (const f of files) logProblems(f, suiteOf(f)?.errors ?? []);
+  } finally {
+    checking = false;
+    if (toCheck.size) checkTimer = setTimeout(runChecks, 0);
+  }
+}
+// Another scope chosen, or its values changed: what a run would find can differ
+const scopeKey = () => JSON.stringify([get().env, environmentNow()?.values ?? null]);
+app.subscribe(() => {
+  const { opened, suites } = get();
+  if (opened && checkedEnv !== undefined && scopeKey() !== checkedEnv) {
+    checkedEnv = scopeKey();
+    checkSuites(suites.map((s) => s.file));
+  }
+});
+
+// What stops a run of a suite: as the check found it, or (until it has) its file's own problems
+export function problemsOf(file) {
+  const suite = suiteOf(file);
+  return get().problems[file] ?? [...(suite?.errors ?? []), ...(suite?.missing ?? [])];
+}
+
+// A suite's warnings: the check's (its files' own and what it found), else its files' own, as read
+export function warningsOf(file) {
+  return get().warnings[file] ?? suiteOf(file)?.warnings ?? [];
+}
+
+// A suite's problems in the console, in red, once each: one still there when it's read again isn't
+// logged again; one that went and came back is
+const logged = new Map();  // suite file → Set of "file|line|message" (a problem can be in a provider file it uses)
+function logProblems(file, problems) {
+  const before = logged.get(file) ?? new Set();
+  const now = new Set();
+  for (const e of problems) {
+    const key = `${e.file ?? file}|${e.line ?? ""}|${e.message}`;
+    now.add(key);
+    if (!before.has(key)) say(`${e.file ?? file}${e.line ? `:${e.line}:${e.column}` : ""}  ${e.message}`, "err");
+  }
+  logged.set(file, now);
 }
 
 export async function reload() {
@@ -176,71 +301,129 @@ export async function reconfigure() {
   await engine.call("configure", { relay: get().relay, secrets: secretsForBrowser() });
 }
 
-export const environments = (suites) => [...new Set(suites.flatMap((s) => Object.keys(s.data?.environments ?? {})))];
-
-// Every scope there is to choose (Settings → Environments; --env in CI): the folder's
-// scope files (environments/<scope>.yml), the suites' environments, and the scopes with secrets
-export function scopeNames({ suites, scopes, secretScopes } = get()) {
-  return [...new Set([...(scopes ?? []).map((s) => s.name), ...environments(suites ?? []), ...(secretScopes ?? []).filter(Boolean)])];
+// Every scope there is to choose (the scope button, Settings → Environments and Secrets): the ones made
+// in the app, in the order they were made, and no others. (A suite's environment of a scope's name
+// gives that scope values too, but doesn't make one; nor do secrets.)
+export function scopeNames({ scopes } = get()) {
+  return (scopes ?? []).map((s) => s.name);
 }
 
+// The scope chosen as the engine is given it, with every call that runs or checks something: its name
+// (env: the suites' environment of that name, and where its secrets are looked for) and its environment
+// values (environment: { name, values }, what {{env.NAME}} is filled from); none chosen, environment:
+// null. It's always given, so the engine never reads an environment from the folder.
+export function environmentNow({ env, scopes } = get()) {
+  if (!env) return null;
+  return { name: env, values: { ...(scopes.find((s) => s.name === env)?.values ?? {}) } };
+}
+const scopeArgs = () => ({ env: get().env ?? undefined, environment: environmentNow() });
+
+// Choose the scope in use (null: none, which is remembered as a choice too)
 export function setEnv(env) {
-  store.set(KEYS.env, env);
-  set({ env });
-  audit("config.scope", { scope: env });
+  store.set(KEYS.env, env ?? "");
+  set({ env: env || null });
+  audit("config.scope", { scope: env || "none" });
   refreshSecrets().catch(() => {});
 }
 
-// Which scopes have secrets, and the names of the chosen scope's (and every scope's): for the
-// picker, and for the fields' check of {{scope.NAME}} (never a value)
+// Which scopes have secrets, and the names of the chosen scope's (and every scope's): for Settings →
+// Secrets, and for the fields' check of {{secret.NAME}} (never a value). The names are the scope's
+// chosen once this is done; a later call, another scope chosen meanwhile, has the last word.
+let secretsAsked = 0;
 export async function refreshSecrets() {
+  const asked = ++secretsAsked;
+  const scopesWithSecrets = await kept.secretScopes();
+  if (asked !== secretsAsked) return;
+  set({ secretScopes: scopesWithSecrets });
   const env = get().env ?? "";
-  let scopesWithSecrets;
-  let names;
-  if (isApp) {
-    scopesWithSecrets = (await invoke("secrets_scopes")) ?? [];
-    names = Object.fromEntries(await Promise.all([...new Set([env, ""])].map(async (e) => [e, Object.keys((await invoke("secrets_list", { env: e })) ?? {})])));
-  } else {
-    const all = store.getJSON(KEYS.secrets, {});
-    scopesWithSecrets = Object.keys(all).filter((e) => Object.keys(all[e] ?? {}).length);
-    names = Object.fromEntries([...new Set([env, ""])].map((e) => [e, Object.keys(all[e] ?? {})]));
-  }
-  set({ secretScopes: scopesWithSecrets, scopeSecrets: names });
-  // The scope chosen last, if it's one that has only secrets (not known when the folder was read, so
-  // the first one was chosen meanwhile): chosen again
-  const remembered = store.get(KEYS.env);
-  if (remembered && remembered !== get().env && scopeNames().includes(remembered)) set({ env: remembered });
-  // A scope that has only secrets is one to choose too (once a folder is open: before, one is only
-  // chosen again, so a folder's own environments come first)
-  if (!get().env && get().opened) {
-    const first = scopeNames()[0];
-    if (first) set({ env: first });
-  }
+  const names = Object.fromEntries(await Promise.all([...new Set([env, ""])].map(async (e) => [e, await kept.secretNames(e)])));
+  if (asked === secretsAsked) set({ scopeSecrets: names });
 }
 
-// A scope's variables (environments/<scope>.yml, plain YAML): created, changed, deleted
-export const scopeFile = (name) => `environments/${name}.yml`;
+/* ---------- the app's scopes: their environment values and their secrets ---------- */
+
+// The scopes' values as kept now (after a change here, or in another window)
+function scopesChanged() {
+  set({ scopes: kept.keptScopes() });
+}
+
+// The browser build's engine holds the secrets it was given: it's given them again (the desktop app's
+// main process gives its engine them itself, as they change)
+async function secretsChanged() {
+  await reconfigure();
+  await refreshSecrets();
+}
+
 export async function addScope(name) {
-  const next = name.trim();
-  if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(next)) throw new Error("A scope's name is letters, digits, '.', '-' and '_'.");
-  await engine.call("create", { file: scopeFile(next), text: `# The "${next}" scope's variables, plain text: use one in any field as {{scope.NAME}}\n# (its secrets are kept apart, in Settings → Secrets)\n` });
-  await reload();
+  const next = kept.makeScope(name.trim());
+  scopesChanged();
   audit("scope.create", { scope: next });
   return next;
 }
-export async function setScopeVariable(scope, name, value) {
-  const known = get().scopes.find((s) => s.name === scope);
-  const file = known?.file ?? scopeFile(scope);
-  if (!known) await engine.call("create", { file, text: `# The "${scope}" scope's variables, plain text: use one in any field as {{scope.NAME}}\n` });
-  await engine.call("editFile", { file, edits: [value === null ? { op: "delete", path: [name] } : { op: "set", path: [name], value }] });
-  await reload();
-  audit("scope.variable", { scope, name, action: value === null ? "delete" : "set" });
+
+// A value set in a scope (null deletes it); the scope's kept from then on if it wasn't
+export function setScopeValue(scope, name, value) {
+  kept.setValues(scope, { [name]: value });
+  scopesChanged();
+  audit("scope.value", { scope, name, action: value === null ? "delete" : "set" });
 }
+
+// Values from a .env file (or the scope's text edited as a whole: replace), into a scope
+export function importScopeValues(scope, values, { replace = false, from } = {}) {
+  if (replace) kept.replaceValues(scope, values);
+  else kept.setValues(scope, values);
+  scopesChanged();
+  audit("scope.import", { scope, names: Object.keys(values).length, from });
+}
+
+// A scope's values as a .env file (<scope>.env: what --env reads in CI), downloaded
+export function exportScopeValues(scope) {
+  const values = kept.valuesOf(scope);
+  kept.download(`${scope}.env`, kept.envText(values, `The "${scope}" scope's environment values, from Hafen.\nIn CI: hafen run … --env ${scope}.env`));
+  audit("scope.export", { scope, names: Object.keys(values).length });
+}
+
+// A scope renamed: its values and its secrets go with it, and it stays chosen if it was
+export async function renameScope(from, to) {
+  const next = to.trim();
+  if (next === from) return from;
+  if (!kept.SCOPE_NAME.test(next)) throw new Error(kept.SCOPE_RULE);
+  if (scopeNames().includes(next)) throw new Error(`There's a scope "${next}" already.`);
+  await kept.moveSecrets(from, next);
+  kept.renameKept(from, next);
+  scopesChanged();
+  if (get().env === from) setEnv(next);
+  await secretsChanged();
+  audit("scope.rename", { scope: from, to: next });
+  return next;
+}
+
+// A scope deleted, all of it: its secrets first (so one that can't be forgotten, the desktop app's
+// secrets file unreadable say, leaves the scope as it was, and says why), then its entry and its
+// values. Chosen, no scope is chosen after it. Nothing brings it back: the scopes are only the ones
+// made here.
 export async function deleteScope(scope) {
-  const file = get().scopes.find((s) => s.name === scope)?.file;
-  if (file) await engine.call("remove", { file });
-  await reload();
+  await kept.dropSecrets(scope);
+  kept.dropKept(scope);
+  scopesChanged();
+  if (get().env === scope) setEnv(null);
+  await secretsChanged();
   audit("scope.delete", { scope });
+}
+
+// Secrets kept in a scope ("" every scope's): { NAME: value }, "" forgetting one
+export async function keepSecrets(env, values, { action } = {}) {
+  await kept.keepSecrets(env, values);
+  // (their names and scope only: never a value)
+  for (const name of Object.keys(values)) audit("config.secret", { name, env: env || "every", action: action ?? (values[name] ? "set" : "forget") });
+  await secretsChanged();
+}
+
+export async function exportSecrets(env) {
+  const file = `${env || "every-scope"}.secret.env`;
+  const written = await kept.exportSecrets(env, file);
+  if (written) audit("scope.export.secrets", { scope: env || "every", file: typeof written === "string" ? written : file });
+  return written;
 }
 
 /* ---------- finding things ---------- */
@@ -314,6 +497,7 @@ export async function editSuite(file, edits, guards = []) {
     const suite = await engine.call("edit", { file, edits, guards: [...guardsFor(file, edits), ...guards] });
     set({ suites: get().suites.map((s) => (s.file === file ? suite : s)) });
     emit("suites:changed");
+    checkSuites([file]);
     if (!get().canWrite) offerDownload(file);
     return suite;
   } catch (err) {
@@ -548,7 +732,7 @@ export async function renameSuite(file, name) {
   return to;
 }
 
-const newTestValue = () => ({ id: testId(), name: "New test", turns: [{ user: "Hello" }] });
+const newTestValue = (tests = []) => ({ id: testId(), name: freeTestName(tests, "New test"), turns: [{ user: "Hello" }] });
 
 // The next new suite's file: tests.hafen.yml, then tests-2.hafen.yml, …
 export function freeSuiteFile() {
@@ -559,16 +743,21 @@ export function freeSuiteFile() {
   return fileOf(n);
 }
 
-// A new suite file with one test, using the first provider, and the environments and variables of a
-// suite that already uses it (so what its templates need, {{base_url}} say, is set)
-export async function newSuite() {
-  const { providers, suites } = get();
-  const file = freeSuiteFile();
-  const provider = providers[0]?.file;
+// A new suite file with one test (name: its file's, without .hafen.yml, a folder's path allowed; none,
+// the next free one), using the provider in use (the conversation's, or the one used last), and the
+// environments and variables of a suite that already uses it (so what its templates need,
+// {{base_url}} say, is set)
+export async function newSuite(name = "") {
+  const { suites } = get();
+  const typed = name.trim().replace(SUITE_FILE, "");
+  if (typed && !SUITE_NAME.test(typed)) throw new Error("A suite's name is letters, digits, '.', '-' and '_' (and '/' for a folder).");
+  const file = typed ? `${typed}.hafen.yml` : freeSuiteFile();
+  if (suites.some((s) => s.file === file)) throw new Error(`${file} is there already: choose another name`);
+  const provider = providerInUse()?.file;
   const like = provider ? suites.find((s) => Object.values(s.providerFiles ?? {}).includes(provider)) : null;
   try {
     await createSuite(file, {
-      name: file.replace(SUITE_FILE, ""), provider: provider ? relativePath(file, provider) : "openai-chat",
+      name: file.split("/").pop().replace(SUITE_FILE, ""), provider: provider ? relativePath(file, provider) : "openai-chat",
       environments: like?.data?.environments, variables: like?.data?.variables, tests: [newTestValue()],
     });
   } catch (err) {
@@ -582,9 +771,12 @@ export async function newSuite() {
   return file;
 }
 
+// What a new suite's name may be (its file's, without .hafen.yml): smoke, or support/refunds
+export const SUITE_NAME = /^[A-Za-z0-9][\w.-]*(\/[A-Za-z0-9][\w.-]*)*$/;
+
 // A new test at the end of a suite
 export async function newTest(file) {
-  const suite = await editSuite(file, [{ op: "add", path: ["tests"], value: newTestValue() }]);
+  const suite = await editSuite(file, [{ op: "add", path: ["tests"], value: newTestValue(suiteOf(file)?.data?.tests) }]);
   select({ kind: "test", file, test: (suite.data?.tests ?? []).length - 1 });
 }
 
@@ -663,7 +855,7 @@ export function chooseProvider(providerFile, { keep = false } = {}) {
   store.set(KEYS.provider, providerFile);
   audit("config.provider", { provider: providerFile, for: keep ? "the conversation going on" : "a new conversation" });
   if (keep && c?.run?.turns?.length) {
-    if (c.token) engine.call("reset", { token: c.token }).catch(() => {});
+    letGo(c.token);
     set({ conversation: { ...c, token: newToken(), provider: providerFile, error: null } });
     return;
   }
@@ -674,8 +866,17 @@ export function chooseProvider(providerFile, { keep = false } = {}) {
 // A new conversation (the one going on is kept, under Conversations, if it has any turns)
 export function resetConversation() {
   const c = get().conversation;
-  if (c?.token) engine.call("reset", { token: c.token }).catch(() => {});
+  letGo(c?.token);
   set({ conversation: c ? { id: newToken(), token: newToken(), provider: c.provider, run: null, error: null, sending: false } : null });
+}
+
+// A conversation let go in the engine (another opened, a new one started, its provider changed): its
+// provider's after and afterAll fixtures run then, and their lines go in the console, as a message's
+// fixtures' do (they come with its token, after its messages)
+function letGo(token) {
+  if (!token || !engine) return;
+  const off = engine.on(token, (event) => auditEvent("conversation", event));
+  engine.call("reset", { token }).catch(() => {}).finally(off);
 }
 
 /* ---------- conversations kept here ---------- */
@@ -715,7 +916,7 @@ export async function openConversation(id) {
     return;
   }
   const c = get().conversation;
-  if (c?.token) engine.call("reset", { token: c.token }).catch(() => {});
+  letGo(c?.token);
   const provider = get().providers.some((p) => p.file === kept.provider) ? kept.provider : null;
   set({ conversation: { id: kept._id, token: newToken(), provider, run: kept.run, title: kept.title, sending: false, error: null } });
   audit("conversation.open", { conversation: kept.title, turns: kept.run?.turns?.length ?? 0 });
@@ -755,7 +956,7 @@ export async function deleteConversationTurn(index) {
   const c = get().conversation;
   if (!c?.run?.turns?.[index]) return;
   if (c.sending) stopSending();
-  if (c.token) engine.call("reset", { token: c.token }).catch(() => {});
+  letGo(c.token);
   set({ conversation: { ...c, token: newToken(), run: withoutTurn(c.run, index), error: null } });
   audit("conversation.turn.delete", { turn: index + 1 });
   const sel = get().selection;
@@ -779,17 +980,25 @@ export function withoutTurn(run, index) {
 
 // The suite whose environments and variables an exploring provider uses: the selected one, else the
 // first that uses this provider, else the first
-function contextSuite(providerFile) {
+export function contextSuite(providerFile) {
   const { selection, suites } = get();
   if (selection.file && suites.some((s) => s.file === selection.file)) return selection.file;
   const using = suites.find((s) => Object.values(s.providerFiles ?? {}).includes(providerFile));
   return (using ?? suites[0])?.file;
 }
 
+// The provider a message goes to (and a new suite uses): the conversation's, else the one used last,
+// else the first the pickers offer
+export function providerInUse() {
+  const { conversation, providers } = get();
+  const file = conversation?.provider ?? store.get(KEYS.provider);
+  return providers.find((p) => p.file === file) ?? providerChoices(get())[0] ?? null;
+}
+
 export async function sendMessage(text) {
   let c = get().conversation;
   if (!c?.provider) {
-    const first = store.get(KEYS.provider) ?? get().providers[0]?.file;
+    const first = providerInUse()?.file;
     if (!first) throw new Error("add a provider first");
     chooseProvider(first, { keep: true });
     c = get().conversation;
@@ -809,7 +1018,7 @@ export async function sendMessage(text) {
   try {
     // (A kept conversation's turns so far: the engine carries on from them when the token is new to it)
     const seed = c.run?.turns?.length ? c.run : undefined;
-    const call = engine.call("send", { token, providerFile: c.provider, suiteFile: contextSuite(c.provider), env: get().env, message: text, history: "live", seed });
+    const call = engine.call("send", { token, providerFile: c.provider, suiteFile: contextSuite(c.provider), ...scopeArgs(), message: text, history: "live", seed });
     inFlight = call.catch(() => {});
     const out = await call;
     // (the live copy's last redraw, if one is waiting, doesn't come after the engine's own run)
@@ -895,7 +1104,7 @@ export async function runTests(file, testIndex, { untilTurn, onlyTurn } = {}) {
   if (test ? liveForTest(file, testIndex) : liveIn(file)) return undefined;
   const token = newToken();
   // (what runs at once: the suite's and its tests' groups, as the files say)
-  const options = { env: get().env ?? undefined, load: false };
+  const options = { ...scopeArgs(), load: false };
   if (test && Number.isInteger(onlyTurn)) {
     options.onlyTurn = onlyTurn;
     // The earlier turns' records from its last run, as the file has them now

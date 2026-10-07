@@ -116,9 +116,9 @@ same results.
    responses, **Then** every rule-based check gives the same result as in the app.
 2. **Given** a failing check, **When** the runner finishes, **Then** it exits with the "tests
    failed" code, and the JUnit report names the test, the turn, the check and why it failed.
-3. **Given** a missing environment variable or an invalid file, **When** the runner starts, **Then**
-   it exits with the "setup error" code and names the file, the line and the variable, without
-   sending any request.
+3. **Given** a secret or an environment value that isn't set, or an invalid file, **When** the
+   runner starts, **Then** it exits with the "setup error" code and names the file, the line and the
+   variable, without sending any request.
 4. **Given** the runner's `validate` command, **When** it runs on a folder of suites, **Then** it
    checks every file against the schema and sends nothing.
 5. **Given** the run file a CI run wrote, **When** it's opened in the app, **Then** the app shows
@@ -224,7 +224,8 @@ run a test with thinking checks, and see them pass, pass on the summary, and ski
 A test runs once per row of a data file (CSV or JSON lines), with the row's values in its messages
 and checks; its accuracy is the share of rows that passed. Tests can start with setup steps (a
 login that returns a token, a request that creates a session) and end with teardown steps that run
-even when the test fails. Named environments (local, staging) hold variables.
+even when the test fails. Named environments (local, staging) hold the values that change between
+places, such as an address; secrets are kept apart.
 
 **Why this priority**: QA teams expect data files and logins from their API tools; without them,
 real endpoints are hard to test. The core loop works without them.
@@ -241,7 +242,7 @@ accuracy over 5 rows.
    **Then** their requests use that token.
 3. **Given** a test that fails, **When** it ends, **Then** its teardown steps still run.
 4. **Given** two environments, **When** the tester switches from local to staging (or CI passes
-   `--env staging`), **Then** the same test runs against staging's variables.
+   `--env staging.env`), **Then** the same test runs against staging's values.
 
 ---
 
@@ -365,7 +366,7 @@ by about 300ms; run a simulated-user scenario for up to 5 turns and see checks o
 ### User Story 13 - Use it in a browser (Priority: P3)
 
 Without the desktop app, the same app works in a browser for endpoints that let a web page call
-them, or through the project's own relay (`hafen serve`), which the tester runs. When a
+them, or through the project's own relay (`npm run serve`), which the tester runs. When a
 browser blocks a call, the app says so and what to do.
 
 **Why this priority**: The desktop app and CI are the defaults; the browser is a convenience.
@@ -401,8 +402,8 @@ calls, then against one that doesn't, with and without the relay.
 - **Repeats:** some repeats error while others pass (errors count as not passing, and are reported
   separately).
 - **Files:** a suite edited outside the app while open (the app reloads it; if the app has unsaved
-  changes too, it asks which to keep); comments and unknown keys (kept, with a warning for unknown
-  keys); a file from a newer version (refused, saying so); two runs of the same file at once.
+  changes too, it asks which to keep); comments (kept) and unknown keys (kept in the file, and a problem: a
+  misspelled key would otherwise do nothing, silently; keys of the user's own start with `x-`); a file from a newer version (refused, saying so); two runs of the same file at once.
 - **Variables and secrets:** a variable used but never set (setup error before anything is sent); a
   secret value that appears in a response (redacted in saved runs and reports).
 - **Stopping:** the tester stops a run (status stopped, what ran is kept); the app closes mid-run
@@ -532,8 +533,10 @@ calls, then against one that doesn't, with and without the relay.
 - **FR-060**: Suites MUST be stored as YAML or JSON files following one published schema. The app
   MUST read and write those files directly; in a browser it opens and downloads them.
 - **FR-061**: Saving from the app MUST keep a file's comments, key order and formatting.
-- **FR-062**: Suite and provider files MUST reference secrets (`${env:NAME}`) and never contain
-  them; the app keeps secret values in the system's keychain (desktop) or a git-ignored local file.
+- **FR-062**: Suite and provider files MUST reference secrets (`{{secret.NAME}}`) and never contain
+  them; the app keeps secret values for each scope, encrypted by the system's keychain (desktop) or in
+  the browser's storage (browser build), and the command line reads them from a file it's given
+  (`--secret`) or the process's environment.
 - **FR-063**: A command-line runner MUST run suites (files and folders, filtered by name or tag) and
   validate them without sending anything, with options for reports, environment, repeats,
   concurrency, unsure policy, spending limit, stopping at the first failure, and a baseline.
@@ -554,8 +557,11 @@ calls, then against one that doesn't, with and without the relay.
   values, reporting each row's result and accuracy across rows.
 - **FR-071**: Tests MUST be able to have setup and teardown steps (HTTP requests with extractions);
   teardown MUST run even when the test fails.
-- **FR-072**: Users MUST be able to define named environments of variables and pick one in the app
-  or on the command line.
+- **FR-072**: Users MUST be able to define named environments of values (`{{env.NAME}}`) and pick one
+  in the app (its scopes) or on the command line (`--env <file>`). Whoever runs the engine passes the
+  chosen environment's values; the engine doesn't read them from the project's folder (not even a
+  folder's old `environments/<name>.yml`). The old spellings (`${env:NAME}`, `{{scope.NAME}}`, a
+  plugin's `{ secret: "NAME" }`) MUST be problems that say what to write instead, never filled in.
 
 **Baselines and history**
 
@@ -630,7 +636,9 @@ calls, then against one that doesn't, with and without the relay.
 - **Judge**: what answers a judged check: a System One source or an LLM with a rubric.
 - **Provider**: how to talk to one endpoint: request shape, response shape, history, thinking,
   prices.
-- **Environment**: a named set of variables; secrets are referenced, not stored.
+- **Environment**: a named set of values (`{{env.NAME}}`), given by whoever runs the engine (the
+  app's scope, the command line's `--env` file); secrets are referenced (`{{secret.NAME}}`), not
+  stored.
 - **Data file**: rows of values a test runs once per row.
 - **Run**: one execution of suites, tests or a load test: its settings, every step, every result and
   its summary.

@@ -9,7 +9,8 @@ import { emit } from "./events.js";
 import { KEYS, store } from "./store.js";
 
 export const THEMES = [["light", "Light"], ["dark", "Dark"], ["system", "As the system's"]];
-export const theme = () => store.get(KEYS.theme) ?? "light";
+// (Not chosen yet: the system's, so a first visit with the system dark is dark)
+export const theme = () => store.get(KEYS.theme) ?? "system";
 
 // What's applied: "light" or "dark"; and the logo for it (a black tile on light, a white one on dark)
 const applied = () => (document.documentElement.dataset.theme === "dark" ? "dark" : "light");

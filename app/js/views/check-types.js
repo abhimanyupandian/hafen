@@ -3,7 +3,7 @@
 // check a click adds. The sidebar's Checks lists them by group; a turn's checks are cards named by
 // their kind.
 
-import { typeOf } from "../../../engine/checks/names.js";
+import { typeOf } from "hafen/engine/checks/names.js";
 
 export const CHECK_GROUPS = [
   { id: "response", label: "Response" },

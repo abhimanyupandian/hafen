@@ -19,16 +19,20 @@ const value = (v) => {
 export const ms = (n) => (n === undefined ? "" : n < 1000 ? `${Math.round(n)} ms` : `${(n / 1000).toFixed(2)} s`);
 export const bytes = (n) => (n === undefined ? "" : n < 1024 ? `${n} B` : n < 1024 * 1024 ? `${(n / 1024).toFixed(1)} kB` : `${(n / 1024 / 1024).toFixed(1)} MB`);
 
-// audit("engine.edit", { file, op }, { status: "ok", ms: 12 }); an error (status "error") is red
-export function audit(name, attrs = {}, { status, ms: took, extra, error = false } = {}) {
+// audit("engine.edit", { file, op }, { status: "ok", ms: 12 }); an error (status "error") is red.
+// tag: what it's about, for the console to hide on request ("fixture")
+export function audit(name, attrs = {}, { status, ms: took, extra, error = false, tag } = {}) {
   const parts = Object.entries(attrs).filter(([, v]) => v !== undefined && v !== null && v !== "").map(([k, v]) => `${k}=${value(v)}`);
   const end = [status, took !== undefined ? ms(took) : "", extra].filter(Boolean).join(" · ");
-  say(`${time()}  ${name}${parts.length ? `  ${parts.join(" ")}` : ""}${end ? `  ${end}` : ""}`, error ? "err" : "log");
+  say(`${time()}  ${name}${parts.length ? `  ${parts.join(" ")}` : ""}${end ? `  ${end}` : ""}`, error ? "err" : "log", tag);
 }
 
 // An engine command, as the page sent it: what it was about (never a file's text, a message, or a
 // secret), and how it ended
 export function auditCall(cmd, args = {}, { ok, error, value: out, ms: took }) {
+  // (a suite's check before it's run goes on in the background after every edit: logged when it
+  // fails; the problems it finds are logged themselves, once each)
+  if (cmd === "preflight" && ok) return;
   const a = {};
   switch (cmd) {
     case "open":
@@ -49,7 +53,7 @@ export function auditCall(cmd, args = {}, { ok, error, value: out, ms: took }) {
       a.file = args.file;
       a.to = args.to;
       break;
-    case "validate":
+    case "validate": case "preflight":
       a.files = (args.files ?? []).join(",");
       break;
     case "run":
@@ -78,10 +82,11 @@ export function auditCall(cmd, args = {}, { ok, error, value: out, ms: took }) {
   audit(`engine.${cmd}`, a, { status: ok ? "ok" : `error: ${error}`, ms: took, error: !ok });
 }
 
-// A log the engine sent: its HTTP calls
+// A log the engine sent: its HTTP calls (a plugin's or a fixture's say whose: via=fixture:acme-login)
 export function auditEngineLog(entry) {
   if (entry?.name === "http.request") {
-    audit("http.request", { method: entry.method, url: entry.url }, {
+    audit("http.request", { method: entry.method, url: entry.url, via: entry.via }, {
+      tag: entry.via?.startsWith("fixture:") ? "fixture" : undefined,
       status: entry.error ? `error: ${entry.error}` : String(entry.status),
       ms: entry.ms,
       extra: entry.bytes !== undefined ? bytes(entry.bytes) : undefined,
@@ -90,9 +95,16 @@ export function auditEngineLog(entry) {
   }
 }
 
-// A run's or a conversation's events as they come: each test and turn as it ends
+// A run's or a conversation's events as they come: each fixture, test and turn as it ends
 export function auditEvent(where, event) {
-  if (event?.type === "test:end") {
+  if (event?.type === "fixture:end") {
+    const f = event.fixture ?? {};
+    const test = f.test ? `${f.test.name}${f.test.row ? ` row ${f.test.row}` : ""}${f.test.repeat > 1 ? ` run ${f.test.repeat}` : ""}` : undefined;
+    audit(`${where}.fixture`, { name: f.name, phase: f.phase, provider: f.provider, test, calls: f.calls || undefined }, {
+      status: f.status === "ok" ? `ok${f.provides?.length ? ` · gave ${f.provides.join(", ")}` : ""}` : `error: ${f.error}`,
+      ms: f.ms, error: f.status !== "ok", tag: "fixture",
+    });
+  } else if (event?.type === "test:end") {
     const t = event.test ?? {};
     audit(`${where}.test`, { test: t.name }, { status: `${t.status} ${t.passed ?? 0}/${t.total ?? 0}`, error: t.status === "failed" || t.status === "error" });
   } else if (event?.type === "turn:end") {

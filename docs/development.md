@@ -8,6 +8,8 @@ npm ci
 npm run app            # build the UI and start the desktop app
 npm run dev            # the UI in Vite's dev server
 npm run mock           # the mock endpoint on :8791, for trying things out
+npm run serve          # the browser build (npm run build first) with its relay, on :8790
+npx hafen --help       # the command line (the workspace's), or node packages/hafen/cli/hafen.js
 ```
 
 ## How it's built
@@ -15,26 +17,47 @@ npm run mock           # the mock endpoint on :8791, for trying things out
 One engine, with no DOM, runs everywhere: in Node for the CLI, in Electron's utility process for
 the desktop app, and in a Web Worker for the browser build.
 
+The repository is two npm workspaces. **`packages/hafen/`** is the `hafen` package: the engine and
+the command line, which installs on its own for CI (`npm install hafen`: its dependencies are Ajv,
+json-p3 and yaml, and rolldown, optional, for `pack`). **The root** is the app (`hafen-app`, private):
+the UI, the desktop app and the browser build's server, which depends on `hafen`. `npm ci` at the
+root links `packages/hafen` as `node_modules/hafen`, and the app imports the engine by the package's
+name, never by a path into it: `hafen/engine/<module>.js` (Vite resolves them through
+`node_modules/hafen` for the page, the engine's Web Worker and the plugin worker) and
+`hafen/cli/node-host.js` (the desktop app's engine process). The package imports nothing of the
+app's.
+
 | Path | What |
 |---|---|
-| `engine/` | Everything about running tests: files and schemas, variables, JSONPath (RFC 9535, json-p3), transports and retries, stream parsers, providers and presets, checks, judges, the runner, spans and metrics, redaction, reports. Runs unchanged in Node, a Web Worker and Electron's utility process |
-| `cli/` | The command-line runner, its Node host, and the relay (`serve`) |
+| `packages/hafen/engine/` | Everything about running tests: files and schemas, variables, JSONPath (RFC 9535, json-p3), transports and retries, stream parsers, providers and presets, checks, judges, the runner, spans and metrics, redaction, reports. Runs unchanged in Node, a Web Worker and Electron's utility process |
+| `packages/hafen/cli/` | The command-line runner (`hafen`, `cli/hafen.js`), its Node host, and `pack` |
+| `packages/hafen/tests/` | The package's tests (`node --test`): `engine/`, `cli/`, and `fixtures/` (the mock endpoint, suites and providers for it, the JSONPath compliance suite) |
 | `app/` | The UI (React). `design/` is Hafen's design system and its additions (check badge, JSON tree, timeline, charts); `views/`; `state.js`; `host.js` connects to the engine; `worker.js` runs it in a browser |
 | `desktop/` | Electron: the window, the engine's utility process, folders and secrets |
-| `tests/` | Engine and CLI tests (`node --test`); browser, desktop and visual tests (Playwright); fixtures and the mock endpoint |
+| `server/` | The browser build's server (`npm run serve`, `serve.js`) and its relay (`relay.js`), which calls only the endpoints it's allowed |
+| `tests/` | The app's tests: `app/` (`node --test`: the app's helpers, the page's bundle, design parity, the relay and `npm run serve`, the desktop app's data carried over); `browser/` and `visual/` (Playwright) |
 | `spec/` | The product spec: user stories, data model, contracts, research, and the design system |
 
 ## Tests
 
 ```sh
-npm test               # engine and CLI tests (Node)
+npm test               # the package's tests (npm test -w hafen), then the app's (tests/app/)
 npm run test:browser   # the app end to end in Chromium, and the desktop app in Electron
 npm run test:visual    # the design-system gallery against its baseline screenshots
+npm test -w hafen      # only the package's: engine and CLI
 ```
 
-The mock endpoint (`tests/fixtures/mock-endpoint.mjs`) answers deterministically, one scenario per
-path, so tests are fast, free and repeatable. Its header comment lists every scenario.
-`tests/fixtures/suites/` holds reference suites and providers that use it.
+The mock endpoint (`packages/hafen/tests/fixtures/mock-endpoint.mjs`) answers deterministically, one
+scenario per path, so tests are fast, free and repeatable. Its header comment lists every scenario.
+`packages/hafen/tests/fixtures/suites/` holds reference suites and providers that use it; the app's
+tests use them too.
+
+To check the package installs on its own, pack it and install the file somewhere else:
+
+```sh
+npm pack -w hafen                   # hafen-0.1.0.tgz: engine/, cli/ and the README, not the tests
+cd /some/empty/folder && npm install /path/to/hafen-0.1.0.tgz && npx hafen --version
+```
 
 ## Packaging
 
@@ -72,5 +95,5 @@ format:
 - [`spec/design/`](../spec/design/README.md): the design system the UI is built from (tokens,
   layout, components, patterns).
 
-The engine's JSON Schemas (`engine/files/schema/`) are kept identical to the spec's
+The engine's JSON Schemas (`packages/hafen/engine/files/schema/`) are kept identical to the spec's
 `suite.schema.json` and `provider.schema.json`, and a test checks it.

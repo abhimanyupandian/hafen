@@ -488,6 +488,11 @@ In a reply (which has no label), in the order they happened, before the text:
   its text is the disclosure's `<pre>`.
 - **Tool calls:** one `.hint` line each (`.msg-tool`): `↳ lookup_order · 0.4 s`; a click selects it.
 - **Text:** `.msg-body`, as now.
+- **Cut short:** a reply that failed after some of its text came (a stream cut off) shows that text as
+  any reply's, its last block ending `…` in `--muted` (`.msg-body.md.cut`), then the error under it as
+  `.msg-body.error`: `cut short: network error`. (One that failed before any text came shows only the
+  error, with `show the response` for a body that came.) Its stats leave out `to first token` when no
+  text came.
 
 Then its foot (`.msg-foot`, 8px under the text, wrapping, 4px down and 10px across): the stats line
 (`.msg-stats`) and `copy`; then the check badges.
@@ -570,19 +575,20 @@ A JSON response, browsable, in the panel: the `.panel-output` box with one row p
 
 The steps of a run on a time axis (a Gantt chart), in a [dock](layout.md#docks-and-the-console)
 above the console: a `section.console.collapsible.timeline` with the console's 40px head
-(`TIMELINE`, then ghost `fit`), the same resizable top edge (remembered as `<app>.timelineHeight`,
-240px by default), and its own body. The console itself doesn't change.
+(`TIMELINE`, then ghost `fit`), the same resizable top edge (remembered as `<app>.timelineHeight`;
+by default a fifth of the window's height, between 120px and 240px, so the thread keeps most of
+it), and its own body. The console itself doesn't change.
 
 | Part | Rule |
 |---|---|
-| Body | `--bg`; a 200px label column (resizable like the sidebar, remembered as `<app>.timelineLabels`) and the chart, which scrolls both ways with no scrollbars (the wheel or trackpad, or Space and drag) |
-| Axis | 24px, stays on top while scrolling; ticks as 1px `--line` lines down the chart; labels mono 11px `--muted` (`0 s`, `0.5 s`, `1 s`) |
+| Body | `--bg`; a 200px label column (resizable like the sidebar, remembered as `<app>.timelineLabels`; never more than 40% of the body, so a phone keeps room for the chart) and the chart, which scrolls both ways with no scrollbars (the wheel or trackpad, or Space and drag) |
+| Axis | 24px, stays on top while scrolling; ticks as 1px `--line` lines down the chart, at least 64px apart at any width or zoom, so their labels never overlap; labels mono 11px `--muted` (`0 s`, `0.5 s`, `1 s`) |
 | Rows | 24px; group rows start a group, with a `.tree-toggle` and a `.label` (`TURN 1`); step rows are indented 14px per level, their name in mono 11px `--muted` |
 | Bars | 14px tall, centred in the row, 1px border; steps: `--soft` fill, `--line` border; checks and judge calls by status: pass `--ok-soft`/`--ok-line`, fail and error `--bad-soft`/`--bad-line`, unsure `--wait-soft`/`--wait-line`, running `--run-soft`/`--run-line`; skipped at opacity .55 |
 | Duration | mono 11px `--muted`, 6px after the bar's end: `1.8 s` |
 | Selected | `--fg` border with a 2px inset bar; its row on `--soft` |
 | Live | Bars grow while running; a 1px `--run` line marks now |
-| Zoom | The `Zoom` group at the chart's bottom right, zooming the time axis (25% to 200%); Ctrl or ⌘ and the wheel zoom around the pointer; Space and drag pans (`panWithSpace`) |
+| Zoom | The `Zoom` group is the corner cell over the label column, beside the axis (`top: 0; left: 0`, as wide as the column, its buttons 23px tall, a 1px line on its right and under it: the axis's height, its line running on under it), on `--bg`: never over a bar or a tick, and the labels scroll under it as the bars do under the axis. It zooms the time axis (25% to 200%); Ctrl or ⌘ and the wheel zoom around the pointer; Space and drag pans (`panWithSpace`) |
 | Hover | `title`: the step, start, duration and its metrics |
 | Click | Selects the step: the thread scrolls to it and highlights it, and the panel shows it |
 | Empty | No label column; the note (`.note.timeline-empty`) is centred across the whole body, 14px above and below, and the body is as tall as it (not the dock's set height); the top edge doesn't resize it. (The state's class is `.no-steps`, not `.empty`: that's the thread's placeholder) |
@@ -608,7 +614,7 @@ A check as a [palette card](#palette-card), coloured by how it last went: a turn
 | Rule | Value |
 |---|---|
 | Card | The palette card's: `--bg`, 1px `--line` border, `10px 12px`, 6px between its rows; with a 2px inset bar at its left in its status's colour (`--line` before it has run) |
-| Head | The `.block-label` (the check icon, 16px, and its kind as a `.label`: `PATH`, `SYSTEM ONE · NOUL`), then its status in mono 11px (`pass`, `fail`, `unsure`, `error`, `skipped`, `running…`, `not run`, `off`), an `on` box (`.check` at 20px, mono 11px `--muted`) and `×` (always shown, 20px), at the right |
+| Head | The `.block-label` (the check icon, 16px, and its kind as a `.label`: `PATH`, `SYSTEM ONE · NOUL`), then its status in mono 11px (`pass`, `fail`, `unsure`, `error`, `skipped`, `running…`, `not run`, `off`), an `on` box (`.check` at 20px, mono 11px `--muted`) and `×` (always shown, 20px), at the right. A check that failed or errored has the `fail` icon (✗) in place of the check icon (✓): a tick never stands beside `fail` |
 | What it checks | `.check-card-text`: mono 12px/1.5 `--fg`, wrapping anywhere |
 | Why | `.check-card-reason`: sans 12.5px/1.45 `--muted` (the result's reason, its confidence) |
 | Colour by `data-status` | `pass` `--ok`, `fail` and `error` `--danger`, `unsure` `--wait`, `running` `--run`: the bar, the icon, the label and the status; others `--muted` |
@@ -656,7 +662,9 @@ at least 80px tall: a `.note.placeholder` (`<what> couldn't be shown: <why>`) ov
 At 860px and below the panel (`.panel`) shows only with `.shown` (something selected, or asked for),
 at `z-index` 8: under the drawer (10) and its scrim (9). The top bar's `#panelToggle` (a ghost icon
 button, the `sidebar` icon, 16px, `--muted`, `--fg` while the panel shows; small screens only, as the
-menu's button) asks for it.
+menu's button) asks for it. The panel covers the top bar's right end, so its own head has
+`#panelHide` (the same button, `--fg`, just before its ×; small screens only): it hides the panel and
+keeps what's selected (the test stays open in the thread), where × closes it.
 
 ### Panel spacing
 
@@ -685,6 +693,7 @@ Added to a project's `Icon` set, drawn as the others (18×18, stroke 1.5, no fil
 | `stop` | `<rect x="4.5" y="4.5" width="9" height="9"/>` | Stopping a run |
 | `scope` | `<path d="M9 2.5l6.5 3.25L9 9 2.5 5.75z"/><path d="M2.5 9.25L9 12.5l6.5-3.25M2.5 12.5L9 15.75l6.5-3.25"/>` (round joins) | A scope (stage, prod…): stacked layers; the scope button |
 | `settings` (changed) | A gear: an outline of eight teeth (r 7.2 at the tips, 5.3 between them, round joins) around a hub (`<circle cx="9" cy="9" r="2.25"/>`) | Settings, in place of the two sliders (`#openSettings`, the gallery) |
+| `fail` | `<path d="M5 5l8 8M13 5l-8 8"/>` (a ✗, a little smaller than `close`'s ×, the size of `check`'s ✓) | A check that failed or errored (its card) |
 
 They're reviewed next to the existing icons, at 14, 16 and 18px, in both themes, before they're
 used.
@@ -692,10 +701,20 @@ used.
 ### Scope button
 
 The sidebar head's control for the scope (in place of a select): a ghost button (`.scope-button`,
-`#scopeButton`) with the `scope` icon (18px) and the scope chosen (`.scope-name`, mono 11px, cut with
-an ellipsis; "no scope" when none is), 6px apart, padded `0 6px`, at most 160px wide; `--muted`,
-`--fg` on hover. A click opens Settings on Environments (`openSettings("environments")`), where a
-scope is chosen. Its `title` and `aria-label` name the scope.
+`#scopeButton`, `data-scope` the scope chosen, "" for none) with the `scope` icon (18px, in
+`.scope-icon`) and the scope chosen (`.scope-name`, mono 11px, cut with an ellipsis), 6px apart, padded
+`0 6px`, at most 160px wide; `--muted`, `--fg` on hover. A click opens Settings on Environments
+(`openSettings("environments")`), where a scope is chosen. Its `title` and `aria-label` name the scope
+(`Scope: stage. Choose a scope`).
+
+**No scope chosen** (`.scope-button.none`): no words, the icon alone, greyed out as a disabled field
+is (opacity .5: it still opens the choice), with an alert badge over the icon's top right corner. Its
+`title` and `aria-label` say it: `No scope chosen: choose one`.
+
+| Part | Look |
+|---|---|
+| `.scope-icon` | The icon's box (18×18), which the badge is placed on; greyed out with it |
+| `.scope-alert` | `!` (`aria-hidden`: the button's name says it), a 10×10 square, mono 10px/10px 600, centred, `--bg` on `--muted` (`--fg` as the button is pointed at or focused, as its icon turns); 6px up and 6px right of the icon's corner, so it sits clear of the icon's lines |
 
 ### Scrollbars
 
@@ -772,3 +791,83 @@ on). Its placeholder says what it searches ("Search by name or date").
 | `search` | `<circle cx="7.75" cy="7.75" r="4.75"/><path d="M11.25 11.25l4.25 4.25"/>` | A search field |
 | `bell` | `<path d="M4.5 13V8.5a4.5 4.5 0 0 1 9 0V13l1.5 1.5H3z"/><path d="M7.5 16h3"/>` | Notifications |
 
+
+### Toasts under the top bars
+
+`<Toasts anchor="scroller" />`: with an `anchor` (an element's id), the toasts sit at that element's
+top right, 8px in (16px from its right edge), instead of the window's: the app anchors them to the
+thread (`#scroller`), which starts under the top bar and ends at the panel, so a toast never covers
+the top bar's, the panel's, a dock's or the message box's controls (the panel's back and ×
+especially). Where the panel overlays the thread (small screens) and leaves it too narrow for one
+(less than 240px), they take the thread's whole width under the top bar. While a modal is open they
+go back to the window's top right (over the backdrop, above the modal, as before). Width, look and
+motion are unchanged.
+
+### Console when empty
+
+An open console with no lines (none written yet, or all cleared, or all hidden) shows a note in
+place of the log (`.note.console-empty`, `No lines yet: what the app does is logged here.`),
+centred, 14px above and below, and its body is as tall as the note, not `--console-h`; its top edge
+doesn't resize it (as the timeline's empty state).
+
+### Message box problems
+
+- **Known before sending:** the provider the message would go to has a problem the app can see (its
+  fixtures can't be read, name one twice, or name one the folder hasn't got; a provider plugin that
+  isn't there). It's said only in the panel, by the provider, under its fixtures
+  (`.hint.error.fixtures-hint#convFixturesProblem`, `role="alert"`: `<provider>: <the problem>`, then
+  `edit the provider`, an `.inline-link` to Settings → Providers, `#convFixturesFix`), in place of the
+  fixtures' own line for the same thing (a list that names one twice, or can't be read); not under the
+  box, nor in the top bar. Send is off meanwhile, its `title` the reason (`Can't send: …`).
+- **Refused when sent:** under the message box (`footer.composer`), in the place of a field's problem
+  (`.hint.error.field-problem#sendProblem`, `role="alert"`): the engine refused the message before
+  sending it (a provider that can't load), and the message is put back in the box (unless something
+  else has been typed since). A message that was sent stays in the thread as a turn, whatever happened
+  to it.
+
+### Settings: the head stays, and unsaved edits are asked about
+
+- The content's head (`.settings-content-head`: the title, its count and `clear all`) stays at the
+  top of the content as it scrolls (`position: sticky`, on `--bg`), so the close button, which sits
+  over the head's right end, never floats over a field.
+- A pane can say that leaving would lose something (`guardSettings(fn)`: `fn()` returns a question,
+  or nothing): Settings → Providers' YAML when it doesn't parse. Closing (×, Esc, the backdrop),
+  another option, or the pane's own back is refused the first time: the close button turns into
+  `discard edits?` (a ghost button in `--danger`, as a ConfirmButton asking), and the pane says why
+  under the field. Trying again goes ahead. Changing the text asks again next time.
+
+### New suite form
+
+The Suites section's `+` (`#newSuite`) doesn't make a file at once: it opens a row at the top of the
+section's body (`form.controls.new-suite-form#newSuiteForm`, above the search): an `.input.grow`
+(`#newSuiteName`, 28px as the search field, its placeholder the next free name: `tests`, then
+`tests-2`), and `add` (`.btn`, 28px, submits); under it a `.hint` with the file it makes and the
+provider it will use (`tests.hafen.yml · provider mock`: the conversation's, else the one used last,
+else the first). Enter adds, Esc (or `+` again) closes it. A name that won't do says why under it
+(`.hint.error.field-problem`), as Save as test's Suite name does; an empty name takes the
+placeholder's.
+
+### List rows: the count is cut first
+
+In the Suites list a suite's row size (`2 tests · 1 failed`) is cut, with an ellipsis, before its name is:
+the name keeps its width first (`.list-open` `flex: 1 1 auto`), the size gives way first (`flex-shrink`
+1000, at least 5 characters wide). Its full text is in the row's `title`.
+
+### The thread's first step
+
+With nothing open yet, the thread's note (`.empty#threadEmpty`) has a primary button under it, 14px
+below (`#threadOpenFolder`, `Open a folder`, or `Open files` in a browser that can't open folders),
+that opens the folder picker; the Suites section's note has the same as a link in its text
+(`#suitesOpenFolder`, `.btn.btn-ghost.inline-link`). The panel's `add one` (a provider) reads `open a
+folder` until a folder is open, and opens the picker.
+
+### Key = value rows
+
+What a scope keeps (Settings → Environments and Secrets) is a `.settings-list` of `.settings-row`s, one
+per name: the name (`.settings-row-name`) over a `.hint` (how a file uses it: `{{env.base_url}}`, and
+whether the open files use it), its value in an `.input` (plain for an environment's value, a password
+field for a secret's, never shown), and the row's own actions: `save` (a secret's), then `×` or
+`forget` as ConfirmButtons. Under the list, the add form (`.controls`: a name, a value, `add`), then a
+`.controls` row of what moves the whole list: `Import .env` (a `.btn` that opens the file picker, a
+hidden `<input type="file">`), `Export .env`, and the scope's own delete. A name the open files use
+that has no value yet has a row too, its hint `not set` in `--danger`.

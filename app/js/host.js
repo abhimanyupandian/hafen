@@ -1,6 +1,6 @@
 // The engine, from the page: in the desktop app, a port to its utility process (desktop/engine-host.js,
 // which runs the engine in Node, as CI does); in a browser, a Web Worker (worker.js). Either way the
-// same commands and events (engine/serve-port.js).
+// same commands and events (hafen/engine/serve-port.js).
 //
 //   const engine = await connectEngine();
 //   await engine.call("open", { root }) → { suites, providers }

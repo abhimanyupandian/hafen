@@ -1,10 +1,10 @@
-// The engine in the browser build: a Web Worker running engine/serve-port.js (research §5), so a long
+// The engine in the browser build: a Web Worker running hafen/engine/serve-port.js (research §5), so a long
 // run never blocks the page. Files come from a folder the user opened (the File System Access API) or
 // from files opened one at a time (kept in memory, downloaded when saved); calls go straight to the
-// endpoint, or through the relay when the app was served by `hafen serve`.
+// endpoint, or through the relay when the app was served by `npm run serve` (server/serve.js).
 
-import { servePort } from "../../engine/serve-port.js";
-import { fetchTransport } from "../../engine/transport.js";
+import { servePort } from "hafen/engine/serve-port.js";
+import { fetchTransport } from "hafen/engine/transport.js";
 
 const VERSION = "0.1.0";
 
@@ -16,7 +16,7 @@ servePort(
   async ({ handle = null, files = {}, relay = null, secrets = {} }) => browserHost({ handle, files, relay, secrets }),
 );
 
-// What the desktop app's host (cli/node-host.js) doesn't list either
+// What the desktop app's host (hafen/cli/node-host.js) doesn't list either
 const SKIP = new Set(["node_modules", ".git", ".hafen", "dist", "release"]);
 
 function browserHost({ handle, files, relay, secrets }) {

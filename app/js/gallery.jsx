@@ -43,7 +43,8 @@ function Gallery() {
           <ConfirmButton className="btn btn-ghost" label="×" question="delete" onConfirm={() => {}} />
           <button className="btn btn-icon" type="button" aria-label="Add"><Icon name="plus" /></button>
           <button className="btn btn-ghost btn-icon" type="button" aria-label="Settings"><Icon name="settings" /></button>
-          <button className="btn btn-ghost scope-button" type="button" aria-label="Scope: stage"><Icon name="scope" /><span className="scope-name">stage</span></button>
+          <button className="btn btn-ghost scope-button" type="button" aria-label="Scope: stage"><span className="scope-icon"><Icon name="scope" /></span><span className="scope-name">stage</span></button>
+          <button className="btn btn-ghost scope-button none" type="button" aria-label="No scope chosen: choose one"><span className="scope-icon"><Icon name="scope" /><span className="scope-alert" aria-hidden="true">!</span></span></button>
           <button className="btn" type="button" disabled>disabled</button>
         </div>
       </section>
@@ -118,7 +119,7 @@ function Gallery() {
             <div className="palette-item" tabIndex={0}><span className="block-label"><Icon name="check" size={16} /><span className="label">Path</span></span><span className="palette-text">A field of the response, by JSONPath, against a value</span></div>
           </div>
         </div>
-        <div className="row">{["suite", "test", "check", "provider", "timeline", "run", "plus", "copy", "maximize", "settings", "scope", "sidebar", "menu", "close", "import", "back"].map((n) => <Icon key={n} name={n} />)}</div>
+        <div className="row">{["suite", "test", "check", "fail", "provider", "timeline", "run", "plus", "copy", "maximize", "settings", "scope", "sidebar", "menu", "close", "import", "back"].map((n) => <Icon key={n} name={n} />)}</div>
       </section>
       <section id="g-check-cards">
         <h2 className="label">Check cards</h2>

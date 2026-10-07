@@ -19,7 +19,7 @@ adds it to the list.
   "ended": 1791191003120,
   "ms": 72120,
   "status": "done",                  // running | done | error | stopped | interrupted
-  "verdict": "failed",               // passed | failed | unsure | null
+  "verdict": "failed",               // passed | failed | unsure | null (stopped: failed if a test failed before the stop, else null)
   "where": { "app": "cli", "version": "0.2.0", "os": "linux", "node": "22.11.0" },
   "suites": [{ "file": "tests/support/refund.hafen.yml", "name": "Support bot · refunds", "sha256": "…" }],
   "settings": { "env": "staging", "filters": { "tag": ["smoke"] }, "unsure": "warn", "network": null, "until_turn": null, "only_turn": null, "redact": ["headers", "secrets"] },
@@ -30,7 +30,8 @@ adds it to the list.
   "reviews": [],
   "baseline": null,
   "stopped": null,                   // why, when status is stopped ("the run's cost reached the limit ($2)")
-  "error": null                      // { message, file?, line?, column?, all: [every problem] } when status is error
+  "error": null,                     // { message, file?, line?, column?, all: [every problem] } when status is error
+  "fixtures": []                     // each provider fixture that ran: { name, phase, provider?, test?, status, ms, provides, calls, error? }
 }
 ```
 
@@ -118,7 +119,7 @@ id, or name).
 ```jsonc
 {
   "suite": "tests/support/refund.hafen.yml", "id": "t_8f2k1q9z", "name": "refund for a broken item", "index": 0,
-  "status": "passed",                // passed | failed | error | skipped | stopped
+  "status": "passed",                // passed | failed | error | skipped | stopped (cut short by the run's stop before it had failed)
   "passed": 2, "total": 3, "accuracy": 0.667, "unsure": false,
   "settings": { "repeat": 3, "pass_rate": 0.67, "history": "live", "on_fail": "continue", "unsure": "warn" },
   "instances": [{ "repeat": 1, "row": null, "status": "passed", "turns": [0, 1], "results": [ … ], "conversation_results": [ … ] }]
@@ -152,9 +153,11 @@ id, or name).
 ## Redaction
 
 Applied before a span or turn is stored or written ([research §21](../research.md#21-redaction)):
-secret headers become `"[redacted]"`; every resolved `${env:…}` value is replaced with
-`"[redacted]"` wherever it appears (request, response, events, variables, reasons); the suite's
-`redact.patterns` replace matches with `"[email]"`, `"[card]"`, `"[phone]"`. The run records which
+secret headers become `"[redacted]"`; every resolved secret's value (4 characters or more) is
+replaced with `"[redacted]"` wherever it appears (request, response, events, variables, reasons), as
+it is and JSON-escaped, URL- or form-encoded, or in base64, and in a raw stream as the text its chunks
+join into; the suite's `redact.patterns` replace matches with `"[email]"`, `"[card]"` (Luhn-valid,
+starting 2–6), `"[phone]"` (7–15 digits after `+` or in groups; never an IP, a port, a date or hex). The run records which
 rules applied (`settings.redact`).
 
 ## Reviews

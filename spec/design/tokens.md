@@ -10,7 +10,8 @@ The theme is `<html data-theme="light|dark">`. Light is `:root` (tokens.css:4–
 it under `:root[data-theme="dark"]` (tokens.css:39–54). Each sets `color-scheme` to match, so
 native controls and scrollbars follow.
 
-The user picks Light (the default), Dark, or As the system's (Settings → Appearance), kept in
+The user picks Light, Dark, or As the system's (the default: a first visit follows the system) in
+Settings → Appearance, kept in
 localStorage as `<app>.theme` (`hafen.theme` in hafen). An inline script in each page's `<head>`
 applies it before the page draws; `lib/prefs.js` keeps it in step afterwards (other tabs, the
 system changing) and emits `theme:changed`.

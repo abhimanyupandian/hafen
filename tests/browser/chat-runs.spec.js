@@ -4,7 +4,7 @@
 // runs at once (tests at once in a run; several runs going on).
 
 import { parse } from "yaml";
-import { chooseScope, expect, fileText, test } from "./fixtures.js";
+import { addScope, expect, fileText, test } from "./fixtures.js";
 
 const SUITE = "smoke.hafen.yml";
 const openTest = (page, name) => page.locator("#suiteList .list-open", { hasText: name }).first().click();
@@ -103,7 +103,7 @@ test("the console is an audit log: engine calls, HTTP calls, settings and events
   await page.press("#testName", "Enter");
   await page.click("#testRun");
   await expect(page.locator("#status")).toContainText(/failed|passed/);
-  await chooseScope(page, "local");
+  await addScope(page, "local");
   await page.click("#openSettings");
   await page.click("#settings-tab-secrets");
   await page.fill("#secretName", "SHOP_TOKEN");
@@ -123,7 +123,8 @@ test("the console is an audit log: engine calls, HTTP calls, settings and events
     /run\.turn .*turn=2/,
     /run\.test .*test="renamed for the log"/,
     /engine\.run .*result="failed 0\/1"/,
-    /config\.secret .*name=SHOP_TOKEN env=every action=set/,
+    // (Secrets opens on the scope chosen)
+    /config\.secret .*name=SHOP_TOKEN env=local action=set/,
   ]) expect(text).toMatch(line);
   expect(text).not.toContain("SECRET123");
   expect(text).not.toContain("VALUE-NOT-LOGGED");
@@ -200,6 +201,7 @@ test("groups: a run's tests in different groups go at once (none: one after anot
     await expect.poll(async () => parse(await fileText(page, SUITE)).tests.find((t) => t.name === name)?.group).toBe(group);
   }
   await page.click("#newSuite");
+  await page.press("#newSuiteName", "Enter");  // (+ asks for a name: the one it offers)
   await expect(page.locator('#suiteList .list-row[data-file="tests.hafen.yml"]')).toHaveCount(1);
   expect(parse(await fileText(page, "tests.hafen.yml")).environments).toEqual(parse(await fileText(page, SUITE)).environments);
   // Both suites at once

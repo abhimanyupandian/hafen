@@ -171,7 +171,10 @@ test("Secrets keeps any number of values under names of your own", async ({ app:
   await page.fill("#secretValue", "x");
   await page.click("#secretAdd button[type=submit]");
   await expect(page.locator("#secretsError")).toContainText("doesn't start with a digit");
-  await page.locator("#secret-SHOP_TOKEN button", { hasText: "forget" }).click();
+  // (forgetting asks first)
+  await page.click("#secret-SHOP_TOKEN-forget");
+  await expect(page.locator("#secret-SHOP_TOKEN")).toHaveCount(1);
+  await page.click("#secret-SHOP_TOKEN-forget");
   await expect(page.locator("#secret-SHOP_TOKEN")).toHaveCount(0);
 });
 
@@ -191,7 +194,7 @@ test("a new provider in Settings lists every kind; Ollama starts as a working fi
   await page.click("#newProvider");
   await expect(page.locator("#newProviderForm")).toBeVisible();
   const kinds = await page.locator("#newProviderKind option").allTextContents();
-  expect(kinds).toEqual(["Ollama", "OpenAI chat completions", "OpenAI responses", "Anthropic messages", "Gemini", "HTTP endpoint · one JSON reply", "HTTP endpoint · streamed (SSE)", "HTTP endpoint · streamed (JSON lines)", "WebSocket"]);
+  expect(kinds).toEqual(["Ollama", "OpenAI chat completions", "OpenAI responses", "Anthropic messages", "Gemini", "HTTP endpoint · one JSON reply", "HTTP endpoint · streamed (SSE)", "HTTP endpoint · streamed (JSON lines)", "WebSocket", "A2A agent"]);
   await expect(page.locator("#newProviderName")).toHaveValue("ollama");
   await expect(page.locator("#newProviderModel")).toHaveAttribute("placeholder", "gemma4");
   await page.selectOption("#newProviderKind", "anthropic-messages");
@@ -264,6 +267,9 @@ test("Connection → System One keeps JEV_API_KEY, for every environment", async
   await expect(page.locator("#secretsError")).toContainText("System One");
   expect(await page.evaluate(() => JSON.parse(localStorage.getItem("eval.secrets"))[""].JEV_API_KEY)).toBe("jev-test-key");
   await page.click("#settings-tab-systemone");
+  // (forgetting asks first)
+  await page.click("#systemoneForget");
+  await expect(page.locator("#systemoneKeyState")).toHaveText("set");
   await page.click("#systemoneForget");
   await expect(page.locator("#systemoneKeyState")).toHaveText("not set");
 });
@@ -291,8 +297,10 @@ test("collapsed, the sidebar shows its sections as icons; one opens it on that s
 test("+ adds a new suite each time; a suite's own + adds a test to it", async ({ app: { page } }) => {
   await page.click("#openFolder");
   await page.click("#newSuite");
+  await page.press("#newSuiteName", "Enter");  // (+ asks for a name: the one it offers)
   await expect(page.locator('#suiteList .list-row[data-file="tests.hafen.yml"]')).toHaveCount(1);
   await page.click("#newSuite");
+  await page.press("#newSuiteName", "Enter");  // (+ asks for a name: the one it offers)
   await expect(page.locator('#suiteList .list-row[data-file="tests-2.hafen.yml"]')).toHaveCount(1);
   expect(await fileText(page, "tests-2.hafen.yml")).toContain("name: New test");
   await expect(page.locator("#evalTitle")).toHaveText("New test");

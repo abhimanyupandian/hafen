@@ -1,10 +1,12 @@
 // The settings modal's panes (contracts/ui.md, Settings): Storage → Runs; Connection → Providers,
-// System One, and Relay in the browser build; Configurations → Secrets; App → Appearance.
+// System One, and Relay in the browser build; Configurations → Environments, Secrets and Plugins;
+// App → Appearance and Notifications.
 
 import { useEffect, useRef, useState } from "react";
+import { ConfirmButton } from "../design/confirm.jsx";
 import { useEvent, useStore } from "../design/hooks.js";
 import { Select } from "../design/select.jsx";
-import { isApp, invoke } from "../lib/app.js";
+import { isApp } from "../lib/app.js";
 import { sec, when } from "../lib/format.js";
 import * as idb from "../lib/idb.js";
 import * as prefs from "../lib/prefs.js";
@@ -12,88 +14,57 @@ import { KEYS, store } from "../lib/store.js";
 import { audit } from "../lib/audit.js";
 import { askSystemPermission, notifySettings, onNotifySettings, setNotifySettings, systemPermission, tryNotification } from "../lib/notifications.js";
 import { notify } from "../design/toast.jsx";
-import { app, clearConversations, clearRuns, deleteConversation, deleteRun, engineCall, reconfigure, refreshSecrets, scopeNames } from "../state.js";
-import { EnvironmentsPane } from "./environments.jsx";
+import { app, clearConversations, clearRuns, deleteConversation, deleteRun, exportSecrets, keepSecrets, reconfigure, scopeNames } from "../state.js";
+import { fixturesOf } from "hafen/engine/fixture-lists.js";
+import { secretNames as storedSecretNames, SECRET_NAME, SECRET_RULE } from "../lib/scope-store.js";
+import { EnvironmentsPane, readEnvFile } from "./environments.jsx";
+import { usedNames } from "./references.js";
 import { PluginsPane } from "./plugins.jsx";
 import { ProvidersPane } from "./providers.jsx";
 
 const bytes = (value) => new Blob([JSON.stringify(value)]).size;
-const NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const JEV = "JEV_API_KEY";  // System One's key: its own pane, not Secrets
-const DEFAULT_KEYS = { "openai-chat": "OPENAI_API_KEY", "openai-responses": "OPENAI_API_KEY", "anthropic-messages": "ANTHROPIC_API_KEY", gemini: "GEMINI_API_KEY" };
 
-// Every ${env:NAME} the open suites and providers name, and the presets' default keys
-function secretNames(suites, providers) {
-  const names = new Set();
-  const scan = (value) => { for (const m of JSON.stringify(value ?? {}).matchAll(/\$\{env:([A-Za-z_][A-Za-z0-9_]*)\}/g)) names.add(m[1]); };
-  for (const s of suites) {
-    scan(s.data);
-    for (const p of Object.values(s.providers ?? {})) {
-      scan(p);
-      if (DEFAULT_KEYS[p.kind] && p.api_key === undefined) names.add(DEFAULT_KEYS[p.kind]);
-    }
-  }
-  for (const p of providers) {
-    scan(p.config);
-    if (DEFAULT_KEYS[p.config?.kind] && p.config?.api_key === undefined) names.add(DEFAULT_KEYS[p.config.kind]);
-  }
-  return [...names].sort();
-}
-
-// The names the open providers' fixtures give (a login's cookie): set when a run starts, not here.
-// Their plugins are loaded (as Settings → Plugins does) only when a provider names a fixture.
-function useFixtureNames(state, suites, providers) {
-  const [given, setGiven] = useState([]);
+// The names the open providers' fixtures give before their requests (beforeAll's and before's: a
+// login's cookie, say): set when a run starts, not here. What each gives is what the folder's plugins
+// say they provide.
+function fixtureNames({ plugins = [] }, suites, providers) {
   const configs = [...suites.flatMap((s) => Object.values(s.providers ?? {})), ...providers.map((p) => p.config)];
-  const fixtures = [...new Set(configs.map((c) => (typeof c?.fixture === "string" ? c.fixture.split("@")[0] : null)).filter(Boolean))];
-  const key = fixtures.join(",");
-  useEffect(() => {
-    if (!state.opened || !fixtures.length) {
-      setGiven([]);
-      return;
-    }
-    engineCall("plugins", {}).then((list) => setGiven(list.filter((p) => p.meta?.kind === "fixture" && fixtures.includes(p.meta.name)).flatMap((p) => p.meta.provides ?? [])), () => setGiven([]));
-  }, [state.opened, key]);
-  return given;
+  const named = new Set(configs.flatMap((c) => {
+    const lists = fixturesOf(c);
+    return [...lists.beforeAll, ...lists.before].map((ref) => ref.name);
+  }));
+  return plugins.filter((p) => p.kind === "fixture" && named.has(p.name)).flatMap((p) => p.provides ?? []);
 }
 
-// Which secret names have a value in `env` ("" holds values for every environment): { NAME: true }
+// Which secret names have a value in `env` ("" holds values for every scope): { NAME: true }
 async function storedNames(env) {
-  if (isApp) return (await invoke("secrets_list", { env })) ?? {};
-  return Object.fromEntries(Object.keys(store.getJSON(KEYS.secrets, {})[env] ?? {}).map((n) => [n, true]));
+  return Object.fromEntries((await storedSecretNames(env)).map((n) => [n, true]));
 }
 
 // Keep a secret's value ("" forgets it): encrypted by the desktop app, or in this browser's storage
 async function keepSecret(env, name, value) {
-  if (!NAME.test(name)) throw new Error("A secret's name is letters, digits and _, and doesn't start with a digit.");
-  // (Its name and environment only: never its value)
-  audit("config.secret", { name, env: env || "every", action: value ? "set" : "forget" });
-  if (isApp) {
-    await invoke("secrets_set", { env, name, value });
-    await refreshSecrets();
-    return;
-  }
-  const all = store.getJSON(KEYS.secrets, {});
-  all[env] = { ...(all[env] ?? {}) };
-  if (value) all[env][name] = value;
-  else delete all[env][name];
-  store.setJSON(KEYS.secrets, all);
-  await reconfigure();
-  await refreshSecrets();
+  if (!SECRET_NAME.test(name)) throw new Error(SECRET_RULE);
+  await keepSecrets(env, { [name]: value });
 }
 
+// Settings → Secrets: a scope's secrets (or every scope's), by name; never shown once kept. The files
+// use one as {{secret.NAME}}. The scopes are the ones made in Environments.
 function SecretsPane() {
-  const { suites, providers } = useStore(app);
   const state = useStore(app);
+  const { suites, providers } = state;
   const envs = scopeNames(state);
-  const [env, setEnv] = useState("");  // every scope, unless one is chosen
-  const [set, setSet] = useState({});  // name -> "here" (a value for this environment) or "all" (for every one)
+  const [env, setEnv] = useState(state.env ?? "");  // the scope chosen, else every scope
+  const [set, setSet] = useState({});  // name -> "here" (a value for this scope) or "all" (for every one)
   const [error, setError] = useState("");
-  const given = useFixtureNames(state, suites, providers);
-  const referenced = secretNames(suites, providers).filter((n) => !given.includes(n));
+  const fileRef = useRef(null);
+  const given = fixtureNames(state, suites, providers);
+  const used = usedNames(state);
+  const referenced = [...used.secret].filter((n) => !given.includes(n));
   // The names the files use, and every name that has a value (your own ones included)
   // (System One's key is in its own pane, Connection → System One)
   const names = [...new Set([...referenced, ...Object.keys(set)])].filter((n) => n !== JEV).sort();
+  const file = `${env || "every-scope"}.secret.env`;
   const read = async () => {
     try {
       const all = env ? await storedNames("") : {};
@@ -103,12 +74,13 @@ function SecretsPane() {
       setError(err.message);
     }
   };
-  useEffect(() => { read(); }, [env]);
-  const save = async (name, value) => {
+  // (read again when the scopes' secrets change: a scope deleted or renamed in Environments)
+  useEffect(() => { read(); }, [env, state.secretScopes.join(), JSON.stringify(state.scopeSecrets)]);
+  useEffect(() => { if (env && !envs.includes(env)) setEnv(""); }, [envs.join()]);
+  const act = async (work) => {
     setError("");
     try {
-      if (name === JEV) throw new Error("JEV_API_KEY is System One's key: set it in Connection → System One.");
-      await keepSecret(env, name, value);
+      await work();
       await read();
       return true;
     } catch (err) {
@@ -116,26 +88,46 @@ function SecretsPane() {
       return false;
     }
   };
+  const save = (name, value) => act(async () => {
+    if (name === JEV) throw new Error("JEV_API_KEY is System One's key: set it in Connection → System One.");
+    await keepSecret(env, name, value);
+  });
   return (
     <>
       <p className="note">{isApp
-        ? "The values your suites reference as ${env:NAME}, kept encrypted by the system (the keychain on macOS). They never go in your files, runs or reports. A name with no value here uses the environment variable the app was started with, if there is one."
-        : "The values your suites reference as ${env:NAME}. In the browser build they're kept in this browser's storage, unencrypted: use the desktop app for keys that matter."}</p>
-      {envs.length > 0 && (
-        <>
-          <div className="field-head"><label className="hint" htmlFor="secretsEnv">Scope</label></div>
-          <label className="select"><Select id="secretsEnv" value={env} options={[["", "every scope"], ...envs.map((e) => [e, e])]} onChange={(e) => setEnv(e.target.value)} /></label>
-        </>
-      )}
+        ? "Each scope's secrets (keys, tokens, passwords), as the command line's --secret files hold them; a value kept for every scope applies where a scope has none of its own. Files use one as {{secret.NAME}}. They're kept encrypted by the system (the keychain on macOS), never in your files, runs or reports, and never shown here once kept. A name with no value here uses the environment variable the app was started with, if there is one."
+        : "Each scope's secrets (keys, tokens, passwords), as the command line's --secret files hold them; a value kept for every scope applies where a scope has none of its own. Files use one as {{secret.NAME}}. In the browser build they're kept in this browser's storage, unencrypted: use the desktop app for keys that matter."}</p>
+      <div className="field-head"><label className="hint" htmlFor="secretsEnv">Scope</label>{env && env === state.env && <span className="hint" id="secretsChosen">chosen now</span>}</div>
+      <label className="select"><Select id="secretsEnv" value={env} options={[["", "every scope"], ...envs.map((e) => [e, e])]} onChange={(e) => { setEnv(e.target.value); setError(""); }} /></label>
       <p className="hint error" id="secretsError" role="alert" hidden={!error}>{error}</p>
       {names.length ? (
         <ul className="list settings-list" id="secretsList" aria-label="Secrets">
           {names.map((name) => <SecretRow key={`${env}-${name}`} name={name} kept={set[name]} used={referenced.includes(name)} onSave={(v) => save(name, v)} />)}
         </ul>
-      ) : <p className="note placeholder" id="secretsEmpty">The open suites don't reference any secrets yet.</p>}
+      ) : <p className="note placeholder" id="secretsEmpty">The open files don't use any secrets yet.</p>}
       {given.length > 0 && <p className="hint" id="secretsFromFixtures">{`Given by a provider's fixture when a run starts, so not set here: ${[...new Set(given)].sort().join(", ")}`}</p>}
       <AddSecret onSave={save} />
-      <p className="hint">{"Use one in a suite or provider as ${env:NAME}. In CI, set them as the job's environment variables."}</p>
+      <div className="controls">
+        <button className="btn" id="secretsImport" type="button" onClick={() => fileRef.current?.click()}>Import .env</button>
+        <ConfirmButton className="btn" id="secretsExport" label="Export .env" question="write them in plain text?" disabled={!Object.keys(set).length}
+                       onConfirm={() => act(() => exportSecrets(env))} />
+      </div>
+      <input ref={fileRef} id="secretsImportFile" type="file" accept=".env,text/plain" hidden onChange={async (e) => {
+        const picked = e.target.files?.[0];
+        e.target.value = "";
+        if (!picked) return;
+        let count = 0;
+        const ok = await act(async () => {
+          const values = readEnvFile(await picked.text(), picked.name);
+          if (JEV in values) throw new Error(`${picked.name}: JEV_API_KEY is System One's key: set it in Connection → System One. Nothing was changed.`);
+          const kept = Object.fromEntries(Object.entries(values).filter(([, v]) => v !== ""));
+          await keepSecrets(env, kept, { action: "import" });
+          count = Object.keys(kept).length;
+        });
+        if (ok) notify({ title: `Imported ${count} secret${count === 1 ? "" : "s"} into ${env || "every scope"}`, text: picked.name, kind: "ok" });
+      }} />
+      <p className="hint" id="secretsExportHint">{`Export writes ${file}: ${env ? "this scope's secrets, and the ones kept for every scope," : "the secrets kept for every scope,"} in plain text. Keep it out of version control.`}</p>
+      <p className="hint">{`Use one in a suite, a provider or a message as {{secret.NAME}}. In CI: run with --secret ${file} (Export writes it), or set them as the job's environment variables.`}</p>
     </>
   );
 }
@@ -152,7 +144,7 @@ function SecretRow({ name, kept, used, onSave }) {
       </div>
       <input className="input" type="password" aria-label={`Value of ${name}`} placeholder={isSet ? "a new value" : "its value"} value={value} onChange={(e) => setValue(e.target.value)} style={{ width: 200 }} />
       <button className="btn" type="button" disabled={!value} onClick={async () => { if (await onSave(value)) setValue(""); }}>save</button>
-      {kept === "here" && <button className="btn btn-ghost" type="button" onClick={() => onSave("")}>forget</button>}
+      {kept === "here" && <ConfirmButton className="btn btn-ghost" id={`secret-${name}-forget`} label="forget" question="forget it?" onConfirm={() => onSave("")} />}
     </li>
   );
 }
@@ -215,7 +207,7 @@ function SystemOnePane() {
       <form className="controls" id="systemoneForm" onSubmit={(e) => { e.preventDefault(); if (value) save(value); }}>
         <input className="input grow" id="systemoneKey" type="password" autoComplete="off" placeholder={isSet ? "a new key" : "your System One key"} value={value} onChange={(e) => setValue(e.target.value)} />
         <button className="btn" id="systemoneSave" type="submit" disabled={!value}>save</button>
-        {isSet && <button className="btn btn-ghost" id="systemoneForget" type="button" onClick={() => save("")}>forget</button>}
+        {isSet && <ConfirmButton className="btn btn-ghost" id="systemoneForget" label="forget" question="forget it?" onConfirm={() => save("")} />}
       </form>
       <p className="hint error" id="systemoneError" role="alert" hidden={!error}>{error}</p>
       <p className="hint">{"The systemone.noul, systemone.choice and systemone.score checks use it in every environment, unless a suite's judge names another key. They call https://api.typesafe.ai with the model jev-latest, unless the judge says otherwise. In CI, set JEV_API_KEY as the job's environment variable."}</p>
@@ -235,7 +227,7 @@ function RelayPane() {
       const body = await res.json();
       setStatus({ ok: true, text: `The relay answers, allowing ${body.endpoints} endpoint prefix${body.endpoints === 1 ? "" : "es"}.` });
     } catch {
-      setStatus({ ok: false, text: "No relay answers there. Start one: npx hafen serve --allow-endpoint <url>" });
+      setStatus({ ok: false, text: "No relay answers there. Start one in Hafen's folder: npm run serve -- --allow-endpoint <url>" });
     }
   };
   useEffect(() => { check(relay); }, [relay]);
@@ -359,15 +351,15 @@ export function panes() {
         ? "TypeSafe's System One (Jev) judges replies against your questions. Its key is kept encrypted by the system, with your other secrets, and never goes in your files, runs or reports."
         : "TypeSafe's System One (Jev) judges replies against your questions. In the browser build its key is kept in this browser's storage, unencrypted: use the desktop app for keys that matter.",
     },
-    !isApp && { id: "relay", group: "Connection", label: "Relay", title: "Relay", description: "In a browser, an endpoint that doesn't allow web pages to call it can be reached through Hafen's relay (npx hafen serve). When the app is served by the relay, it's used by itself.", Body: RelayPane },
+    !isApp && { id: "relay", group: "Connection", label: "Relay", title: "Relay", description: "In a browser, an endpoint that doesn't allow web pages to call it can be reached through Hafen's relay (npm run serve, in Hafen's folder). When the app is served by the relay, it's used by itself.", Body: RelayPane },
     {
       id: "environments", group: "Configurations", label: "Environments", title: "Environments", Body: EnvironmentsPane,
-      description: "Each scope's plain variables (stage, prod…), kept as plain YAML in the open folder: environments/<scope>.yml. Any field takes one as {{scope.NAME}}, for the scope chosen here: the scope button at the top of the sidebar opens this pane.",
+      description: "Your scopes (stage, prod…) and each one's environment values, kept by the app as the command line's --env files are: swap between them with the scope button at the top of the sidebar, which opens this pane. Any field takes a value as {{env.NAME}}, for the scope chosen. A scope's secrets are in Secrets.",
     },
     { id: "secrets", group: "Configurations", label: "Secrets", title: "Secrets", Body: SecretsPane },
     {
       id: "plugins", group: "Configurations", label: "Plugins", title: "Plugins", Body: PluginsPane,
-      description: "Plugins add what configuration can't describe: a provider, a check, a judge, or a fixture that logs in first. Each is an ES module in the folder's plugins/ (or one a suite names: plugins: [./lib/acme.js]), and it can import any other file or package. The command line runs them as the app does.",
+      description: "Plugins add what configuration can't describe: a provider, a check, a judge, or a fixture that logs in first.",
     },
     { id: "appearance", group: "App", label: "Appearance", title: "Appearance", Body: AppearancePane },
     { id: "notifications", group: "App", label: "Notifications", title: "Notifications", Body: NotificationsPane },

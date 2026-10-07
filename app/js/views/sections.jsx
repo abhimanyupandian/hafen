@@ -1,7 +1,7 @@
 // The sidebar's sections (contracts/ui.md, Sidebar): Suites (a tree of suites, tests and turns), Runs,
 // and Checks (palette cards, by group, that add a check to the selected turn). Providers are in Settings.
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { GroupBadge, RepeatBadge, Spinner } from "../design/badges.jsx";
 import { NavSection } from "../design/collapsible.jsx";
 import { ConfirmButton } from "../design/confirm.jsx";
@@ -16,8 +16,8 @@ import { SearchField } from "../design/search.jsx";
 import { KEYS, store } from "../lib/store.js";
 import { notify } from "../design/toast.jsx";
 import {
-  app, chooseProvider, clearRuns, deleteConversation, deleteFile, deleteRun, deleteTest, deleteTurn, editSuite, importRun, newSuite, newTest, openFiles, openFolder, openRun,
-  openConversation, resetConversation, runForTest, runTests, select, stopRun,
+  app, chooseProvider, clearRuns, deleteConversation, deleteFile, deleteRun, deleteTest, deleteTurn, editSuite, freeSuiteFile, importRun, newSuite, newTest, openFiles, openFolder, openRun,
+  openConversation, problemsOf, providerInUse, resetConversation, runForTest, runTests, select, stopRun, SUITE_NAME,
 } from "../state.js";
 import { CHECK_GROUPS, CHECK_TYPES } from "./check-types.js";
 import { pairTurns, repeatOf, testResult, testStatusText, turnChecksText, turnStatus, turnsOf } from "./derive.js";
@@ -36,12 +36,65 @@ const short = (text, n = 48) => {
   return line.length > n ? `${line.slice(0, n - 1)}…` : line;
 };
 
+// Open a folder (or, in a browser that can't, suite and provider files): the first step, wherever it's
+// offered (the Suites section's note, the thread's)
+export function OpenButton({ id, className, children }) {
+  const input = useRef(null);
+  const folders = isApp || !!window.showDirectoryPicker;
+  return (
+    <>
+      <button className={className} id={id} type="button" onClick={() => (folders ? openFolder() : input.current.click())}>{children ?? (folders ? "Open a folder" : "Open files")}</button>
+      {!folders && <input ref={input} type="file" multiple accept=".yml,.yaml,.json,.csv,.jsonl" hidden onChange={(e) => openFiles([...e.target.files])} />}
+    </>
+  );
+}
+
+// A new suite, named first (as Save as test's Suite name: its file's name, without .hafen.yml; none,
+// the next free one), using the provider in use: + opens it at the top of Suites, Enter adds it, Esc
+// closes it (spec/design/components.md, Additions: New suite form)
+function NewSuiteForm({ onDone }) {
+  const [name, setName] = useState("");
+  const [error, setError] = useState("");
+  const ref = useRef(null);
+  useEffect(() => { ref.current?.focus(); }, []);
+  const typed = name.trim().replace(/\.hafen\.(ya?ml|json)$/i, "");
+  const bad = typed !== "" && !SUITE_NAME.test(typed);
+  const file = typed && !bad ? `${typed}.hafen.yml` : freeSuiteFile();
+  const provider = providerInUse();
+  const add = async (e) => {
+    e.preventDefault();
+    if (bad) return;
+    setError("");
+    try {
+      await newSuite(typed);
+      onDone();
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+  return (
+    <>
+      <form className="controls new-suite-form" id="newSuiteForm" aria-label="New suite" onSubmit={add}>
+        <input className="input grow" id="newSuiteName" ref={ref} type="text" aria-label="The new suite's name" placeholder={freeSuiteFile().replace(/\.hafen\.yml$/, "")}
+               value={name} autoComplete="off" spellCheck={false}
+               onChange={(e) => { setName(e.target.value); setError(""); }}
+               onKeyDown={(e) => { if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); onDone(); } }} />
+        <button className="btn" id="newSuiteAdd" type="submit" disabled={bad}>add</button>
+      </form>
+      {bad || error
+        ? <p className="hint error field-problem new-suite-hint" id="newSuiteProblem" role="alert">{bad ? "A suite's name is letters, digits, '.', '-' and '_' (and '/' for a folder)." : error}</p>
+        : <p className="hint new-suite-hint" id="newSuiteNote">{`${file} · ${provider ? `provider ${provider.name}` : "no provider yet"}`}</p>}
+    </>
+  );
+}
+
 /* ---------- Suites ---------- */
 
 export function SuitesSection() {
   const { suites, opened, selection, lives } = useStore(app);
   const now = useNow();
   const [query, setQuery] = useState("");
+  const [naming, setNaming] = useState(false);  // the new suite form is open
   const words = searchWords(query);
   const [folded, setFolded] = useState(() => store.getJSON(KEYS.collapsed, {}));
   const fileInput = useRef(null);
@@ -87,17 +140,19 @@ export function SuitesSection() {
     const id = `suite-${n}`;
     const key = suiteKey(suite);
     const allTests = suite.data?.tests ?? [];
+    const results = allTests.map((t, i) => testResult(runForTest(suite.file, i), suite.file, t));
     // A search: a suite whose name or file matches shows whole; else only its tests that match (by
-    // name, tags, or when each last ran), opened so they're seen; else it's left out
+    // name, tags, how each last went, failed or stopped, or when it last ran), opened so they're seen;
+    // else it's left out
     const suiteHit = matches(words, { texts: [suiteLabel(suite), suite.file, suite.name] }, now);
     const testHits = words.length && !suiteHit
-      ? allTests.map((t, i) => matches(words, { texts: [t.name, ...(t.tags ?? [])], times: [runForTest(suite.file, i)?.started] }, now))
+      ? allTests.map((t, i) => matches(words, { texts: [t.name, ...(t.tags ?? []), results[i] ? testStatusText(results[i]).text : "not run"], times: [runForTest(suite.file, i)?.started] }, now))
       : allTests.map(() => true);
     if (!suiteHit && !testHits.some(Boolean)) return;
     const open = !folded[key] || (words.length > 0 && !suiteHit);
     const tests = allTests;
-    const problems = suite.errors?.length ?? 0;
-    const results = tests.map((t, i) => testResult(runForTest(suite.file, i), suite.file, t));
+    // (what stops a run of it, as the run itself checks: a check type that isn't one, say)
+    const problems = problemsOf(suite.file).length;
     const failed = results.filter((r) => r && (r.status === "failed" || r.status === "error")).length;
     const label = suiteLabel(suite);
     const last = lastRunAt(suite, tests.map((_, i) => i));
@@ -167,7 +222,8 @@ export function SuitesSection() {
   return (
     <NavSection id="suitesSection" name="suites" label="Suites" bodyId="suitesBody" defaultOpen icon={<Icon name="suite" size={14} />} actions={(sectionOpen) => (
       <>
-        <button id="newSuite" className="btn btn-ghost btn-icon" type="button" aria-label="New suite" title="New suite" disabled={!opened} onClick={() => newSuite().catch(() => {})}>
+        <button id="newSuite" className="btn btn-ghost btn-icon" type="button" aria-label="New suite" aria-expanded={naming} aria-controls="newSuiteForm" title="New suite" disabled={!opened}
+                onClick={() => setNaming(!naming)}>
           <Icon name="plus" />
         </button>
         {/* (opening a folder or files: only while the section's open) */}
@@ -177,9 +233,14 @@ export function SuitesSection() {
         <input ref={fileInput} type="file" multiple accept=".yml,.yaml,.json,.csv,.jsonl" hidden onChange={(e) => openFiles([...e.target.files])} />
       </>
     )}>
-      {suites.length > 0 && <SearchField id="suitesSearch" label="Search suites and tests" value={query} onChange={setQuery} placeholder="Search by name or last run" />}
-      <p className="note placeholder" id="suitesEmpty" hidden={suites.length > 0}>
-        {opened ? "No suites here yet: press + to start one, or add files named *.hafen.yml." : isApp || window.showDirectoryPicker ? "Open a folder with your suites (*.hafen.yml), or press + after opening one to start." : "Open your suite and provider files to start."}
+      {naming && opened && <NewSuiteForm onDone={() => { setNaming(false); document.getElementById("newSuite")?.focus(); }} />}
+      {suites.length > 0 && <SearchField id="suitesSearch" label="Search suites and tests" value={query} onChange={setQuery} placeholder="Search by name, status or last run" />}
+      <p className="note placeholder" id="suitesEmpty" hidden={suites.length > 0 || naming}>
+        {opened
+          ? "No suites here yet: press + to start one, or add files named *.hafen.yml."
+          : isApp || window.showDirectoryPicker
+            ? <><OpenButton id="suitesOpenFolder" className="btn btn-ghost inline-link" />{" with your suites (*.hafen.yml) to start."}</>
+            : <><OpenButton id="suitesOpenFolder" className="btn btn-ghost inline-link" />{": your suite and provider files, to start."}</>}
       </p>
       {suites.length > 0 && words.length > 0 && !rows.length && <p className="note placeholder" id="suitesNoMatch">{`No suite or test matches “${query.trim()}”.`}</p>}
       <List id="suiteList" aria-label="Suites, tests and turns">{rows}</List>

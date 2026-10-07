@@ -1,7 +1,7 @@
 // The panels, the sidebar and the thread as they now look (icons, back buttons, no dividers, a check's
 // ×, no overflow), the timeline's fit and scrolling, Markdown replies and copying one raw, scopes
-// (Settings → Environments and Secrets; {{scope.NAME}} anywhere, checked under the field), and
-// Settings → Plugins.
+// (Settings → Environments and Secrets; {{env.NAME}} and {{secret.NAME}} anywhere, checked under the
+// field), and Settings → Plugins.
 
 import { parse } from "yaml";
 import { chooseScope, expect, fileText, test } from "./fixtures.js";
@@ -151,10 +151,10 @@ test("replies are Markdown (safe: no raw HTML, no script links); only a long cod
   }
 });
 
-test("scopes: a scope's plain variables (environments/<scope>.yml) and secrets fill {{scope.NAME}} anywhere; fields say when one isn't there", async ({ app: { page, servers } }) => {
+test("scopes: a scope's environment values (kept by the app) and secrets fill {{env.NAME}} and {{secret.NAME}} anywhere; fields say when one isn't there", async ({ app: { page, servers } }) => {
   // A provider that takes its address and key from the scope
-  await writeFile(page, "providers/mock-json.yml", `kind: http\nurl: "{{scope.base_url}}/json"\nheaders: { Authorization: "Bearer {{scope.API_KEY}}" }\nbody: { message: "{{user}}" }\nresponse: { text: $.data.reply }\n`);
-  // Settings → Environments: a scope, its variables
+  await writeFile(page, "providers/mock-json.yml", `kind: http\nurl: "{{env.base_url}}/json"\nheaders: { Authorization: "Bearer {{secret.API_KEY}}" }\nbody: { message: "{{user}}" }\nresponse: { text: $.data.reply }\n`);
+  // Settings → Environments: a scope, its values
   await page.click("#openSettings");
   await page.click("#settings-tab-environments");
   await page.fill("#newScopeName", "stage");
@@ -166,12 +166,14 @@ test("scopes: a scope's plain variables (environments/<scope>.yml) and secrets f
     await page.click("#envVarAdd button[type=submit]");
     await expect(page.locator(`#envVar-${name}`)).toBeVisible();
   }
-  await expect.poll(async () => fileText(page, "environments/stage.yml").then((t) => parse(t), () => null)).toEqual({ base_url: servers.mock.url, who: "stage-team" });
-  expect(await fileText(page, "environments/stage.yml")).toMatch(/^# The "stage" scope's variables/);
+  // (kept by the app, not in the folder)
+  const stored = () => page.evaluate(() => JSON.parse(localStorage.getItem("eval.scope.stage")));
+  expect(await stored()).toEqual({ base_url: servers.mock.url, who: "stage-team" });
+  await expect.poll(() => fileText(page, "environments/stage.yml").then(() => "there", () => "none")).toBe("none");
   // A value changed in place
   await page.locator("#envVar-who input").fill("stage-crew");
   await page.locator("#envVar-who input").press("Enter");
-  await expect.poll(async () => parse(await fileText(page, "environments/stage.yml")).who).toBe("stage-crew");
+  await expect.poll(async () => (await stored()).who).toBe("stage-crew");
   // Its secret
   await page.click("#settings-tab-secrets");
   await page.selectOption("#secretsEnv", "stage");
@@ -184,12 +186,12 @@ test("scopes: a scope's plain variables (environments/<scope>.yml) and secrets f
   await chooseScope(page, "stage");
   // The message box checks a message as it's typed
   await page.selectOption("#convProvider", "providers/mock-json.yml");
-  await page.fill("#input", "hi from {{scope.nope}}");
-  await expect(page.locator("#inputProblem")).toContainText('{{scope.nope}} isn\'t in the scope "stage"');
-  await page.fill("#input", "hi from {{scope.who}} with {{scope.API_KEY}} known");
+  await page.fill("#input", "hi from {{env.nope}}");
+  await expect(page.locator("#inputProblem")).toContainText('{{env.nope}} isn\'t in the scope "stage"');
+  await page.fill("#input", "hi from {{env.who}} with {{secret.API_KEY}} known");
   await expect(page.locator("#inputProblem")).toHaveCount(0);
   await fetch(`${servers.mock.url}/_log`, { method: "DELETE" });
-  await page.fill("#input", "hi from {{scope.who}}");
+  await page.fill("#input", "hi from {{env.who}}");
   await page.click("#send");
   await expect(page.locator("#send")).toHaveText(/send/i);
   const sent = (await mockLog(servers)).at(-1);
@@ -199,9 +201,9 @@ test("scopes: a scope's plain variables (environments/<scope>.yml) and secrets f
   // A panel's field is checked too (under it), and its value saved as typed
   await openTest(page, "refund for a broken item");
   await page.locator("#turn-0 .turn-head .label").click();
-  await page.fill("#turnUser", "{{scope.missing_one}} please");
-  await expect(page.locator("#turnUserProblem")).toContainText("{{scope.missing_one}} isn't in the scope");
-  await page.fill("#turnUser", "I'm {{scope.who}}");
+  await page.fill("#turnUser", "{{env.missing_one}} please");
+  await expect(page.locator("#turnUserProblem")).toContainText("{{env.missing_one}} isn't in the scope");
+  await page.fill("#turnUser", "I'm {{env.who}}");
   await expect(page.locator("#turnUserProblem")).toHaveCount(0);
   // With another scope, the same name may not be there
   await page.click("#openSettings");
@@ -211,7 +213,7 @@ test("scopes: a scope's plain variables (environments/<scope>.yml) and secrets f
   await page.click("#envChoose");
   await page.click("#settingsClose");
   await expect(page.locator("#scopeButton .scope-name")).toHaveText("prod");
-  await page.locator("#turnUser").fill("I'm {{scope.who}} again");
+  await page.locator("#turnUser").fill("I'm {{env.who}} again");
   await expect(page.locator("#turnUserProblem")).toContainText('isn\'t in the scope "prod"');
 });
 
@@ -269,7 +271,7 @@ test("Settings → Plugins: a fixture (a login) from its starting file; a provid
   await page.click("#newPluginForm button[type=submit]");
   await expect(page.locator("#plugin-my-login")).toContainText("my-login · fixture · 1.0.0");
   await expect(page.locator("#plugin-my-login-provides")).toHaveText("Gives EXAMPLE_COOKIE, EXAMPLE_CSRF, for the run");
-  await expect(page.locator("#plugin-my-login")).toContainText("Any provider in the folder can use it: fixture: my-login");
+  await expect(page.locator("#plugin-my-login")).toContainText("Any provider in the folder can use it: fixtures: { beforeAll: [my-login] }");
   expect(await fileText(page, "plugins/my-login.js")).toContain('kind: "fixture"');
   await page.click("#settingsClose");
   // One that logs in to the mock (a token: a browser can't send or read cookies), and a provider naming it
@@ -286,10 +288,10 @@ test("Settings → Plugins: a fixture (a login) from its starting file; a provid
 };
 `);
   await writeFile(page, "providers/behind-login.yml", `kind: http
-fixture: token-login
+fixtures: { beforeAll: [token-login] }
 url: "${servers.mock.url}/json"
 login_url: "${servers.mock.url}/login"
-headers: { x-token: "\${env:ACME_TOKEN}" }
+headers: { x-token: "{{secret.ACME_TOKEN}}" }
 body: { message: "{{user}}" }
 response: { text: $.data.reply }
 `);

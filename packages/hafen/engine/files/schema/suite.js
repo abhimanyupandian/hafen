@@ -1,0 +1,872 @@
+// The suite file's JSON Schema, from spec/001-hafen/contracts/suite.schema.json (tests/engine/schema-sync.test.js
+// fails if they differ). A module rather than a .json file, so every runtime imports it the same way.
+
+export default {
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Hafen suite",
+  "description": "A suite of end-to-end tests for chat endpoints (spec/001-hafen/contracts/test-file.md). Hafen's own checks go further than the schema: a key it doesn't know is a problem (keys of your own start with x-), and is kept in the file.",
+  "type": "object",
+  "required": [
+    "version",
+    "tests"
+  ],
+  "properties": {
+    "version": {
+      "const": 1,
+      "description": "The file format's version."
+    },
+    "name": {
+      "type": "string"
+    },
+    "group": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "The suite's group: suites in the same group run one after another, groups at the same time; suites with none are one group of their own (contracts/test-file.md, Groups)"
+    },
+    "provider": {
+      "$ref": "#/$defs/providerRef"
+    },
+    "providers": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/providerRef"
+      }
+    },
+    "environments": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": {
+          "$ref": "#/$defs/scalar"
+        }
+      }
+    },
+    "variables": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/scalar"
+      }
+    },
+    "judges": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/judge"
+      }
+    },
+    "defaults": {
+      "$ref": "#/$defs/settings"
+    },
+    "setup": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/step"
+      }
+    },
+    "teardown": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/step"
+      }
+    },
+    "plugins": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "prices": {
+      "oneOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/price"
+          }
+        }
+      ]
+    },
+    "redact": {
+      "$ref": "#/$defs/redact"
+    },
+    "tests": {
+      "type": "array",
+      "minItems": 0,
+      "items": {
+        "$ref": "#/$defs/test"
+      }
+    }
+  },
+  "$defs": {
+    "scalar": {
+      "type": [
+        "string",
+        "number",
+        "boolean"
+      ]
+    },
+    "path": {
+      "type": "string",
+      "pattern": "^\\$",
+      "description": "An RFC 9535 JSONPath."
+    },
+    "providerRef": {
+      "description": "A provider file's path, a preset (openai-chat, openai-responses, anthropic-messages, gemini, ollama), plugin:<name>, or an inline provider.",
+      "oneOf": [
+        {
+          "type": "string"
+        },
+        {
+          "$ref": "provider.schema.json"
+        }
+      ]
+    },
+    "price": {
+      "type": "object",
+      "required": [
+        "input",
+        "output"
+      ],
+      "properties": {
+        "input": {
+          "type": "number",
+          "minimum": 0,
+          "description": "USD per million input tokens."
+        },
+        "output": {
+          "type": "number",
+          "minimum": 0,
+          "description": "USD per million output tokens."
+        },
+        "cached_input": {
+          "type": "number",
+          "minimum": 0
+        }
+      }
+    },
+    "redact": {
+      "type": "object",
+      "properties": {
+        "patterns": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "email",
+              "card",
+              "phone"
+            ]
+          }
+        },
+        "headers": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "settings": {
+      "type": "object",
+      "properties": {
+        "repeat": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "pass_rate": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "history": {
+          "enum": [
+            "live",
+            "pinned"
+          ]
+        },
+        "on_fail": {
+          "enum": [
+            "continue",
+            "stop"
+          ]
+        },
+        "unsure": {
+          "enum": [
+            "pass",
+            "warn",
+            "fail"
+          ]
+        },
+        "unsure_below": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "timeout_ms": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "retries": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "network": {
+          "type": "object",
+          "properties": {
+            "delay_ms": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "jitter_ms": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "kbps": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            "drop_rate": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            }
+          }
+        },
+        "load": {
+          "type": "object",
+          "required": [
+            "concurrency"
+          ],
+          "properties": {
+            "concurrency": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "requests": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "duration_s": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            "ramp_s": {
+              "type": "number",
+              "minimum": 0
+            }
+          },
+          "oneOf": [
+            {
+              "required": [
+                "requests"
+              ]
+            },
+            {
+              "required": [
+                "duration_s"
+              ]
+            }
+          ]
+        }
+      }
+    },
+    "test": {
+      "type": "object",
+      "required": [
+        "name"
+      ],
+      "allOf": [
+        {
+          "$ref": "#/$defs/settings"
+        }
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "id": {
+          "type": "string",
+          "pattern": "^t_[0-9a-z]{8}$"
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "group": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "The test's group in its suite: tests in the same group run one after another, groups at the same time; tests with none are one group of their own (contracts/test-file.md, Groups)"
+        },
+        "provider": {
+          "$ref": "#/$defs/providerRef"
+        },
+        "data": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "object",
+              "required": [
+                "file"
+              ],
+              "properties": {
+                "file": {
+                  "type": "string"
+                },
+                "limit": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "shuffle": {
+                  "type": "boolean"
+                }
+              }
+            }
+          ]
+        },
+        "setup": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/step"
+          }
+        },
+        "teardown": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/step"
+          }
+        },
+        "turns": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/turn"
+          }
+        },
+        "simulate": {
+          "$ref": "#/$defs/simulate"
+        },
+        "expect_conversation": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/check"
+          }
+        }
+      },
+      "anyOf": [
+        {
+          "required": [
+            "turns"
+          ]
+        },
+        {
+          "required": [
+            "simulate"
+          ]
+        }
+      ]
+    },
+    "turn": {
+      "type": "object",
+      "required": [
+        "user"
+      ],
+      "properties": {
+        "user": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "minProperties": 1,
+                "properties": {
+                  "text": {
+                    "type": "string"
+                  },
+                  "image": {
+                    "type": "string"
+                  },
+                  "file": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "attachments": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "file"
+            ],
+            "properties": {
+              "file": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "reply": {
+          "type": "string",
+          "description": "The fixed reply used with history: pinned."
+        },
+        "extract": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/path"
+          }
+        },
+        "tools": {
+          "type": "object",
+          "additionalProperties": {
+            "oneOf": [
+              {
+                "type": "object",
+                "required": [
+                  "result"
+                ],
+                "properties": {
+                  "result": {}
+                }
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "result"
+                  ],
+                  "properties": {
+                    "when": {
+                      "type": "object",
+                      "propertyNames": {
+                        "pattern": "^\\$"
+                      }
+                    },
+                    "result": {}
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "expect": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/check"
+          }
+        }
+      }
+    },
+    "step": {
+      "type": "object",
+      "required": [
+        "request"
+      ],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "request": {
+          "type": "object",
+          "required": [
+            "url"
+          ],
+          "properties": {
+            "url": {
+              "type": "string"
+            },
+            "method": {
+              "enum": [
+                "GET",
+                "POST",
+                "PUT",
+                "PATCH",
+                "DELETE",
+                "HEAD",
+                "OPTIONS"
+              ]
+            },
+            "headers": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            },
+            "body": {}
+          }
+        },
+        "extract": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/path"
+          }
+        },
+        "expect": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/check"
+          }
+        }
+      }
+    },
+    "simulate": {
+      "type": "object",
+      "required": [
+        "user",
+        "scenario",
+        "max_turns"
+      ],
+      "properties": {
+        "user": {
+          "type": "string",
+          "description": "A named provider that plays the user."
+        },
+        "scenario": {
+          "type": "string"
+        },
+        "stop_when": {
+          "type": "string"
+        },
+        "max_turns": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "expect_each": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/check"
+          }
+        }
+      }
+    },
+    "judge": {
+      "type": "object",
+      "required": [
+        "kind"
+      ],
+      "oneOf": [
+        {
+          "properties": {
+            "kind": {
+              "const": "systemone"
+            },
+            "endpoint": {
+              "type": "string",
+              "description": "A System One API endpoint; default TypeSafe's hosted Jev."
+            },
+            "api_key": {
+              "type": "string",
+              "description": "Usually {{secret.…}}; default {{secret.JEV_API_KEY}}."
+            },
+            "model": {
+              "type": "string"
+            }
+          }
+        },
+        {
+          "required": [
+            "provider"
+          ],
+          "properties": {
+            "kind": {
+              "const": "llm"
+            },
+            "provider": {
+              "type": "string"
+            },
+            "samples": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "temperature": {
+              "type": "number",
+              "minimum": 0
+            }
+          }
+        },
+        {
+          "required": [
+            "plugin"
+          ],
+          "properties": {
+            "kind": {
+              "const": "plugin"
+            },
+            "plugin": {
+              "type": "string"
+            }
+          }
+        }
+      ]
+    },
+    "check": {
+      "type": "object",
+      "description": "One check (contracts/checks.md). Either a type, or a path with an operator.",
+      "properties": {
+        "type": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "enabled": {
+          "type": "boolean",
+          "description": "false turns the check off: it's skipped (reason: turned off) and not counted. Default true."
+        },
+        "on": {
+          "type": "string",
+          "pattern": "^(reply|response|thinking|turn|events|tools|conversation)$"
+        },
+        "path": {
+          "$ref": "#/$defs/path"
+        },
+        "all": {
+          "type": "boolean"
+        },
+        "required": {
+          "type": "boolean"
+        },
+        "unsure_below": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "equals": {},
+        "not_equals": {},
+        "contains": {},
+        "not_contains": {},
+        "matches": {
+          "type": "string"
+        },
+        "exists": {
+          "type": "boolean"
+        },
+        "type_is": {
+          "enum": [
+            "string",
+            "number",
+            "integer",
+            "boolean",
+            "object",
+            "array",
+            "null"
+          ]
+        },
+        "min_length": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "max_length": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "lt": {
+          "type": "number"
+        },
+        "lte": {
+          "type": "number"
+        },
+        "gt": {
+          "type": "number"
+        },
+        "gte": {
+          "type": "number"
+        },
+        "schema": {
+          "type": [
+            "object",
+            "string"
+          ]
+        },
+        "ignore_case": {
+          "type": "boolean"
+        },
+        "max_ms": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "max_tokens": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "max_cost": {
+          "type": "number",
+          "minimum": 0
+        },
+        "tool": {
+          "type": "string"
+        },
+        "args": {
+          "type": "object",
+          "propertyNames": {
+            "pattern": "^\\$"
+          }
+        },
+        "order": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "match": {
+          "enum": [
+            "exact",
+            "in_order",
+            "any_order"
+          ]
+        },
+        "value": {
+          "description": "The text for contains/not_contains/matches checks, or the event kinds for a sequence check.",
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          ]
+        },
+        "times": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "first_token_ms": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "question": {
+          "type": "string"
+        },
+        "options": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 2
+        },
+        "min": {
+          "type": "number"
+        },
+        "max": {
+          "type": "number"
+        },
+        "rubric": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "minItems": 1
+            }
+          ]
+        },
+        "reference": {
+          "type": "string"
+        },
+        "judge": {
+          "type": "string"
+        },
+        "samples": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "anyOf": [
+        {
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "required": [
+            "equals"
+          ]
+        },
+        {
+          "required": [
+            "not_equals"
+          ]
+        },
+        {
+          "required": [
+            "contains"
+          ]
+        },
+        {
+          "required": [
+            "not_contains"
+          ]
+        },
+        {
+          "required": [
+            "matches"
+          ]
+        },
+        {
+          "required": [
+            "exists"
+          ]
+        },
+        {
+          "required": [
+            "type_is"
+          ]
+        },
+        {
+          "required": [
+            "min_length"
+          ]
+        },
+        {
+          "required": [
+            "max_length"
+          ]
+        },
+        {
+          "required": [
+            "lt"
+          ]
+        },
+        {
+          "required": [
+            "lte"
+          ]
+        },
+        {
+          "required": [
+            "gt"
+          ]
+        },
+        {
+          "required": [
+            "gte"
+          ]
+        },
+        {
+          "required": [
+            "schema"
+          ]
+        }
+      ]
+    }
+  }
+};

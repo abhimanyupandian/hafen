@@ -3,7 +3,7 @@
 // views show the file as it now is. No errors on the page.
 
 import { parse } from "yaml";
-import { expect, fileText, test } from "./fixtures.js";
+import { addScope, expect, fileText, test } from "./fixtures.js";
 
 const SUITE = "smoke.hafen.yml";
 const suiteData = async (page) => parse(await fileText(page, SUITE));
@@ -226,8 +226,10 @@ test("tests: added to a suite, and deleted from the panel and the sidebar, the Y
 
 test("suites: new ones, named, renamed, pointed at a provider, and deleted", async ({ app: { page } }) => {
   await page.click("#newSuite");
+  await page.press("#newSuiteName", "Enter");  // (+ asks for a name: the one it offers)
   await fileSays(page, (d) => d.tests.length === 1 && d.name === "tests", "tests.hafen.yml");
   await page.click("#newSuite");
+  await page.press("#newSuiteName", "Enter");  // (+ asks for a name: the one it offers)
   await fileSays(page, (d) => d.tests.length === 1, "tests-2.hafen.yml");
   await row(page, "tests-2.hafen.yml").locator(".list-open").click();
   // Name (in reports)
@@ -309,7 +311,8 @@ test("providers: changed as YAML, refused when it isn't, renamed, deleted", asyn
   await fileSays(page, (d) => d.timeout_ms === 9000, "providers/mock-json.yml");
   await page.fill("#providerYaml", "kind: [http");
   await page.locator("#providerYaml").blur();
-  await expect(page.locator(".toast", { hasText: "isn't valid YAML" })).toBeVisible();
+  // (said under the field, with its line, and kept there: not a toast that goes)
+  await expect(page.locator("#providerYamlError")).toContainText(/line \d+, column \d+: .*Not saved/);
   await fileSays(page, (d) => d.timeout_ms === 9000, "providers/mock-json.yml");
   await page.fill("#providerName", "shop");
   await page.press("#providerName", "Enter");
@@ -323,9 +326,12 @@ test("providers: changed as YAML, refused when it isn't, renamed, deleted", asyn
 
 test("secrets: one environment's and every environment's, changed and forgotten", async ({ app: { page } }) => {
   const stored = () => page.evaluate(() => JSON.parse(localStorage.getItem("eval.secrets") ?? "{}"));
+  await addScope(page, "local");
   await page.click("#openSettings");
   await page.click("#settings-tab-secrets");
-  await expect(page.locator("#secretsEnv")).toHaveValue("");
+  // (it opens on the scope chosen: local, made in Environments)
+  await expect(page.locator("#secretsEnv")).toHaveValue("local");
+  await page.selectOption("#secretsEnv", "");
   await page.fill("#secretName", "SHOP_TOKEN");
   await page.fill("#secretValue", "every");
   await page.click("#secretAdd button[type=submit]");
@@ -336,9 +342,12 @@ test("secrets: one environment's and every environment's, changed and forgotten"
   await page.locator("#secret-SHOP_TOKEN button", { hasText: "save" }).click();
   await expect(page.locator("#secret-SHOP_TOKEN .hint")).toHaveText(/^set( ·|$)/);
   expect(await stored()).toEqual({ "": { SHOP_TOKEN: "every" }, local: { SHOP_TOKEN: "local only" } });
-  await page.locator("#secret-SHOP_TOKEN button", { hasText: "forget" }).click();
+  // (forgetting asks first)
+  await page.click("#secret-SHOP_TOKEN-forget");
+  await expect(page.locator("#secret-SHOP_TOKEN-forget")).toHaveText("forget it?");
+  await page.click("#secret-SHOP_TOKEN-forget");
   await expect(page.locator("#secret-SHOP_TOKEN")).toContainText("set for every scope");
-  expect(await stored()).toEqual({ "": { SHOP_TOKEN: "every" }, local: {} });
+  expect(await stored()).toEqual({ "": { SHOP_TOKEN: "every" } });
 });
 
 test("runs: deleted from the sidebar, the run's panel and Settings, and cleared", async ({ app: { page } }) => {

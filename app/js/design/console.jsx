@@ -5,6 +5,8 @@
 // written while it was closed included). Copy puts every line on the clipboard (commands with
 // their $). Its top edge (.console-resizer) can be dragged to make it taller, up to the whole
 // column (remembered). One per page: write() is what lib/log.js's say() writes with.
+// (eval: it starts closed, so the thread has the room; open with nothing to show, it's only as tall
+// as a note saying so: spec/design/components.md, Additions: Console when empty.)
 
 import { useLayoutEffect, useRef, useState } from "react";
 import { copyText } from "../lib/clipboard.js";
@@ -36,7 +38,8 @@ function maxHeight(section) {
 // "==> Downloading 45% (…)" -> "==> Downloading ": lines with the same stem are one progress bar.
 const progressStem = (line) => line.match(/^(.*?)\d+(?:\.\d+)?%/)?.[1];
 
-export function write(text, kind = "out") {
+// tag: what the line is about (Console's `hide` leaves out the lines of those tags)
+export function write(text, kind = "out", tag) {
   // Closed, it has no size: it's scrolled to the bottom when it opens.
   const atBottom = !open || !body || body.scrollHeight - body.scrollTop - body.clientHeight < 40;
   for (let line of String(text).split("\n")) {
@@ -50,7 +53,7 @@ export function write(text, kind = "out") {
       previous.text = line;
       continue;
     }
-    lines.push({ key: nextKey++, kind, text: line });
+    lines.push({ key: nextKey++, kind, text: line, ...(tag ? { tag } : {}) });
   }
   if (lines.length > LIMIT) lines = lines.slice(-LIMIT);
   if (atBottom) follow = true;
@@ -58,14 +61,15 @@ export function write(text, kind = "out") {
   lineDraw.draw();
 }
 
-export function Console() {
+// actions: more buttons in its head (before copy). hide: tags whose lines aren't shown (or copied).
+export function Console({ actions = null, hide = [] }) {
   useDraw(lineDraw);
   const sectionRef = useRef(null);
   const bodyRef = useRef(null);
   const handleRef = useRef(null);
   const [copyLabel, setCopyLabel] = useState("copy");
   const toBottom = () => { bodyRef.current.scrollTop = bodyRef.current.scrollHeight; };
-  const [isOpen, toggle] = useCollapsible("console", true, (now) => { if (now) toBottom(); });
+  const [isOpen, toggle] = useCollapsible("console", false, (now) => { if (now) toBottom(); });
   open = isOpen;
   useLayoutEffect(() => {
     body = bodyRef.current;
@@ -81,8 +85,9 @@ export function Console() {
     follow = false;
     toBottom();
   });
+  const shown = hide.length ? lines.filter((line) => !hide.includes(line.tag)) : lines;
   const copy = async () => {
-    const text = lines.map((line) => line.text).join("\n");
+    const text = shown.map((line) => line.text).join("\n");
     const copied = text && await copyText(text);
     setCopyLabel(!text ? "nothing to copy" : copied ? "copied" : "couldn't copy");
     setTimeout(() => setCopyLabel("copy"), 1500);
@@ -91,18 +96,22 @@ export function Console() {
     lines = [];
     lineDraw.draw();
   };
+  const empty = !shown.length;
   return (
-    <section className={"console collapsible" + (isOpen ? " open" : "")} id="console" aria-labelledby="consoleLabel" ref={sectionRef}>
+    <section className={"console collapsible" + (isOpen ? " open" : "") + (empty ? " no-lines" : "")} id="console" aria-labelledby="consoleLabel" ref={sectionRef}>
       <div className="console-resizer" id="consoleResizer" ref={handleRef}></div>
       <div className="console-head collapsible-head">
         <button className="collapsible-toggle" id="consoleToggle" type="button" aria-expanded={isOpen} aria-controls="consoleBody" onClick={toggle}>
           <span className="chev" aria-hidden="true"></span><span className="label" id="consoleLabel">Console</span>
         </button>
+        {actions}
         <button className="btn btn-ghost console-copy when-open" id="consoleCopy" type="button" onClick={copy}>{copyLabel}</button>
         <button className="btn btn-ghost console-clear when-open" id="consoleClear" type="button" onClick={clear}>clear</button>
       </div>
-      <div className="console-body collapsible-body" id="consoleBody" role="log" aria-label="Console output" tabIndex={0} ref={bodyRef}>
-        {lines.map((line) => <div key={line.key} className={line.kind}>{line.text}</div>)}
+      <div className={"console-body collapsible-body" + (empty ? " no-lines" : "")} id="consoleBody" role="log" aria-label="Console output" tabIndex={0} ref={bodyRef}>
+        {empty
+          ? <p className="note console-empty" id="consoleEmpty">No lines yet: what the app does is logged here.</p>
+          : shown.map((line) => <div key={line.key} className={line.kind} data-tag={line.tag}>{line.text}</div>)}
       </div>
     </section>
   );

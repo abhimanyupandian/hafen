@@ -3,7 +3,7 @@
 // unless the design spec was changed on purpose (then: npx playwright test tests/visual --update-snapshots).
 
 import { expect, test } from "@playwright/test";
-import { createRelay } from "../../cli/relay.js";
+import { createRelay } from "../../server/relay.js";
 
 let relay;
 let url;

@@ -5,6 +5,11 @@
 // A page in the background (another tab; the desktop app's window behind others) doesn't run its
 // animations, so one given then waits, and slides in on the way back; the system shows it then too
 // (system: as given, else as Settings → Notifications says), silently: the sound is the page's.
+//
+// <Toasts area={() => …} /> (an Addition): where they go instead of the window's top right, asked as
+// one comes in and as the window's resized: { top, right, width } on screen, or null for the corner
+// (the app's: the thread's top right, under the top bar and beside the panel, so a toast never covers
+// a bar's or the panel's controls: spec/design/components.md, Additions: Toasts under the top bars).
 
 import { useLayoutEffect, useRef } from "react";
 import { createPortal } from "react-dom";
@@ -43,9 +48,24 @@ export function notify({ title, text = "", kind = "", sound, onClick, system }) 
   leaveLater(id);
 }
 
-export function Toasts() {
+export function Toasts({ area }) {
   const { list, added } = useStore(toasts);
   const ref = useRef(null);
+  // Where they go, as each comes in (and as the window's resized while any shows)
+  useLayoutEffect(() => {
+    const layer = ref.current;
+    if (!layer || !area || !list.length) return undefined;
+    const place = () => {
+      const at = area();
+      for (const key of ["top", "right", "width"]) {
+        if (at) layer.style.setProperty(key, `${Math.round(at[key])}px`);
+        else layer.style.removeProperty(key);
+      }
+    };
+    place();
+    window.addEventListener("resize", place);
+    return () => window.removeEventListener("resize", place);
+  }, [added, list.length > 0]);
   // Shown while there are any; shown again as one comes in while a modal is open, to be above it
   useLayoutEffect(() => {
     const layer = ref.current;

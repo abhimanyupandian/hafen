@@ -2,7 +2,7 @@
 // for statuses. Nothing is checked or timed here; the engine did that (constitution II).
 
 // (from names.js: only what names a check, not what runs one: the page doesn't need JSONPath or JSON Schema)
-import { describe as describeCheck } from "../../../engine/checks/names.js";
+import { describe as describeCheck } from "hafen/engine/checks/names.js";
 import { sec, tokens as tokenText, money } from "../lib/format.js";
 
 export { describeCheck };
@@ -97,7 +97,8 @@ export function turnChecksText(record, checks = []) {
 export function statsLine(record) {
   const m = record?.metrics ?? {};
   const parts = [];
-  if (m.ttft_ms !== undefined) parts.push(`${sec(m.ttft_ms)} to first token`);
+  // (a turn that failed before any text came had no first token)
+  if (m.ttft_ms !== undefined && (!record.error || record.reply)) parts.push(`${sec(m.ttft_ms)} to first token`);
   if (m.ms !== undefined) parts.push(sec(m.ms));
   const t = tokenText(m.tokens);
   if (t) parts.push(t);

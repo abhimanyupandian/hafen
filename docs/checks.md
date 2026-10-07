@@ -44,7 +44,7 @@ check.
 | `matches: re` | A string matches the regular expression (JavaScript syntax; flags as `/…/i`) |
 | `exists: true \| false` | The path matched something / nothing |
 | `type_is: t` | `string`, `number`, `integer`, `boolean`, `object`, `array` or `null` |
-| `min_length`, `max_length` | A string's characters, or an array's items, are within limits |
+| `min_length`, `max_length` | A string's characters, or an array's items, are within limits. Characters as a reader counts them: an accented letter, an emoji (👋🏽) or a flag is one |
 | `lt`, `lte`, `gt`, `gte` | Number comparisons (combine them for a range) |
 | `schema: s` | The value validates against a JSON Schema (inline, or a file) |
 
@@ -59,7 +59,7 @@ one does. A path that matches nothing fails with "no match", except `exists: fal
 | `status` | an operator (usually `equals`) | The HTTP status passes |
 | `contains`, `not_contains`, `matches` | `value`, or the operator | The reply text passes. Shorthand: `{ contains: "4417" }` |
 | `latency` | `max_ms`, `first_token_ms?` | Total time (and time to first token) are within limits |
-| `length` | `min_length`, `max_length` | The reply's length in characters is within limits |
+| `length` | `min_length`, `max_length` | The reply's length in characters (as `min_length` counts them) is within limits |
 | `json` | `schema?` | The reply text parses as JSON (and validates) |
 | `tokens` | `max_tokens`, `on?` | Output tokens (or thinking tokens, with `on: thinking`) are within the limit |
 | `cost` | `max_cost` | The turn's cost is within the limit. Needs a [price](providers.md#prices) |
@@ -89,7 +89,8 @@ together, in one request.
 The confidence is the API's own when it gives one. The full answer and the exact request are kept,
 and the app shows both on the check and on the judge call's step.
 
-Set the key in the app (Settings → System One) or as `JEV_API_KEY` in CI.
+Set the key in the app (Settings → System One). On the command line it's the secret `JEV_API_KEY`:
+in the `--secret` file, or an environment variable.
 
 ### LLM judges
 
@@ -114,15 +115,16 @@ Declare judges in the suite, and name them in checks:
 
 ```yaml
 judges:
-  default:    { kind: systemone }                     # TypeSafe's hosted Jev; key from ${env:JEV_API_KEY}
-  selfhosted: { kind: systemone, endpoint: "http://judge.internal:8080", api_key: "${env:JUDGE_KEY}" }
+  default:    { kind: systemone }                     # TypeSafe's hosted Jev; key: the secret JEV_API_KEY
+  selfhosted: { kind: systemone, endpoint: "http://judge.internal:8080", api_key: "{{secret.JUDGE_KEY}}" }
   rubric:     { kind: llm, provider: claude-judge, samples: 3 }
 ```
 
 `default` is used when a check names no judge. A judge is given exactly what the check selects,
 never shortened; input longer than the judge accepts is an error that says so.
 
-You can also write your own judge as a [plugin](plugins.md#check-and-judge-plugins).
+You can also write your own check or judge as a [plugin](plugins.md#check-and-judge-plugins). It gets
+the check's fields and the chosen environment's values (`env`), never a secret.
 
 ## Turning a check off
 

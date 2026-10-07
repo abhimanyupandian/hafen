@@ -9,7 +9,6 @@ and the command line runs it unchanged.
 |---|---|
 | Suites | `*.hafen.yml`, `*.hafen.yaml` or `*.hafen.json`, anywhere in the folder |
 | Providers | `providers/*.yml`, by convention (any path works) |
-| Scopes | `environments/<scope>.yml` |
 | Plugins | `plugins/*.js` |
 | Data files | CSV or JSON lines, by a path relative to the suite |
 | Prices | `prices.yml`, by a path from a suite |
@@ -18,6 +17,9 @@ and the command line runs it unchanged.
 The app and the CLI find suites in a folder by their names. Files a suite names (providers, data,
 prices, plugins) must be inside the opened folder (the app) or the project being run (the CLI).
 Anything outside is refused, and nothing of it is read or sent.
+
+An environment's values and the secrets aren't in the folder at all: the app keeps them, and the
+CLI reads files you name ([Environments and secrets](#environments-and-secrets)).
 
 Editors that support JSON Schema can check your files as you type. Point a suite at Hafen's
 `suite.schema.json` on its first line:
@@ -42,7 +44,7 @@ variables:
   customer: Priya
 
 judges:
-  default: { kind: systemone }                                 # TypeSafe's System One; key from ${env:JEV_API_KEY}
+  default: { kind: systemone }                                 # TypeSafe's System One; key: the secret JEV_API_KEY
   rubric:  { kind: llm, provider: claude-judge, samples: 3 }   # an LLM judge
 providers:
   claude-judge: providers/anthropic-judge.yml
@@ -56,9 +58,9 @@ defaults:
 setup:
   - name: log in
     request:
-      url: "{{base_url}}/auth"
+      url: "{{env.base_url}}/auth"
       method: POST
-      body: { user: "qa-bot", password: "${env:ACME_QA_PASSWORD}" }
+      body: { user: "qa-bot", password: "{{secret.ACME_QA_PASSWORD}}" }
     extract:
       token: $.access_token
 
@@ -110,16 +112,16 @@ tests:
 | `version` | yes | `1` |
 | `name` | | Shown in the app and in reports. Defaults to the file's name |
 | `group` | | The suite's group, a whole number of 1 or more ([Groups](#groups)) |
-| `provider` | yes, here or on every test | A provider file's path, a preset (`openai-chat`, `openai-responses`, `anthropic-messages`, `gemini`, `ollama`), `plugin:<name>`, or a provider written inline ([Providers](providers.md)) |
-| `providers` | | Named providers, for judges or for tests that use another provider |
-| `environments` | | Named sets of variables. One is chosen per run (`--env`, or the app's scope button); the first is the default |
-| `variables` | | The suite's variables |
+| `provider` | yes, here or on every test | A name under `providers`, a preset (`openai-chat`, `openai-responses`, `anthropic-messages`, `gemini`, `ollama`), `plugin:<name>` or a provider file's path, looked up in that order; an A2A agent (`kind: a2a`); or a provider written inline ([Providers](providers.md)) |
+| `providers` | | Named providers, for judges or for tests that use another provider: each names one as `provider: <name>` |
+| `environments` | | Named sets of values. The chosen environment's (the app's scope, or `--env`) fills `{{env.NAME}}` where the values given don't have NAME, and each is a `{{name}}` too. With none chosen, the first ([Environments and secrets](#environments-and-secrets)) |
+| `variables` | | The suite's variables. A variable (or an environment's value) can't be called `env`, `secret` or `secrets` |
 | `judges` | | Named judges ([Judges](checks.md#judges)). `default` is used when a check names none |
 | `defaults` | | Settings every test starts from |
 | `setup`, `teardown` | | Steps around the whole suite ([Steps](#steps)) |
 | `plugins` | | More plugins: paths from the suite (`./plugins/acme.js`) or package names. The folder's own `plugins/*.js` need no naming |
 | `prices` | | A prices file, or `{ <model>: { input, output, cached_input? } }` in USD per million tokens |
-| `redact` | | More to redact: `{ patterns: [email, card, phone], headers: [x-session-token] }` |
+| `redact` | | More to redact from runs and reports: `{ patterns: [email, card, phone], headers: [x-session-token] }`. A named header's value is hidden wherever it shows, as a secret's is. `phone`: 7 to 15 digits after a `+` or in groups (never an IP address, a host's port, a date or a hex string); `card`: a card number that passes the Luhn check, starting 2 to 6 |
 | `tests` | yes | The tests. An empty list is valid, with a warning |
 
 ## Test keys
@@ -130,7 +132,7 @@ tests:
 | `id` | A stable id (`t_` and 8 characters), so history follows a rename. The app writes it; optional by hand |
 | `tags` | For `--tag` |
 | `group` | The test's group in its suite ([Groups](#groups)) |
-| `provider` | Overrides the suite's |
+| `provider` | Overrides the suite's: a name under the suite's `providers`, or anything the suite's `provider` can be. A name that's none of them is a problem, with the names there are |
 | `data` | A CSV file (with a header row) or a JSON-lines file. The test runs once per row; use `{{row.<column>}}` |
 | `setup`, `teardown` | Steps around the test. Teardown always runs |
 | `turns` | The conversation ([Turns](#turns)) |
@@ -140,8 +142,19 @@ tests:
 | `history` | What each turn sends of the conversation: `live` (the default), or `pinned` (earlier turns' `reply` values stand in for the endpoint's) |
 | `on_fail` | `continue` (the default), or `stop` to skip the remaining turns after a failed check |
 | `unsure`, `unsure_below` | How [unsure results](checks.md#unsure) count, and below which confidence a judged result is unsure |
-| `timeout_ms`, `retries` | Per turn (defaults: 120000 ms, and 2 retries on rate limits and server errors) |
+| `timeout_ms`, `retries` | Per turn (defaults: 120000 ms, and 2 retries on rate limits and server errors). A provider can set them too |
 | `network` | A network profile: `{ delay_ms, jitter_ms, kbps, drop_rate }` |
+
+A test's settings come from, the most specific first:
+
+1. the test's own keys;
+2. the suite's `defaults`;
+3. its provider's `timeout_ms` and `retries` ([Providers](providers.md));
+4. Hafen's defaults, above.
+
+So a provider with `timeout_ms: 300` times out its turns after 300 ms unless the suite's `defaults`
+or the test say otherwise. On the command line, `--timeout` (and `--repeat`, `--unsure`,
+`--network`) override all of them.
 
 ## Turns
 
@@ -149,7 +162,7 @@ tests:
 |---|---|
 | `user` | The message |
 | `reply` | With `history: pinned`, the reply earlier turns are given instead of the live one |
-| `extract` | `{ <variable>: <path> }`, read from the response, for later turns and steps |
+| `extract` | `{ <variable>: <path> }`, read from the response, for later turns and steps. A variable can't be called `env`, `secret` or `secrets` |
 | `tools` | Results to give a model API that asks for a tool: `{ get_weather: { result: { temp: 21 } } }`, or a list of `{ when: { $.city: Paris }, result: … }` |
 | `expect` | The turn's [checks](checks.md) |
 
@@ -175,11 +188,11 @@ test's teardown still runs.
 
 | Syntax | Comes from |
 |---|---|
-| `{{name}}` | Extractions and setup steps, then the data row, then the suite's `variables`, then the chosen environment. The latest extraction wins |
+| `{{name}}` | Extractions and setup steps, then the data row, then the suite's `variables`, then the suite's `environments:` entry for the chosen environment. The latest extraction wins |
 | `{{row.col}}` | The data file's current row |
-| `{{scope.NAME}}` | The chosen scope ([Scopes](#scopes)) |
+| `{{env.NAME}}` | A value of the chosen environment: the app's scope, or `--env <file>` on the command line, then the suite's `environments:` entry of its name ([Environments and secrets](#environments-and-secrets)) |
+| `{{secret.NAME}}` | A secret: what a provider's [fixture](plugins.md#fixtures) gave in this run, then the app's secrets for the scope, or, on the command line, the `--secret` file and then the environment variables. `{{secrets.NAME}}` works too |
 | `{{run.id}}`, `{{test.name}}`, `{{turn.index}}`, `{{repeat}}` | The run |
-| `${env:NAME}` | A secret: what a provider's [fixture](plugins.md#fixtures) gave in this run, then the process's environment in CI, or the app's stored secrets |
 
 A variable nothing sets stops the run before anything is sent. Set one from the command line with
 `--var name=value`.
@@ -187,35 +200,102 @@ A variable nothing sets stops the run before anything is sent. Set one from the 
 A value that is exactly one `{{name}}` keeps its type: `equals: "{{row.order}}"` compares as a
 number when the row's value is one. Inside other text, it's text.
 
-**Secrets** are `${env:NAME}` only, and never written to files. Their values are redacted from every
-run file and report. `${env:…}` is filled in only in text your files wrote, never in text that came
-from elsewhere (a reply, a data row): a reply that says `${env:CI_TOKEN}` doesn't get the secret sent
-back.
+`{{env.NAME}}` and `{{secret.NAME}}` work wherever text does: a suite's, a test's, a turn's and a
+check's fields, steps, judges, providers, and a message typed in the app. They work inside the
+values of `variables` and `environments:` too (`api: "{{env.base_url}}/v2"`, then `{{api}}`). A
+dotted name is that key first, else it reaches into a value: `{{env.db.host}}`. One that isn't set
+stops the run before anything is sent, where it's first used:
 
-## Scopes
+```
+tests/support/refund.hafen.yml:28:13  {{env.base_url}} isn't set: the environment "prod" has no base_url
+```
 
-A scope is a named set of values to switch between, such as `stage` and `prod`. The chosen scope
-(the app's scope button, or `--env <scope>` on the command line) fills `{{scope.NAME}}` anywhere a
-variable can go: a provider's address or headers, a message, a check. A name is looked up in:
+**Secrets** are written `{{secret.NAME}}`, never as their values. Their values are redacted from
+every run file and report: as they are, and where they show JSON-escaped, URL- or form-encoded, or
+in base64 (in a Basic login, say), even split across a stream's chunks. A value shorter than 4
+characters isn't redacted (it would cut `yes` or `443` out of ordinary text). An environment's values
+aren't secret, and aren't redacted.
 
-1. the scope's **plain variables**, `environments/<scope>.yml` in the folder, kept in version
-   control (`{{scope.db.host}}` reaches into a map);
-2. then its **secrets**, kept by the app (Settings → Secrets), or the job's environment variables in
-   CI. They're redacted wherever they appear.
+`{{env.…}}` and `{{secret.…}}` are filled in only in text your files wrote, never in text that came
+from elsewhere (a reply, a data row, an extraction): a reply that says `{{secret.CI_TOKEN}}` doesn't
+get the secret sent back. It goes as written.
 
-```yaml
-# environments/stage.yml
-base_url: https://stage.acme.example
-team: refunds
+## Environments and secrets
+
+An environment is a named set of values to switch between, such as `staging` and `prod`: an address,
+a region. Secrets are keys, tokens and passwords. Neither is read from your folder: whoever runs the
+suite gives them.
+
+| | Environment values: `{{env.NAME}}` | Secrets: `{{secret.NAME}}` |
+|---|---|---|
+| **The app** | The scope chosen with the scope button: its values, kept by the app (Settings → Environments) | The scope's secrets, and the ones kept for every scope (Settings → Secrets): encrypted by the system in the desktop app, in the browser's storage in the browser build |
+| **The command line** | `--env <file>`: a `KEY=VALUE` file anywhere on the disk | `--secret <file>`: a `KEY=VALUE` file anywhere on the disk, then the environment variables |
+
+```sh
+# staging.env: the environment's values (fine to commit)
+base_url=https://staging.acme.example
+db.host = db.internal          # a dotted name is one name: {{env.db.host}}
+```
+
+```sh
+# staging.secrets.env: secrets (never in version control)
+ACME_API_KEY=sk-…
 ```
 
 ```yaml
 # providers/acme.yml
-url: "{{scope.base_url}}/chat"
-headers: { Authorization: "Bearer {{scope.API_KEY}}" }   # API_KEY: a secret of the stage scope
+url: "{{env.base_url}}/chat"
+headers: { Authorization: "Bearer {{secret.ACME_API_KEY}}" }
 ```
 
-The chosen scope also picks each suite's environment of the same name, when it has one.
+```sh
+npx hafen run tests/ --env staging.env --secret ~/secrets/staging.secrets.env
+```
+
+The environment's name is the file's, without its extension: `staging.env` is `staging`. It picks
+each suite's `environments:` entry of that name, which fills any `{{env.NAME}}` the file hasn't. So a
+suite with its own `environments:` needs no file: `--env staging` picks that entry by name, and with
+no `--env` the first entry is used. In the app, the scope's name does the same.
+
+A `KEY=VALUE` file has one `NAME=value` a line:
+
+| Line | Means |
+|---|---|
+| `region=eu`, `region = eu` | A value. Spaces around `=` are fine |
+| `export REGION=eu` | The same: `export ` before the name is ignored |
+| `# a comment`, a blank line | Skipped. A `#` after a value starts a comment only after a space, so `url=https://acme.example/#top` keeps its `#top` |
+| `greeting="Hi,\n\"you\""` | Double quotes take `\n`, `\t`, `\"` and `\\` |
+| `path='C:\temp\new'` | Single quotes: as written |
+
+Every value is text. A name is letters, digits, `_`, `.` and `-`, not starting with a digit, and is
+set once. A line that isn't `NAME=value` is a problem at its file, line and column: the command line
+stops before anything is sent, and the app's import changes nothing. The app's Settings →
+Environments and Secrets import and export the same files (the app takes a secret's name as letters,
+digits and `_`).
+
+**Plugins** get the environment's values as `env`, never a secret. A plugin's request writes a
+secret as `"Bearer {{secret.NAME}}"`, and Hafen fills it in as the request leaves
+([Plugins](plugins.md#sandboxing-and-secrets)).
+
+### Old spellings
+
+The old ways to write these are problems now, each at its file, line and column: `validate` exits
+`2`, and a run exits `2` with nothing sent. Write the new way instead:
+
+| Old | Write |
+|---|---|
+| `${env:NAME}` | `{{secret.NAME}}` |
+| `{{scope.NAME}}` | `{{env.NAME}}` (a value of the environment) or `{{secret.NAME}}` (a secret) |
+| A plugin's `{ secret: "NAME" }` | `"{{secret.NAME}}"` in its request ([Plugins](plugins.md#sandboxing-and-secrets)) |
+
+```
+providers/acme.yml:3:35  ${env:ACME_KEY} is the old way to write a secret: write {{secret.ACME_KEY}}
+providers/acme.yml:2:7  {{scope.base_url}} is the old way: write {{env.base_url}} (a value of the environment) or {{secret.base_url}} (a secret)
+```
+
+A folder's `environments/<name>.yml` isn't read: `--env <name>` only names the environment (each
+suite's `environments:` entry of that name). Give the values in a `KEY=VALUE` file
+(`--env staging.env`), or keep them in the app's scopes.
 
 ## Groups
 
@@ -252,7 +332,8 @@ usage, plus the last chunk's fields).
 
 - Comments, blank lines, key order, quoting and one-line `{ … }` maps stay as they were.
 - An edit changes only the lines it's about. Adding a check is one line.
-- Keys the app doesn't know are kept, with a warning.
+- Keys Hafen doesn't know stay in the file, and are a problem until they're fixed (see
+  [Validation](#validation)).
 - New entries follow the style of their neighbours.
 - Windows line endings and a byte order mark are kept. JSON files are written with 2-space
   indentation, keys in their order.
@@ -262,16 +343,64 @@ usage, plus the last chunk's fields).
 `hafen validate` and the app check that:
 
 1. the file parses, and its `version` is supported;
-2. it matches the schema;
-3. every provider, data file, prices file and plugin it names exists;
-4. every `{{name}}` can be resolved, and every `${env:NAME}` the run needs is set (`--env-check`);
-5. every path parses, every regular expression compiles, and every judge it names is declared.
+2. it matches the schema, and has no key Hafen doesn't know;
+3. every provider, data file, prices file and plugin it names exists, and every check's `type` is
+   Hafen's or a check plugin's;
+4. every `{{name}}` can be resolved, every `{{env.NAME}}` is in the chosen environment, the
+   environment `--env` names exists, and every secret the run needs is set (`--env-check`): each
+   `{{secret.NAME}}`, a preset's or System One's default key, and each `{{secret.NAME}}` a plugin
+   writes in its code;
+5. every path parses, every regular expression compiles, and every judge it names is declared;
+6. no two tests in a file have the same name;
+7. no variable, environment's value or extraction is called `env`, `secret` or `secrets`
+   (`{{env.x}}` is the environment's, `{{secret.x}}` a secret).
 
-Each problem comes with the file, line and column, and what to fix:
+`validate` is the same check a run makes before it sends anything. A suite that fails it stops every
+run (exit `2`, nothing sent). With `--env-check`, run with the same `--env` and `--secret` files,
+environment variables and `--var`s as the run, a suite that passes it isn't stopped by that check. (A
+run that has started can still stop with a setup error: a suite's setup step, or a provider's
+`beforeAll` fixture, that fails.)
+
+Without `--env-check`, secrets aren't looked at, so a suite that passes can still be stopped by one
+that isn't set. Every `{{env.NAME}}` is checked either way.
+
+A key Hafen doesn't know would otherwise do nothing, silently: an `expcet:` whose checks never run
+would let the test pass. So each is a problem, saying the key it most likely meant. It stays in the
+file. Keys of your own (an owner, a ticket) start with `x-`, as `x-owner: qa`, and are left alone. A
+provider with [fixtures](plugins.md) gives them its other keys as their settings, so there only a
+misspelling of one of Hafen's own keys is a problem.
 
 ```
-tests/support/refund.hafen.yml:14:18  ${env:ACME_QA_PASSWORD} isn't set
+tests/support/refund.hafen.yml:12:9  tests.0.turns.0: unknown key "expcet" (did you mean "expect"?)
+tests/support/refund.hafen.yml:15:21  "contians" isn't a check type (did you mean "contains"?)
 ```
+
+A test with no checks is a warning, not a problem: it passes whenever each turn gets a reply.
+
+Each problem comes with the file, line and column, and what to fix. A secret that isn't set is
+named where it's first used: in the suite, or in the provider file that uses it. A preset's own key
+(`ANTHROPIC_API_KEY`) is named at the provider's `kind`, and System One's (`JEV_API_KEY`) at its judge.
+An `{{env.NAME}}` the environment hasn't is named at its first use too, and a secret a plugin writes
+at that line of the plugin's file. A name that can't be used is named where it's set, and an old
+spelling where it's written ([Old spellings](#old-spellings)). A problem with a provider's fixtures is
+named at the fixture in its list (`fixtures.before`):
+
+```
+tests/support/refund.hafen.yml:30:42  {{secret.ACME_QA_PASSWORD}} isn't set (not in the --secret file or the environment)
+tests/support/providers/anthropic-judge.yml:1:7  {{secret.ANTHROPIC_API_KEY}} isn't set (not in the --secret file or the environment)
+tests/support/refund.hafen.yml:28:13  {{env.base_url}} isn't set: the environment "prod" has no base_url
+plugins/acme-login.js:14:47  {{secret.ACME_PASSWORD}} isn't set (not in the --secret file or the environment) (the fixture plugin "acme-login" names it)
+tests/support/refund.hafen.yml:11:3  variables.env: a variable can't be called "env" ({{env.NAME}} is a value of the environment): call it something else
+```
+
+With no `--secret` file, a secret that isn't set says `(not in the environment: set it, or pass
+--secret <file>)`. In the app, it says the scope: `{{secret.ACME_QA_PASSWORD}} isn't set for the scope
+"staging"`.
+
+A file a suite names (a provider, data, prices or schema file, or a plugin) by a path that climbs out
+of the opened folder (`../outside.yml` from a suite at its top) is outside it, wherever that leads,
+and said so: `provider: the provider file ../outside.yml isn't in the opened folder (only files in
+it are read)`.
 
 ## Not built yet
 

@@ -17,7 +17,7 @@ import { copyText } from "../lib/clipboard.js";
 import { ago, money, sec, tokens as tokenText, when } from "../lib/format.js";
 import * as idb from "../lib/idb.js";
 import {
-  app, chooseProvider, compareRuns, deleteCheck, deleteConversation, deleteFile, deleteRun, deleteTest, deleteTurn, editSuite, freeSuiteFile, newTest, relativePath, renameSuite, exportRun, openRun, readFile, renameConversation, runForTest, runTests,
+  app, chooseProvider, compareRuns, providerChoices, deleteCheck, deleteConversation, deleteFile, deleteRun, deleteTest, deleteTurn, editSuite, freeSuiteFile, newTest, openFolder, problemsOf, warningsOf, relativePath, renameSuite, exportRun, openRun, readFile, renameConversation, runForTest, runTests,
   liveForSuite, liveForTest, liveIn, runAgain, saveConversation, select, setCheckOn, stopRun, suiteOf, suiteRunFor, testOf, writeFile,
 } from "../state.js";
 import { CheckCard, CheckOnBox } from "./check-card.jsx";
@@ -25,6 +25,8 @@ import { runTestDefinition } from "./thread.jsx";
 import { isOn, kindOf } from "./check-types.js";
 import { Facts, FieldHead, NumberField, Pre, Problems, TextField } from "./fields.jsx";
 import { showProvider } from "./providers.jsx";
+import { showPlugin } from "./plugins.jsx";
+import { FixturesSummary, sendProblem } from "./fixtures-field.jsx";
 import { instancesOf, pairResults, pairTurns, pickedInstance, spanFor, statsLine, testResult, testStatusText, turnsOf, visibilityText } from "./derive.js";
 
 // The run a turn or check is shown from (the open run when picked in its thread, else the test's
@@ -42,7 +44,9 @@ function turnRecordOf(selection, test, i) {
 
 /* ---------- parts ---------- */
 
-// onBack: what holds this (a check's or a step's turn, a turn's test, a test's suite)
+// onBack: what holds this (a check's or a step's turn, a turn's test, a test's suite). On a small
+// screen, where the panel covers the thread, hide (before ×) puts it away and keeps what's selected
+// open; × closes it (spec/design/components.md, Additions: The panel on a small screen)
 const Head = ({ icon, label, onClose, onBack, backLabel }) => (
   <div className="panel-head">
     {onBack && (
@@ -51,6 +55,10 @@ const Head = ({ icon, label, onClose, onBack, backLabel }) => (
       </button>
     )}
     <span className="block-label"><Icon name={icon} size={16} /><span className="label">{label}</span></span>
+    <button className="btn btn-ghost btn-icon panel-hide" id="panelHide" type="button" aria-label="Hide the details" aria-controls="panel"
+            title="Hide the details (what's open stays open)" onClick={() => app.set({ panelOpen: false })}>
+      <Icon name="sidebar" size={16} />
+    </button>
     <button className="btn btn-ghost btn-icon" id="panelClose" type="button" aria-label={`Close ${label.toLowerCase()}`} title="Close" onClick={onClose}>
       <Icon name="close" size={16} />
     </button>
@@ -63,13 +71,15 @@ const refName = (ref) => (typeof ref === "string" ? ref.split("/").pop().replace
 
 // Which provider a suite (or one test) runs on: the folder's providers, by name. The file says it as
 // a path relative to itself. A reference that isn't one of them (a missing file, a preset, an inline
-// provider) shows as it is, so it can be seen and replaced.
-function ProviderPicker({ id, label, file, current, resolved, inherit, onChange }) {
-  const { providers } = useStore(app);
+// provider, one of the suite's named providers) shows as it is, so it can be seen and replaced.
+// used: the provider file the test or suite runs with (its own, or the one it inherits): its fixtures.
+// named: the name under the suite's providers: the reference is, when it's one
+function ProviderPicker({ id, label, file, current, resolved, used, named, inherit, onChange }) {
+  const providers = providerChoices(useStore(app));
   const value = current === undefined ? "" : resolved && providers.some((p) => p.file === resolved) ? resolved : "?";
   const options = [
     ...(inherit ? [["", inherit]] : current === undefined ? [["", "choose a provider", true]] : []),
-    ...(value === "?" ? [["?", `${refName(current)}${typeof current === "string" && !resolved ? " (missing)" : ""}`, true]] : []),
+    ...(value === "?" ? [["?", named ? `${named} (in this suite's providers)` : `${refName(current)}${typeof current === "string" && !resolved ? " (missing)" : ""}`, true]] : []),
     ...providers.map((p) => [p.file, p.name]),
   ];
   return (
@@ -84,16 +94,38 @@ function ProviderPicker({ id, label, file, current, resolved, inherit, onChange 
           onChange(next ? relativePath(file, next) : null);
         }} />
       </label>
+      <FixturesSummary id={`${id}Fixtures`} providerFile={value === "?" ? null : used ?? resolved ?? null} />
     </>
   );
 }
 
-const ciCommand = (file, test, env) => [
-  "npx hafen run", JSON.stringify(file),
-  env && `--env ${env}`,
-  test && (test.id ? `--test ${JSON.stringify(test.name)}` : `--test ${JSON.stringify(test.name)}`),
-  "--report junit:results/junit.xml", "--report run:results/run.hafen-run.json",
-].filter(Boolean).join(" ");
+// The files a CI run takes the scope chosen from, as Settings → Environments' and Secrets' Export write
+// them: <scope>.env (its values), and <scope>.secret.env (its secrets, with every scope's) when it has any
+function ciFiles({ env, scopeSecrets = {} }) {
+  const secrets = (scopeSecrets[env ?? ""]?.length ?? 0) + (env ? scopeSecrets[""]?.length ?? 0 : 0);
+  return { env: env ? `${env}.env` : null, secret: secrets ? `${env || "every-scope"}.secret.env` : null };
+}
+
+const ciCommand = (file, test, state) => {
+  const files = ciFiles(state);
+  return [
+    "npx hafen run", JSON.stringify(file),
+    files.env && `--env ${files.env}`,
+    files.secret && `--secret ${files.secret}`,
+    test && `--test ${JSON.stringify(test.name)}`,
+    "--report junit:results/junit.xml", "--report run:results/run.hafen-run.json",
+  ].filter(Boolean).join(" ");
+};
+
+// Under Copy CI command: where the files it names come from
+function CiHint({ id }) {
+  const files = ciFiles(useStore(app));
+  const named = [files.env, files.secret].filter(Boolean);
+  if (!named.length) return null;
+  const where = files.env && files.secret ? "Environments and Secrets" : files.env ? "Environments" : "Secrets";
+  const keep = files.secret ? ` (keep ${files.env ? "the secrets file" : "it"} out of version control)` : "";
+  return <p className="hint panel-note" id={id}>{`Export in Settings → ${where} writes ${named.join(" and ")}, which it reads${keep}.`}</p>;
+}
 
 function CopyButton({ id, text, label = "Copy CI command", className = "btn" }) {
   const [said, setSaid] = useState(label);
@@ -190,10 +222,17 @@ function judgeCallOf(run, record, k) {
 /* ---------- views ---------- */
 
 function ConversationView({ close }) {
-  const { conversation, providers, suites, selection } = useStore(app);
+  const state = useStore(app);
+  const { conversation, providers, suites, selection } = state;
+  const choices = providerChoices(state);
   const [chosenSuite, setSuiteFile] = useState("");
   const suiteFile = suites.some((s) => s.file === chosenSuite) ? chosenSuite : "";
   const [name, setName] = useState("");
+  // A new suite's name (its file's, without .hafen.yml: smoke, or support/refunds), else the next free
+  const [suiteName, setSuiteName] = useState("");
+  const typed = suiteName.trim().replace(/\.hafen\.(ya?ml|json)$/i, "");
+  const badName = typed !== "" && !/^[A-Za-z0-9][\w.-]*(\/[A-Za-z0-9][\w.-]*)*$/.test(typed);
+  const newFile = typed && !badName ? `${typed}.hafen.yml` : freeSuiteFile();
   const run = conversation?.run;
   const turns = run?.turns ?? [];
   const selected = selection.explore && selection.turn !== undefined ? turns[selection.turn] : turns.at(-1);
@@ -209,15 +248,19 @@ function ConversationView({ close }) {
     <>
       <Head icon="provider" label="Conversation" onClose={close} />
       <div className="panel-body">
-        <FieldHead label="Provider" htmlFor="convProvider" actions={
-          <button className="btn btn-ghost" id="convProviders" type="button" title="Settings → Providers" onClick={() => showProvider(providers.length ? conversation?.provider ?? null : "new")}>{providers.length ? "manage" : "add one"}</button>
+        {/* (no folder open yet: a provider is a file in one, so the first step is opening one) */}
+        <FieldHead label="Provider" htmlFor="convProvider" actions={state.opened || providers.length
+          ? <button className="btn btn-ghost" id="convProviders" type="button" title="Settings → Providers" onClick={() => showProvider(providers.length ? conversation?.provider ?? null : "new")}>{providers.length ? "manage" : "add one"}</button>
+          : <button className="btn btn-ghost" id="convProviders" type="button" title="Providers are files in a folder: open one first" onClick={openFolder}>open a folder</button>
         } />
         <label className="select">
-          <Select id="convProvider" value={conversation?.provider ?? ""} options={[["", providers.length ? "Choose a provider" : "No providers yet", true], ...providers.map((p) => [p.file, p.name])]}
+          <Select id="convProvider" value={conversation?.provider ?? ""} options={[["", providers.length ? "Choose a provider" : "No providers yet", true], ...choices.map((p) => [p.file, p.name])]}
                   disabled={!!conversation?.sending} title={conversation?.sending ? "Wait for the reply (or stop it) to change the provider" : undefined}
                   onChange={(e) => chooseProvider(e.target.value, { keep: true })} />
         </label>
         {turns.length > 0 && <p className="hint">Another provider carries this conversation on: the turns so far are its history.</p>}
+        {/* (what stops a message to the provider, known before sending, is said here, by it: not at the box) */}
+        <FixturesSummary id="convFixtures" providerFile={conversation?.provider ?? null} problem={sendProblem(state.plugins)} />
         {turns.length > 0 && (
           <TextField key={conversation.id} id="convTitle" label="Name" single value={conversation.title ?? ""} placeholder={String(turns.find(Boolean)?.user ?? "").replace(/\s+/g, " ").slice(0, 60)}
                      onSave={(v) => renameConversation(v)} />
@@ -232,15 +275,24 @@ function ConversationView({ close }) {
         {selected && <TurnRecord record={selected} index={turns.indexOf(selected)} />}
         <FieldHead label="Save as test" />
         <label className="select">
-          <Select id="saveSuite" value={suiteFile} options={[["", `New suite (${freeSuiteFile()})`], ...suites.map((s) => [s.file, s.file])]} onChange={(e) => setSuiteFile(e.target.value)} />
+          <Select id="saveSuite" value={suiteFile} options={[["", `New suite (${newFile})`], ...suites.map((s) => [s.file, s.file])]} onChange={(e) => setSuiteFile(e.target.value)} />
         </label>
-        <div className="field-head"><label className="hint" htmlFor="saveName">Name</label></div>
+        {!suiteFile && (
+          <>
+            <div className="field-head"><label className="hint" htmlFor="saveSuiteName">Suite name</label></div>
+            <input className="input" id="saveSuiteName" type="text" placeholder={freeSuiteFile().replace(/\.hafen\.yml$/, "")} value={suiteName} onChange={(e) => setSuiteName(e.target.value)} autoComplete="off" spellCheck={false} />
+            {badName && <p className="hint error" id="saveSuiteNameProblem" role="alert">A suite's name is letters, digits, '.', '-' and '_' (and '/' for a folder).</p>}
+            {!badName && suites.some((s) => s.file === newFile) && <p className="hint" id="saveSuiteNameNote">{`${newFile} is there already: the test goes into it.`}</p>}
+          </>
+        )}
+        <div className="field-head"><label className="hint" htmlFor="saveName">Test name</label></div>
         <input className="input" id="saveName" type="text" placeholder="What this conversation tests" value={name} onChange={(e) => setName(e.target.value)} autoComplete="off" />
         <div className="controls">
-          <button className="btn btn-primary" id="saveTest" type="button" disabled={!turns.length || !name.trim()} onClick={async () => {
+          <button className="btn btn-primary" id="saveTest" type="button" disabled={!turns.length || !name.trim() || (!suiteFile && badName)} onClick={async () => {
             try {
-              await saveConversation({ file: suiteFile || freeSuiteFile(), name: name.trim() });
+              await saveConversation({ file: suiteFile || newFile, name: name.trim() });
               setName("");
+              setSuiteName("");
             } catch (err) {
               notify({ title: "Couldn't save the test", text: err.message, kind: "error" });
             }
@@ -258,7 +310,7 @@ function ConversationView({ close }) {
 }
 
 function SuiteView({ file, close }) {
-  const { env } = useStore(app);
+  const state = useStore(app);
   const now = useNow();
   const [tries, setTries] = useState(0);  // a rename that didn't happen puts the name back
   const suite = suiteOf(file);
@@ -277,7 +329,7 @@ function SuiteView({ file, close }) {
           if (!v.trim() || !(await renameSuite(file, v))) setTries((n) => n + 1);
         }} />
         <p className="hint">{file}</p>
-        <ProviderPicker id="suiteProvider" label="Provider" file={file} current={d.provider} resolved={suite.providerFiles?.[""]}
+        <ProviderPicker id="suiteProvider" label="Provider" file={file} current={d.provider} resolved={suite.providerFiles?.[""]} named={suite.providerNames?.[""]}
                         onChange={(ref) => editSuite(file, [{ op: "set", path: ["provider"], value: ref }]).catch(() => {})} />
         <div className="controls">
           <NumberField id="suiteGroup" label="Group" min="1" step="1" value={d.group}
@@ -295,13 +347,14 @@ function SuiteView({ file, close }) {
             return at ? `${when(at)} · ${ago(at, now)}` : undefined;
           })()],
         ]} />
-        <Problems problems={[...(suite.errors ?? []), ...(suite.missing ?? [])]} />
-        {suite.warnings?.length > 0 && <p className="hint panel-note">{suite.warnings.map((w) => w.message).join(" · ")}</p>}
+        <Problems problems={problemsOf(file)} file={file} />
+        {warningsOf(file).length > 0 && <p className="hint panel-note">{warningsOf(file).map((w) => w.message).join(" · ")}</p>}
         <div className="controls">
           <button className={"btn btn-primary" + (running ? " stop" : "")} id="suiteRun" type="button" disabled={busy} title={busy ? "A test of it is running" : undefined} onClick={() => (running ? stopRun(going.token) : runTests(file).catch(() => {}))}>{running ? "Stop" : "Run suite"}</button>
           <button className="btn" id="suiteAddTest" type="button" onClick={() => newTest(file).catch(() => {})}>Add test</button>
-          <CopyButton id="suiteCopyCi" text={ciCommand(file, null, env)} />
+          <CopyButton id="suiteCopyCi" text={ciCommand(file, null, state)} />
         </div>
+        <CiHint id="suiteCiHint" />
         <div className="controls"><EditFile file={file} id="suiteYaml" label="Edit the file as YAML" /></div>
         <div className="panel-foot">
           <p className="hint">{suite.file}</p>
@@ -315,7 +368,7 @@ function SuiteView({ file, close }) {
 function TestView({ file, index, close }) {
   const state = useStore(app);
   const now = useNow();
-  const { env, runs } = state;
+  const { runs } = state;
   const suite = suiteOf(file);
   const test = testOf(file, index);
   const [history, setHistory] = useState([]);
@@ -347,10 +400,11 @@ function TestView({ file, index, close }) {
       <Head icon="test" label="Test" onClose={close} onBack={() => select({ kind: "suite", file })} backLabel="Back to the suite" />
       <div className="panel-body">
         <TextField id="testName" label="Name" value={test.name} single onSave={(v) => v.trim() && set("name", v.trim())} />
-        <ProviderPicker id="testProvider" label="Provider" file={file} current={test.provider} resolved={suite.providerFiles?.[`test:${index}`]}
+        <ProviderPicker id="testProvider" label="Provider" file={file} current={test.provider} resolved={suite.providerFiles?.[`test:${index}`]} named={suite.providerNames?.[`test:${index}`]}
+                        used={test.provider === undefined ? suite.providerFiles?.[""] : suite.providerFiles?.[`test:${index}`]}
                         inherit={`the suite's (${refName(suite.data?.provider) || "none"})`}
                         onChange={(ref) => editSuite(file, [ref ? { op: "set", path: ["tests", index, "provider"], value: ref } : { op: "delete", path: ["tests", index, "provider"] }]).catch(() => {})} />
-        <TextField id="testTags" label="Tags (comma-separated)" single value={tags} placeholder="smoke, refunds" onSave={(v) => {
+        <TextField id="testTags" label="Tags (comma-separated)" single value={tags} placeholder="No tags yet" onSave={(v) => {
           const list = v.split(",").map((x) => x.trim()).filter(Boolean);
           return list.length ? set("tags", list) : unset("tags");
         }} />
@@ -374,9 +428,10 @@ function TestView({ file, index, close }) {
         <TextField id="testData" label="Data file (CSV or JSON lines)" single value={typeof test.data === "string" ? test.data : test.data?.file ?? ""} placeholder="data/rows.csv" onSave={(v) => (!v.trim() ? unset("data") : test.data && typeof test.data === "object" ? editSuite(file, [{ op: "set", path: ["tests", index, "data", "file"], value: v.trim() }]) : set("data", v.trim()))} />
         <div className="controls">
           <button className={"btn btn-primary" + (isLive ? " stop" : "")} id="testRun" type="button" onClick={() => (isLive ? stopRun(going.token) : runTests(file, index).catch(() => {}))}>{isLive ? "Stop" : "Run"}</button>
-          <CopyButton id="testCopyCi" text={ciCommand(file, test, env)} />
+          <CopyButton id="testCopyCi" text={ciCommand(file, test, state)} />
         </div>
-        <Problems problems={[...(suite.errors ?? []), ...(suite.missing ?? [])]} />
+        <CiHint id="testCiHint" />
+        <Problems problems={problemsOf(file)} file={file} />
         <InstancePicker run={run} file={file} test={test} selection={state.selection} id="testInstance" />
         {result && (
           <>
@@ -460,7 +515,8 @@ function TurnRecord({ record, index, onAddCheck }) {
       <details className="panel-template" id="turnRequest"><summary>Request</summary><Pre value={record.request ?? "—"} /></details>
       {record.response?.chunks?.length > 0 && <details className="panel-template" id="turnStream"><summary>{`Raw stream · ${record.response.chunks_total} chunk${record.response.chunks_total === 1 ? "" : "s"}`}</summary><Pre value={record.response.chunks.join("")} /></details>}
       <Facts className="panel-facts" id="turnFacts" facts={[
-        ["first token", m.ttft_ms !== undefined ? sec(m.ttft_ms) : undefined],
+        // (a turn that failed before any text came had no first token)
+        ["first token", m.ttft_ms !== undefined && (!record.error || record.reply) ? sec(m.ttft_ms) : undefined],
         ["thinking", m.thinking_ms !== undefined ? sec(m.thinking_ms) : undefined],
         ["first answer", m.first_answer_ms !== undefined ? sec(m.first_answer_ms) : undefined],
         ["total", m.ms !== undefined ? sec(m.ms) : undefined],
@@ -670,7 +726,45 @@ function StepView({ span, run, close, back }) {
         {event?.type === "tool_result" && <><FieldHead label="Result" /><JsonTree id="stepResult" value={event.result ?? null} label="Result" /></>}
         {span.kind === "request" && turn?.request && <><FieldHead label="Request" /><Pre value={turn.request} /></>}
         {span.kind === "judge_call" && span.request && <JudgeRequest request={span.request} id="stepJudgeRequest" running={span.end === undefined} />}
+        {span.kind === "fixture" && (
+          <Facts className="panel-facts" id="stepFixture" facts={[
+            ["fixture", span.fixture?.name && <button className="btn btn-ghost inline-link" type="button" id="stepFixtureCode" title="Its code (Settings → Plugins)" onClick={() => showPlugin(span.fixture.name)}>{span.fixture.name}</button>],
+            ["when", span.fixture?.phase], ["provider", span.fixture?.provider],
+            ["gave", m.provides?.length ? m.provides.join(", ") : undefined], ["calls", m.calls ? String(m.calls) : undefined], ["error", span.error],
+          ]} />
+        )}
+        {span.kind === "call" && <CallDetails span={span} />}
       </div>
+    </>
+  );
+}
+
+// A plugin's (or a fixture's) HTTP call: what it sent and what came back, as the run kept them
+// (redacted: a secret header or value shows as [redacted]; the body's start, when it's long)
+const pretty = (body) => {
+  if (typeof body !== "string") return JSON.stringify(body, null, 2);
+  try {
+    return JSON.stringify(JSON.parse(body), null, 2);
+  } catch {
+    return body;
+  }
+};
+function CallDetails({ span }) {
+  const req = span.request ?? {};
+  const res = span.response;
+  return (
+    <>
+      {/* (the plugin that made it, "fixture acme-login": a link to its code) */}
+      <FieldHead label="Request" id="stepCallRequestLabel" actions={span.plugin ? (
+        <button className="btn btn-ghost" type="button" id="stepCallPlugin" title="Its code (Settings → Plugins)" onClick={() => showPlugin(span.plugin.split(" ").slice(1).join(" "))}>{span.plugin}</button>
+      ) : null} />
+      <p className="hint judge-request-url" id="stepCallUrl">{`${req.method ?? "GET"} ${req.url ?? ""}`}</p>
+      {Object.keys(req.headers ?? {}).length > 0 && <Facts className="panel-facts" id="stepCallHeaders" facts={Object.entries(req.headers)} />}
+      {req.body !== undefined && <Pre id="stepCallBody" className="judge-request" value={pretty(req.body)} />}
+      <FieldHead label="Response" id="stepCallResponseLabel" actions={<span className="hint" id="stepCallStatus">{res?.status !== undefined ? String(res.status) : span.end === undefined ? "waiting…" : "no response"}</span>} />
+      {span.error && <p className="hint error" id="stepCallError">{span.error}</p>}
+      {Object.keys(res?.headers ?? {}).length > 0 && <Facts className="panel-facts" id="stepCallResponseHeaders" facts={Object.entries(res.headers).map(([k, v]) => [k, Array.isArray(v) ? v.join("; ") : v])} />}
+      {res?.body ? <Pre id="stepCallResponseBody" className="judge-request" value={pretty(res.body)} /> : null}
     </>
   );
 }

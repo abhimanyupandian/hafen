@@ -11,6 +11,12 @@
 //   secrets_scopes  → the scopes that have secrets ("" for every scope)
 //   secrets_list    {env} → which secret names have values (never the values)
 //   secrets_set     {env, name, value} → keep a value ("" forgets it)
+//   secrets_set_many {env, values} → keep several at once ({NAME: value}, "" forgetting one): an import
+//   secrets_drop    {env} → forget every secret of a scope (the scope deleted)
+//   secrets_move    {from, to} → a scope's secrets kept under its new name (the scope renamed)
+//   secrets_export  {env, file} → ask where, and write the scope's secrets there as a .env file, in
+//                   plain text (its own over every scope's: what --secret reads in CI); the values
+//                   never pass through the page. → the path written, or null
 //   notify_system   {title, body, tag} → the system's notification, when the window isn't in front;
 //                   clicked, the window comes forward and the page is told its tag (hafen:notification)
 //   set_theme       {applied} → the window's background and native parts follow the page
@@ -20,6 +26,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { carryOver, LEGACY_FOLDER } from "./carry-over.js";
+import { envValueText } from "hafen/engine/env-file.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const PAGE = join(here, "../app/dist/index.html");
@@ -86,17 +93,38 @@ function readSecrets() {
   return { values, stored, unreadable };
 }
 
-// Write the values, keeping the ones that couldn't be read as they were in the file
+// Write the values, keeping the ones that couldn't be read as they were in the file. A scope with
+// none left isn't written at all: no trace of it stays in the file.
 function writeSecrets({ values, stored, unreadable }) {
   const out = {};
   for (const env of new Set([...Object.keys(stored), ...Object.keys(values)])) {
-    out[env] = {};
-    for (const [name, value] of Object.entries(stored[env] ?? {})) if (unreadable.has(`${env}\0${name}`)) out[env][name] = value;
-    for (const [name, value] of Object.entries(values[env] ?? {})) out[env][name] = encrypt(value);
+    const kept = {};
+    for (const [name, value] of Object.entries(stored[env] ?? {})) if (unreadable.has(`${env}\0${name}`)) kept[name] = value;
+    for (const [name, value] of Object.entries(values[env] ?? {})) kept[name] = encrypt(value);
+    if (Object.keys(kept).length) out[env] = kept;
   }
   mkdirSync(dirname(secretsFile()), { recursive: true });
   writeFileSync(secretsFile(), JSON.stringify(out, null, 2), { mode: 0o600 });
 }
+
+// Change the values (each scope's {NAME: value}; a value "" forgets it), write them and give the engine
+// them. A file that can't be read at all throws, and nothing is written over it.
+function changeSecrets(change) {
+  const all = readSecrets();
+  change(all);
+  writeSecrets(all);
+  sendSecrets();
+}
+const setIn = (all, env, values) => {
+  all.values[env] = { ...(all.values[env] ?? {}) };
+  for (const [name, value] of Object.entries(values)) {
+    if (!SECRET_NAME.test(name ?? "")) throw new Error(`"${name}": a secret's name is letters, digits and _`);
+    all.unreadable.delete(`${env}\0${name}`);  // set or forgotten: what was there goes
+    if (value) all.values[env][name] = String(value);
+    else delete all.values[env][name];
+  }
+};
+const SECRET_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 const sendSecrets = () => {
   try {
@@ -129,11 +157,18 @@ function connect() {
 
 /* ---------- the window ---------- */
 
+// The window's look before the page draws: the theme the page last applied, unless it was the system's
+// (or none was chosen yet, a first start): then the system's now, so a dark system never sees a light
+// window first
 function themeNow() {
+  const system = nativeTheme.shouldUseDarkColors ? "dark" : "light";
   try {
-    return JSON.parse(readFileSync(join(app.getPath("userData"), "window.json"), "utf8")).applied ?? "light";
+    const saved = JSON.parse(readFileSync(join(app.getPath("userData"), "window.json"), "utf8"));
+    // (a file from before the choice was kept in it has only what was applied)
+    if (saved.choice === "system" || !["light", "dark"].includes(saved.choice ?? saved.applied)) return system;
+    return saved.applied === "dark" ? "dark" : "light";
   } catch {
-    return "light";
+    return system;
   }
 }
 
@@ -182,16 +217,43 @@ const COMMANDS = {
     return Object.fromEntries(Object.keys(values[env] ?? {}).map((name) => [name, true]));
   },
   secrets_set({ env = "", name, value }) {
-    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name ?? "")) throw new Error("a secret's name is letters, digits and _");
-    // (A file that can't be read at all throws here, and nothing is written over it)
-    const all = readSecrets();
-    all.values[env] = { ...(all.values[env] ?? {}) };
-    all.unreadable.delete(`${env}\0${name}`);  // set or forgotten: what was there goes
-    if (value) all.values[env][name] = value;
-    else delete all.values[env][name];
-    writeSecrets(all);
-    sendSecrets();
+    changeSecrets((all) => setIn(all, env, { [name]: value }));
     return true;
+  },
+  secrets_set_many({ env = "", values = {} }) {
+    changeSecrets((all) => setIn(all, env, values));
+    return true;
+  },
+  secrets_drop({ env }) {
+    if (!env) throw new Error("name the scope whose secrets go");
+    changeSecrets((all) => {
+      delete all.values[env];
+      delete all.stored[env];
+      for (const key of [...all.unreadable]) if (key.startsWith(`${env}\0`)) all.unreadable.delete(key);
+    });
+    return true;
+  },
+  secrets_move({ from, to }) {
+    if (!from || !to) throw new Error("name the scope and its new name");
+    changeSecrets((all) => {
+      if (!all.values[from]) return;
+      all.values[to] = { ...(all.values[to] ?? {}), ...all.values[from] };
+      delete all.values[from];
+      // (one that couldn't be read goes with it, as it was)
+      all.stored[to] = { ...(all.stored[to] ?? {}), ...Object.fromEntries(Object.entries(all.stored[from] ?? {}).filter(([name]) => all.unreadable.has(`${from}\0${name}`))) };
+      delete all.stored[from];
+      for (const key of [...all.unreadable]) if (key.startsWith(`${from}\0`)) { all.unreadable.delete(key); all.unreadable.add(`${to}${key.slice(from.length)}`); }
+    });
+    return true;
+  },
+  async secrets_export({ env = "", file }) {
+    const { values } = readSecrets();
+    const mine = { ...(env ? values[""] ?? {} : {}), ...(values[env] ?? {}) };
+    const result = await dialog.showSaveDialog(win, { title: "Export the secrets, in plain text", defaultPath: join(app.getPath("documents"), file || `${env || "every-scope"}.secret.env`), buttonLabel: "Export" });
+    if (result.canceled || !result.filePath) return null;
+    const head = `# ${env ? `The "${env}" scope's secrets (with the ones kept for every scope)` : "The secrets kept for every scope"}, in plain text, from Hafen.\n# Keep this file out of version control. In CI: hafen run … --secret <this file>\n`;
+    writeFileSync(result.filePath, `${head}${Object.entries(mine).map(([name, value]) => `${name}=${envValueText(value)}\n`).join("")}`, { mode: 0o600 });
+    return result.filePath;
   },
   notify_system({ title, body, tag }) {
     if (Notification.isSupported()) {
@@ -212,7 +274,7 @@ const COMMANDS = {
     win?.setBackgroundColor(BACKGROUND[applied] ?? BACKGROUND.light);
     if (process.platform !== "darwin") win?.setTitleBarOverlay?.({ color: BACKGROUND[applied], symbolColor: applied === "dark" ? "#ededed" : "#0a0a0a" });
     try {
-      writeFileSync(join(app.getPath("userData"), "window.json"), JSON.stringify({ applied }));
+      writeFileSync(join(app.getPath("userData"), "window.json"), JSON.stringify({ applied, choice }));
     } catch {}
     return true;
   },

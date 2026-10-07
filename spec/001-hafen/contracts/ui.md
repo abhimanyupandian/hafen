@@ -66,14 +66,42 @@ that section if it's closed, scrolls to it and focuses its toggle.
 ### Head
 
 The logo at the left. At the right (`.nav-actions`), the **scope button** (`#scopeButton`, the
-`scope` icon and the scope chosen, or "no scope": [Scope button](../../design/components.md#scope-button)).
+`scope` icon and the scope chosen; `data-scope` its name, "" for none. With none chosen, no words: the
+icon alone, greyed out as a disabled field is (opacity .5; still a button), with a small `!` badge over
+its top right corner (`.scope-alert`), its `title` and `aria-label` `No scope chosen: choose one`:
+[Scope button](../../design/components.md#scope-button)).
 A click opens Settings on Environments, where the scope is chosen (`Scope`, `.select#envScope`, then
-`choose it`) among every scope there is: the folder's scope files (`environments/<scope>.yml`), the
-open suites' environments, and the scopes that have secrets (known before a folder is open, so one of
-those can be chosen with none open). The chosen one fills `{{scope.NAME}}` (its plain variables, then
-its secrets) and picks the suites' environment of that name; it applies to runs and the message box
-(as `--env` does in CI). The one chosen last is chosen again (after a reload, before a folder is
-open); when none was, a folder's first environment is.
+`choose it`) among the scopes made in the app (Settings → Environments), and only those; or `no scope`.
+A suite's `environments:` block gives a scope of the same name values too, but doesn't make one, and
+neither do secrets. A scope is a name, its environment values and its secrets, as the command line's
+`--env` and `--secret` files are: the app keeps any number, so one is swapped for another here. The
+chosen one fills `{{env.NAME}}` (its values, then the suites' environment of its name) and
+`{{secret.NAME}}` / `{{secrets.NAME}}` (its secrets, then those kept for every scope, then, in the
+desktop app, the environment variable it was started with). The old ways, `{{scope.NAME}}` and
+`${env:NAME}`, fill nothing: a field that has one says what to write instead, as the engine does. It
+applies to runs, the message box and a suite's check before it's run: every engine call that runs or
+checks something (`preflight`, `run`, `send`) passes `env: <scope>` and `environment: { name, values }`
+(the scope's values), or `environment: null` when none is chosen, so the engine never reads an
+environment from the folder. A suite's check before it's run is the engine's `preflight` (`{ files,
+env, environment }` → for each suite, `{ file, problems, warnings }`: what `hafen validate` lists,
+secrets taken as set). A switch applies to a conversation's next message. The one chosen last is
+chosen again (after a reload, before a folder is open), if it's still one of the app's; `no scope`,
+chosen, stays chosen; when none ever was, the first scope there is is, once a folder is open.
+
+**Where they're kept.** A scope's environment values: localStorage, in both builds (`eval.scopes`, the
+names in the order they were made; `eval.scope.<name>`, its values, one key a scope). Its secrets: in
+the desktop app, the main process's `secrets.json` in the app's data folder, each value encrypted with
+the system's keychain (safeStorage), keyed by scope (`""`: every scope; a scope with no secrets left
+isn't in the file), handed to the engine's process as they change and never to the page; in the
+browser build, `eval.secrets` (unencrypted, as Settings → Secrets says), given to the engine's worker
+(`configure`) as they change.
+
+**Deleting a scope** (Settings → Environments, `Delete scope`, asking first) deletes all of it at once:
+its secrets (the keystore's or the browser's storage), then its entry and its values (`eval.scopes`,
+`eval.scope.<name>`); it's gone from the scope button's list, Environments and Secrets, and, if it was
+the one chosen, no scope is chosen after it. Nothing brings it back: not a reload, a restart of the
+desktop app, a suite's environment of its name, nor a folder's file. (A folder's
+`environments/<scope>.yml`, the old way, isn't read by the app at all.)
 In the desktop window the logo is hidden and the button stays at the right, as the design system
 says.
 
@@ -297,6 +325,12 @@ button (no large-editor button: the box grows with what's typed, up to 200px, th
 Enter sends or adds; Shift+Enter is a new line; Esc stops. With a test open, `⌘↵` / `Ctrl+Enter`
 runs (see [Keyboard](#keyboard)) and adds nothing; exploring, it sends, as Enter does.
 
+A message the engine refused before sending it comes back in the box, the reason under it
+(`.hint.error#sendProblem`). A problem the provider is known to have before anything is sent (a
+fixture the folder hasn't got, say) is said only in the panel, by the provider (Conversation's
+`#convFixturesProblem`), not under the box nor in the top bar; Send is off meanwhile, its `title`
+`Can't send: …` ([Message box problems](../../design/components.md#message-box-problems)).
+
 ## Panel
 
 `aside.panel#panel`, 340px ([layout](../../design/layout.md#panel)): a 52px head (`.block-label`
@@ -316,11 +350,17 @@ test (in an open run: the run), a test's to its suite. A row of buttons in the b
 run out of the panel (they share the width; a label that doesn't fit is cut with an ellipsis), and
 the body never scrolls sideways.
 
-Every text field in the panel and in Settings, and the message box, checks the `{{scope.NAME}}`s in
-it as it's typed, for the scope chosen now: one its variables and its secrets (or every scope's)
-don't have, or none chosen, shows under the field (`.hint.error#<field>Problem`): `{{scope.nope}}
-isn't in the scope "stage": add it in Settings → Environments (or Secrets)`. The field still saves
-what's typed (a run with it would stop with a setup error).
+Every text field in the panel and in Settings, and the message box, checks what it takes from the
+scope as it's typed, for the scope chosen now: an `{{env.NAME}}` its values (or an open suite's
+environment of its name) haven't got, or none chosen; a `{{secret.NAME}}` (`{{secrets.NAME}}`) it and
+every scope have no secret for (nor a fixture gives); an old way to write one (`${env:NAME}`,
+`{{scope.NAME}}`), which fills nothing, said with what to write instead, as the engine says it
+(`${env:API_KEY} is the old way to write a secret: write {{secret.API_KEY}}`). It shows under
+the field (`.hint.error#<field>Problem`): `{{env.nope}} isn't in the scope "stage": add it in Settings →
+Environments`; `{{secret.KEY}} isn't a secret of the scope "stage" (or of every scope): add it in
+Settings → Secrets`. The field still saves what's typed (a run with it would stop with a setup error,
+said in its toast and the console; a message, in its turn, and nothing is sent). Every such field takes
+a template: none is a `type="url"` field the browser would refuse one in.
 
 The views:
 
@@ -328,10 +368,25 @@ The views:
 
 Head: `provider` icon, `CONVERSATION`.
 
-- `Provider` (`.select#convProvider`, with `manage` / `add one`): with turns already, another one
+- `Provider` (`.select#convProvider`, with `manage` / `add one`): the folder's providers, less a
+  provider file whose kind names a plugin that isn't a provider (a fixture's, a check's: from the
+  engine's list of the folder's plugins, `open`/`load`'s `plugins`, each loaded once per text). With
+  turns already, another one
   carries the conversation on (its turns so far are the history), as a `.hint` under it says. It's off
   while a message is on its way (its reply would be lost). Opening another conversation, or starting
   a new one, stops a message on its way.
+- `Fixtures` (the chosen provider's): a field head with `edit` (`#convFixturesEdit`, ghost: Settings →
+  Providers, that provider), then what it runs, in order, as facts (`#convFixtures`: `once, before the
+  run` → `acme-login → warm`, one per list that has any; a name the folder's plugins haven't, with
+  `(missing)`), or `#convFixturesNone` ("None yet: edit adds some…"; "Choose a provider file…" with
+  none chosen). The suite's and the test's provider pickers have the same (`#suiteProviderFixtures…`,
+  `#testProviderFixtures…`: the provider the test runs with, its own or the suite's), and the same
+  filter (only providers to pick). Under the conversation's, when the provider a message goes to has a
+  problem the app can see before sending (its fixtures can't be read or name one twice, a fixture or a
+  provider plugin the folder and the suite haven't got): `#convFixturesProblem` (`.hint.error`,
+  `role="alert"`: `ollama: the fixture "login" (fixtures.beforeAll) isn't in the folder's plugins/ or
+  the suite's plugins`) with `edit the provider` (`#convFixturesFix`: Settings → Providers, that
+  provider), in place of the fixtures' own line for the same thing. It's said here only; Send is off.
 - `Name` (`.input#convTitle`, once it has turns): its title, saved on blur or Enter; empty, its first
   message stands for it.
 - Facts (`dl.trace-facts`): turns, tokens, cost, p50, from the turns it has now.
@@ -365,8 +420,15 @@ Head: `suite` icon, `SUITE`.
 - Facts: tests, environments (names; secret values are kept in Settings → Secrets), judges, defaults
   (repeat, pass rate, history, on failure, unsure), plugins, last run (`14:02:11 · 2 mins ago`: the
   latest of its tests').
+- Its problems (an old way its files, or its plugins, write a secret or an environment's value is one,
+  saying the new way: `${env:API_KEY} is the old way to write a secret: write {{secret.API_KEY}}`),
+  then its warnings as the file was read (`.hint.panel-note`, joined by ` · `): a test with no checks,
+  what isn't built yet.
 - `RUN SUITE` (`.btn-primary#suiteRun`; `STOP` while it runs; off while one of its tests runs on its
-  own), `Add test` (`.btn#suiteAddTest`), `Copy CI command` (`.btn#suiteCopyCi`); then `Edit the file
+  own), `Add test` (`.btn#suiteAddTest`), `Copy CI command` (`.btn#suiteCopyCi`: `npx hafen run
+  "<file>" --env <scope>.env --secret <scope>.secret.env --report junit:… --report run:…`, `--env` with
+  a scope chosen, `--secret` when it or every scope has secrets; under it, `.hint#suiteCiHint`, that
+  Settings → Environments' and Secrets' Export write those files); then `Edit the file
   as YAML` (`.btn#suiteYamlEdit`): it reads the file as it is when pressed and opens it in the large
   editor (code style); Save validates and writes. Foot: the file path
 (`.hint`), `Delete suite file` (`#suiteDelete`, asking `delete this file?`), which deletes the file
@@ -387,7 +449,8 @@ Head: `test` icon, `TEST`.
   (`.input#testData`, a file path, with the row count as a `.hint`).
 - `Setup` and `Teardown`: one line each per step (`.hint`), edited as YAML.
 - `.controls`: `RUN` (`.btn-primary#testRun`, `STOP` while running) and `Copy CI command`
-  (`.btn#testCopyCi`, which says `copied` for 1.5s).
+  (`.btn#testCopyCi`, which says `copied` for 1.5s: the suite's, with `--test "<name>"`; its hint
+  `.hint#testCiHint`).
 - `Showing` (`.select#testInstance`, a test that ran more than once, by repeat or data row): which
   run the thread shows, `run 3 of 3 · passed`, failed ones first in the list; with none picked, the
   latest (the one going on, while it runs).
@@ -459,6 +522,14 @@ Head: `timeline` icon, `STEP · <KIND>`. Facts: kind, name, start, duration, sta
 then its content: the thinking text, a tool call's arguments and result (JSON trees), a request and
 response, a judge's question and answer, a retry's reason.
 
+A fixture (`fixture`) shows facts (`#stepFixture`): fixture, when (its phase), provider, gave (the
+names, never values), calls, error. A plugin's or fixture's call (`call`) shows `Request`, its plugin
+in its head (`#stepCallPlugin`, `fixture acme-login`), `METHOD url` (`#stepCallUrl`), its headers as
+facts (`#stepCallHeaders`), its body (`#stepCallBody`, pretty JSON when it's JSON); then `Response`,
+its status in its head (`#stepCallStatus`; `waiting…` while it's going, `no response` when it failed
+first), its error (`#stepCallError`), its headers (`#stepCallResponseHeaders`) and the start of its
+body (`#stepCallResponseBody`). Secrets show as `[redacted]`.
+
 A System One call (`judge_call`) shows `Request to System One` (`#stepJudgeRequest`): the request it
 sent, all of it, as soon as it's sent (while the run goes on, and the call's still being answered:
 `asking…` in `--run` in its head): `POST <endpoint>/v1/systemone` (`#stepJudgeRequestUrl`), its
@@ -495,7 +566,12 @@ area and above the console, spanning the full width, open by default (`eval.sect
 - Shows the open run (or the explore conversation, or the open test's last run), for the repeat
   and row the panel shows.
 - Head: `TIMELINE`, then `fit` (`#timelineFit`, ghost: fit the run to the width; with steps only)
-  and a `.hint` with the total (`4.1 s · 37 steps`).
+  and a `.hint` with the total (`4.1 s · 37 steps`); when what it shows has fixtures,
+  `hide fixtures` / `show fixtures` (`#timelineFixtures`, ghost, `aria-pressed` when hidden): the
+  fixtures' steps (and the calls under them) left out, or shown again. One choice with the console's,
+  remembered (`eval.fixtures`: `hidden` or `shown`).
+- A provider's fixtures are steps (`fixture`, named `<fixture> · <phase>`), each plugin's or
+  fixture's HTTP call too (`call`, under what made it).
 - Rows: one group per turn (`TURN 1`), and setup and teardown groups; load runs show one row per
   concurrent slot.
 - Empty (`.no-steps` on the dock and its body): `.note.timeline-empty#timelineEmpty` "Run a test or
@@ -560,14 +636,21 @@ or reply's body, a header, or a secret's value.
 | Name | When | Attributes |
 |---|---|---|
 | `engine.<command>` | Each engine command, when it's answered (`open`, `load`, `edit`, `create`, `write`, `read`, `remove`, `rename`, `run`, `send`, `saveConversation`, `configure`, …) | What it was about: the file, the edit (`op=set:tests.0.name`), what it found (`found="2 suites, 2 providers"`), a run's result (`result="failed 0/1"`), `concurrency`; then `ok` or `error: …`, and its time |
-| `http.request` | Each HTTP call the engine makes (a run's, a conversation's, a judge's, a setup step's) | `method`, `url` (no user or password; query values whose names look like keys, tokens or secrets as `***`); then its status, its time to the end of its body, its size |
+| `http.request` | Each HTTP call the engine makes (a run's, a conversation's, a judge's, a setup step's, a plugin's, a fixture's) | `method`, `url` (no user or password; query values whose names look like keys, tokens or secrets as `***`), `via` (the plugin or fixture that made it: `fixture:acme-login`, `provider:acme`); then its status, its time to the end of its body, its size |
+| `run.fixture`, `conversation.fixture` | Each provider fixture, as it ends | `name`, `phase`, `provider`, `test`, `calls`; `ok · gave NAMES` (never values) or `error: …` |
 | `run.start`, `run.turn`, `run.test` | A run starting; each turn and test as it ends | The file, the test, `until_turn` / `only_turn`, `at_once`; a turn's checks (`4/5`); a test's status |
 | `conversation.turn`, `conversation.open`, `conversation.delete`, `conversation.turn.delete`, `conversation.clear` | A conversation's events | Its turn, its name |
 | `run.delete`, `run.clear`, `run.import` | Runs kept here | The run |
-| `config.env`, `config.provider`, `config.secret`, `config.relay`, `config.theme` | A setting changed | Its new value; a secret's name and environment, and `set` or `forget` |
+| `config.scope`, `config.provider`, `config.secret`, `config.relay`, `config.theme` | A setting changed | Its new value (the scope chosen, `none`); a secret's name and scope, and `set`, `forget` or `import` |
+| `scope.create`, `scope.value`, `scope.rename`, `scope.delete`, `scope.import`, `scope.export`, `scope.export.secrets` | A scope made, renamed or deleted; a value set or deleted; values imported (from a `.env` file) or exported | The scope; a value's name (never a secret's value), how many were imported, the file |
 
 Errors (a failed command, an HTTP status of 400 or more, a call that didn't get an answer) are
-`--danger`. The console keeps the last 3000 lines; `copy` puts them all on the clipboard.
+`--danger`. The console keeps the last 3000 lines; `copy` puts what it shows on the clipboard.
+
+Lines about a provider's fixtures (`*.fixture`, and `http.request` with `via=fixture:…`) are tagged
+(`data-tag="fixture"`): `hide fixtures` / `show fixtures` in the console's head (`#consoleFixtures`,
+once the folder's providers have fixtures, or while they're hidden) leaves them out. One choice with
+the timeline's.
 
 ## Settings
 
@@ -578,7 +661,7 @@ foot (`#settingsUsage`) says the storage used: `Storage used` over the size (`#s
 `2.7 MB`, in `--fg`), the runs and conversations kept, and the browser's or the app's storage in
 all, on hover.
 
-A large editor opened from a pane (Edit the scope as YAML, a plugin's `edit`, a field's max button)
+A large editor opened from a pane (Environments' `Edit as .env`, a plugin's `edit`, a field's max button)
 goes back to Settings when it closes: Cancel, Esc, a click outside it and Save close the editor only
 (each modal acts on its own dialog's close; the editor is drawn inside Settings' React tree, which
 would otherwise pass its close up to Settings).
@@ -588,12 +671,12 @@ would otherwise pass its close up to Settings).
 | Storage | Runs | Runs kept by the app, with sizes; delete one or clear all |
 | Storage | Conversations | Conversations kept by the app (as Conversations lists them), with sizes; delete one or clear all |
 | Connection | Providers | The open folder's providers ([below](#providers-settings)) |
-| Connection | System One | System One's key, `JEV_API_KEY` (`.input#systemoneKey`, password; `save` `#systemoneSave`, `forget` `#systemoneForget`; `#systemoneKeyState` says `set` or `not set`), kept as a secret for every environment; a `.hint` says which checks use it, the endpoint and model they call unless a judge says otherwise, and how CI sets it; a link to System One's documentation |
+| Connection | System One | System One's key, `JEV_API_KEY` (`.input#systemoneKey`, password; `save` `#systemoneSave`, `forget` `#systemoneForget`, a ConfirmButton asking `forget it?`; `#systemoneKeyState` says `set` or `not set`), kept as a secret for every environment; a `.hint` says which checks use it, the endpoint and model they call unless a judge says otherwise, and how CI sets it; a link to System One's documentation |
 | Connection | Relay (browser build) | The relay's address (default: where the app was served from) and whether it answers |
-| Configurations | Environments | Each scope's plain variables ([Scopes](test-file.md#scopes)): `Scope` (`.select#envScope`, with `choose it` (`#envChoose`) to make it the one chosen); `add scope` (`#newScopeForm`: `.input#newScopeName`) makes `environments/<scope>.yml`; the scope's variables as rows (`envVar-<name>`: the name over `{{scope.<name>}}`, its value in a plain `.input` saved on blur or Enter, `×` deleting it); `add` (`#envVarAdd`: `.input#envVarName`, `.input#envVarValue`); `Edit the scope as YAML` (`#envYaml`); `Delete scope` (`#envDelete`, asking `delete its file?`). Saved in place, comments kept. With no folder open: "Open a folder first: a scope's variables are kept in its environments/ folder, as plain YAML."; when there are scopes all the same (a suite's environments, opened as files; scopes that have secrets), `Scope` and `choose it` stay, over "Open a folder to add scopes and their variables…". The scope button at the top of the sidebar opens this pane |
-| Configurations | Secrets | Each scope's secret values, by name (`Scope`: `.select#secretsEnv`; the pane opens on "every scope"; a value for every scope applies where a scope has none of its own); `{{scope.NAME}}` and `${env:NAME}` both reach them: a row for each name the open files reference as `${env:NAME}` (and the presets' default keys), and for each name that has a value (`set`, or `set for every scope` when the value is kept for all of them). `JEV_API_KEY` isn't here: it's System One's, in its pane. `Add a secret` (`#secretAdd`: a name, `.input#secretName`, and a value, `.input#secretValue`) keeps any number under names of your own (letters, digits and `_`, not starting with a digit), for files to use as `${env:NAME}`. In the desktop app they're stored encrypted by the system; in the browser build, in this browser's storage, which the pane says plainly |
+| Configurations | Environments | The app's scopes and each one's environment values ([Head](#head)), with no folder needed: `Scope` (`.select#envScope`: `no scope`, then every scope made here; `choose it` (`#envChoose`) makes it the one chosen, `chosen now` (`#envChosen`) when it is); `add scope` (`#newScopeForm`: `.input#newScopeName`; a name of letters, digits, `.`, `-`, `_`, not taken). For a scope: `Name` (`.input#envScopeName`, renaming it on blur or Enter: its values and secrets go with it, and it stays chosen; a name that's taken is refused and put back); its values as [key = value rows](../../design/components.md#key--value-rows) (`#envVars`, `envVar-<name>`: the name over `{{env.<name>}}` and `not used by the open files` when they don't, its value in a plain `.input` saved on blur or Enter, `×` (`#envVar-<name>-delete`, asking `delete`); a name the open files use as `{{env.NAME}}` that it hasn't got has a row too, `not set` in `--danger`); `add` (`#envVarAdd`: `.input#envVarName`, `.input#envVarValue`; a name as a `.env` file's: letters, digits, `_`, `.`, `-`, not starting with a digit); `Import .env` (`#envImport`, a file picker, `#envImportFile`: each name the file has is set, the others stay; a file that isn't one says its first problem and where, and changes nothing), `Export .env` (`#envExport`: downloads `<scope>.env`), `Edit as .env` (`#envText`: the values as a `.env` file's text in the large editor; saved, they're the scope's values), `Delete scope` (`#envDelete`, asking `delete its values and secrets?`: the scope, all of it, its entry, its values and its secrets, from every list and store, for good ([Head](#head)); the scope chosen, no scope is chosen after it); a `.hint#envCiHint`: `{{env.NAME}}`, and that Export writes `<scope>.env` for `--env` in CI. `no scope` selected: `#envNone` says what's filled then. No scopes at all: "No scopes yet: add one (stage, prod…)." (`#environmentsEmpty`). The scope button at the top of the sidebar opens this pane |
+| Configurations | Secrets | Each scope's secrets, by name, never shown once kept (`Scope`: `.select#secretsEnv`, `every scope` then every scope made in Environments; it opens on the scope chosen, or every scope with none; a value kept for every scope applies where a scope has none of its own): a row for each name the open files use (`{{secret.NAME}}`, `{{secrets.NAME}}`; and the presets' default keys) and each name that has a value (`set`, `set for every scope`, `not set` in `--danger`; `not used by the open files`), with a password `.input`, `save`, and `forget` (`#secret-<name>-forget`, a ConfirmButton asking `forget it?`). `JEV_API_KEY` isn't here: it's System One's, in its pane. `Add a secret` (`#secretAdd`: `.input#secretName`, `.input#secretValue`; letters, digits and `_`, not starting with a digit). `Import .env` (`#secretsImport`, `#secretsImportFile`: into the scope shown; a name that won't do changes nothing) and `Export .env` (`#secretsExport`, a ConfirmButton asking `write them in plain text?`; it writes `<scope>.secret.env`, the scope's own over every scope's, what `--secret` reads in CI: the desktop app's main process asks where and writes it (mode 600), so the values never pass through the page; a browser downloads it), with `.hint#secretsExportHint` saying the file is plain text, to keep out of version control. In the desktop app they're stored encrypted by the system; in the browser build, in this browser's storage, which the pane says plainly |
 | Configurations | Plugins | The folder's plugins (every file in `plugins/`, and every plugin a suite names), each loaded to show it: a row (`plugin-<name>`) with `<name> · <kind> · <version>`, its file and the hosts it may reach, for a fixture the names it gives (`.hint#plugin-<name>-provides`: `Gives ACME_COOKIE, ACME_CSRF, for the run`), any problem loading it (in `--danger`), how to use it (`kind: plugin:<name>`, `{ type: <name> }`, `judges: { mine: { kind: plugin, plugin: <name> } }`, or `fixture: <name>`), "Any suite in the folder can use it: …" ("Any provider …" for a fixture), and the suites that use it (`.hint#plugin-<name>-used`: `Used by a.hafen.yml, b.hafen.yml`, those that name it in their `plugins` or use it by name; `Used by no suite yet`). There's nothing to add it to a suite: any suite uses the folder's plugins by name. `edit` (the file in the [code editor](../../design/components.md#code-editor): JavaScript in colour, Tab and Enter keeping its indent, `Format`); `×` (`#plugin-<name>-delete`, asking `delete file?`). `Add a plugin` (`#newPluginForm`: its kind, `.select#newPluginKind`: Provider, Check, Judge or Fixture; its name, `.input#newPluginName`) writes `plugins/<name>.js` from a starting file that works as it is (`engine/plugin-templates.js`); a provider one also writes its provider file, `providers/<name>.yml` (`kind: plugin:<name>`; `<name>-2`… when that's taken), so it's in Providers at once. With no folder open: "Open a folder first: plugins are files in its plugins/ folder." |
-| App | Appearance | Light, Dark, or As the system's |
+| App | Appearance | Light, Dark, or As the system's (the default). The desktop window is drawn before the page in the theme the page last applied, or, with As the system's or nothing chosen yet (a first start), the system's now, so a dark system never sees a light window first (`window.json`: `{ applied, choice }`) |
 | App | Notifications | What a run's end does besides its toast ([Notifications](#notifications)): `Play a sound when a run ends` (`.check#notifySound`, on); `When it sounds` (`.select#notifyWhen`, off without sound: "only when I'm not looking at what ran", the default, or "after every run"); `For runs that` `passed` (`#notifyPassed`) and `failed, or couldn't run` (`#notifyFailed`), both on; `System notifications` (`#notifySystem`: "Also show the system's notification when Hafen isn't in front": on in the desktop app; in a browser off until turned on, which asks the browser's permission; `#notifySystemState` says `allowed`, `blocked by the browser`, `asks the browser when turned on` or `this browser has none`); `Try it` (`#notifyTry`: the sound and a sample toast, and the system's if on). Kept in `eval.notifications` |
 
 ### Providers (Settings)
@@ -612,6 +695,17 @@ Settings) goes back to the list.
   (`.btn#provider-plugin-<name>-add`), which writes its provider file and opens it. Empty: "No providers yet. Add one: Ollama, OpenAI,
   Anthropic, Gemini, or your own endpoint." With no folder open: "Open a folder first: providers
   are files in its providers/ folder."
+- **A provider**'s `Fixtures` (`#providerFixtures`, between its problems and its YAML): a hint (where
+  they're kept, that every suite using it runs them), then a section for each list
+  (`#providerFixtures-<beforeAll|before|after|afterAll>`), its name in plain words (`Once, before the
+  run`, `Before each test`, `After each test`, `Once, after the run`) over when it runs; its fixtures as
+  rows in their order (`#providerFixtures-<list>-<i>`: the place, the name as written, what it gives or
+  `isn't a fixture in the folder's plugins/` in `--danger`, `↑` `↓` `×`: `-up`, `-down`, `-remove`);
+  then `+ add a fixture` (`.select#providerFixtures-<list>-add`: the folder's fixtures, each with what it
+  gives), which adds one at the end. Each change is written in the provider's file at once (comments
+  kept; a list left empty leaves the file; none, the key goes). A `fixtures` the file has that can't be
+  read is said (`#providerFixturesProblem`), to fix in the YAML. With no fixtures in the folder, `add
+  one in Plugins` (Settings → Plugins).
 - **A provider** (`edit`): `‹ all providers` (ghost, `#providersBack`); `Name`
   (`.input#providerName`): the file's name. Changing it (on blur or Enter) renames the file in its
   folder, keeping the extension, and points every suite that uses it at the new name (their
@@ -624,12 +718,15 @@ Settings) goes back to the list.
   - `Kind` (`.select#newProviderKind`): every kind a provider can start from, in this order:
     Ollama, OpenAI chat completions, OpenAI responses, Anthropic messages, Gemini, HTTP endpoint ·
     one JSON reply, HTTP endpoint · streamed (SSE), HTTP endpoint · streamed (JSON lines),
-    WebSocket; under it, a `.hint` (`#newProviderAbout`) saying what it's for.
+    WebSocket, A2A agent; under it, a `.hint` (`#newProviderAbout`) saying what it's for. (An A2A
+    agent's `URL` is where its agent card is: the file gets `card:`.)
   - `Name` (`.input#newProviderName`): the kind's short name (`ollama`, `openai`, `anthropic`, …),
     with `-2`, `-3` added when taken; a `.hint` shows the file (`providers/<name>.yml`).
   - For a preset: `Model` (`.input#newProviderModel`, Ollama's placeholder `gemma4`) and `Address`
-    (`.input#newProviderBase`, the preset's default as its placeholder); a `.hint` names the key's
-    secret (`${env:OPENAI_API_KEY}`, …; none for Ollama). Otherwise `URL` (`.input#newProviderUrl`).
+    (`.input#newProviderBase`, a text field, the preset's default as its placeholder: it takes a
+    template, `{{env.base_url}}/v1`); a `.hint#newProviderKey` names the key's secret
+    (`{{secret.OPENAI_API_KEY}}`, …; none for Ollama). Otherwise `URL` (`.input#newProviderUrl`,
+    placeholder `{{env.base_url}}/chat`).
   - `ADD PROVIDER` (`.btn-primary#newProviderCreate`) writes `providers/<name>.yml` (from
     `engine/providers/templates.js`: valid as written, with the options it doesn't set as
     comments; an HTTP endpoint's body sends `{{history}}`), opens it, and chooses it for the

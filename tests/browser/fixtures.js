@@ -2,13 +2,13 @@
 // app "opens": the Origin Private File System, filled with the fixture suites, handed to the app in
 // place of the folder picker.
 
-import { test as base } from "@playwright/test";
+import { expect, test as base } from "@playwright/test";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
-import { createRelay } from "../../cli/relay.js";
-import { startMock } from "../helpers.js";
+import { createRelay } from "../../server/relay.js";
+import { startMock } from "../../packages/hafen/tests/fixtures/mock-endpoint.mjs";
 
-const FIXTURES = fileURLToPath(new URL("../fixtures/suites/", import.meta.url));
+const FIXTURES = fileURLToPath(new URL("../../packages/hafen/tests/fixtures/suites/", import.meta.url));
 
 export async function fixtureFiles(mockUrl) {
   return {
@@ -53,7 +53,7 @@ export const test = base.extend({
   },
 });
 
-export { expect } from "@playwright/test";
+export { expect };
 
 // The text of a file in the folder the app opened. While the engine writes a file it's swapped in
 // (createWritable), and for a moment can't be read or found: it's read again a little later.
@@ -70,6 +70,29 @@ export const fileText = (page, path) => page.evaluate(async (path) => {
     }
   }
 }, path);
+
+// Make a scope as one does, and choose it: the scope button at the top of the sidebar opens Settings →
+// Environments, where it's added (`add scope`), given its values and chosen ("choose it"); then
+// Settings is closed and the button names it. (Only this makes a scope: a suite's environment of the
+// same name gives it values, but isn't one.)
+export async function addScope(page, name, values = {}) {
+  await page.click("#scopeButton");
+  await page.locator("#newScopeName").waitFor();
+  await page.fill("#newScopeName", name);
+  await page.click("#newScopeForm button[type=submit]");
+  await expect(page.locator("#envScope")).toHaveValue(name);
+  for (const [key, value] of Object.entries(values)) {
+    await page.fill("#envVarName", key);
+    await page.fill("#envVarValue", value);
+    await page.click("#envVarAdd button[type=submit]");
+    await expect(page.locator(`#envVar-${key} input`)).toHaveValue(value);
+  }
+  if (await page.locator("#envChoose").count()) await page.click("#envChoose");
+  await page.locator("#envChosen").waitFor();
+  await page.click("#settingsClose");
+  await page.locator("#settingsModal[open]").waitFor({ state: "detached" }).catch(() => {});
+  await page.locator("#scopeButton .scope-name", { hasText: name }).waitFor();
+}
 
 // Choose a scope as one does: the scope button at the top of the sidebar opens Settings →
 // Environments, where it's chosen ("choose it"); then Settings is closed and the button names it.

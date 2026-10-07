@@ -1,0 +1,34 @@
+{
+  "name": "hafen",
+  "version": "0.1.0",
+  "description": "End-to-end tests for chat endpoints: the engine and the command-line runner (hafen run, validate, report, compare, pack) for CI",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "bin": {
+    "hafen": "cli/hafen.js"
+  },
+  "exports": {
+    ".": "./engine/index.js",
+    "./engine/*": "./engine/*",
+    "./cli/*": "./cli/*",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "engine",
+    "cli",
+    "README.md"
+  ],
+  "scripts": {
+    "test": "node --test \"tests/engine/*.test.js\" \"tests/cli/*.test.js\""
+  },
+  "dependencies": {
+    "ajv": "^8.20.0",
+    "json-p3": "^3.0.0",
+    "yaml": "^2.9.1"
+  },
+  "optionalDependencies": {
+    "rolldown": "^1.2.12"
+  }
+}

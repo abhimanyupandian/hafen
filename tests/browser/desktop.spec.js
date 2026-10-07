@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parse } from "yaml";
-import { startMock } from "../helpers.js";
+import { startMock } from "../../packages/hafen/tests/fixtures/mock-endpoint.mjs";
 
 const ROOT = fileURLToPath(new URL("../../", import.meta.url));
 
@@ -16,7 +16,7 @@ test.skip(process.platform === "linux" && !process.env.DISPLAY, "needs a display
 test("runs a test in the desktop app and writes the run file", async () => {
   const mock = await startMock({ chunkMs: 10 });
   const folder = await mkdtemp(join(tmpdir(), "hafen-desktop-"));
-  await cp(join(ROOT, "tests/fixtures/suites"), folder, { recursive: true });
+  await cp(join(ROOT, "packages/hafen/tests/fixtures/suites"), folder, { recursive: true });
   const suite = join(folder, "smoke.hafen.yml");
   await writeFile(suite, (await readFile(suite, "utf8")).replace("http://127.0.0.1:8791", mock.url));
   const data = await mkdtemp(join(tmpdir(), "hafen-data-"));
@@ -50,7 +50,7 @@ test("the desktop app edits the files on disk, and gets its engine back if it st
   const mock = await startMock({ chunkMs: 10 });
   const folder = await mkdtemp(join(tmpdir(), "hafen-desktop-"));
   const data = await mkdtemp(join(tmpdir(), "hafen-data-"));
-  await cp(join(ROOT, "tests/fixtures/suites"), folder, { recursive: true });
+  await cp(join(ROOT, "packages/hafen/tests/fixtures/suites"), folder, { recursive: true });
   const suite = join(folder, "smoke.hafen.yml");
   await writeFile(suite, (await readFile(suite, "utf8")).replace("http://127.0.0.1:8791", mock.url));
   const env = { ...process.env, HAFEN_LAB_DATA: data };
@@ -75,6 +75,7 @@ test("the desktop app edits the files on disk, and gets its engine back if it st
     await onDisk((d) => d.tests[0].turns.length === 2);
     // A new suite, renamed, then deleted
     await page.click("#newSuite");
+    await page.press("#newSuiteName", "Enter");  // (+ asks for a name: the one it offers)
     await onDisk((d) => d.tests.length === 1, "tests.hafen.yml");
     await page.locator('#suiteList .list-row[data-file="tests.hafen.yml"] .list-open').click();
     await page.fill("#suiteFile", "checkout");
@@ -97,6 +98,7 @@ test("the desktop app edits the files on disk, and gets its engine back if it st
     process.kill(engine.pid, "SIGKILL");
     await expect(page.locator(".toast", { hasText: "The engine was restarted" })).toBeVisible({ timeout: 10000 });
     await page.click("#newSuite");
+    await page.press("#newSuiteName", "Enter");  // (+ asks for a name: the one it offers)
     await onDisk((d) => d.tests.length === 1, "tests.hafen.yml");
     await expect(page.locator('#suiteList .list-row[data-file="tests.hafen.yml"]')).toHaveCount(1);
   } finally {
@@ -113,10 +115,10 @@ test("in development on macOS the app runs as Hafen (not Electron; Hafen Lab ins
   const into = await mkdtemp(join(tmpdir(), "hafen-dev-"));
   const folder = await mkdtemp(join(tmpdir(), "hafen-desktop-"));
   const data = await mkdtemp(join(tmpdir(), "hafen-data-"));
-  await cp(join(ROOT, "tests/fixtures/suites"), folder, { recursive: true });
+  await cp(join(ROOT, "packages/hafen/tests/fixtures/suites"), folder, { recursive: true });
   const { mkdir } = await import("node:fs/promises");
   await mkdir(join(folder, "plugins"));
-  const { pluginTemplate } = await import("../../engine/plugin-templates.js");
+  const { pluginTemplate } = await import("hafen/engine/plugin-templates.js");
   await writeFile(join(folder, "plugins", "polite.js"), pluginTemplate("check", "polite"));
   // One that imports a file outside plugins/: loaded from its file, its import resolves
   await mkdir(join(folder, "lib"));
@@ -162,7 +164,7 @@ test("what the app kept as hafen eval (its data folder, its database) is carried
   const folder = await mkdtemp(join(tmpdir(), "hafen-desktop-"));
   const legacy = await mkdtemp(join(tmpdir(), "hafen-legacy-"));
   const fresh = await mkdtemp(join(tmpdir(), "hafen-data-"));
-  await cp(join(ROOT, "tests/fixtures/suites"), folder, { recursive: true });
+  await cp(join(ROOT, "packages/hafen/tests/fixtures/suites"), folder, { recursive: true });
   const suite = join(folder, "smoke.hafen.yml");
   await writeFile(suite, (await readFile(suite, "utf8")).replace("http://127.0.0.1:8791", mock.url));
   const launch = (env) => {
@@ -229,7 +231,7 @@ test("a run that ends while the window is in the background: the system's notifi
   const mock = await startMock({ chunkMs: 10 });
   const folder = await mkdtemp(join(tmpdir(), "hafen-desktop-"));
   const data = await mkdtemp(join(tmpdir(), "hafen-data-"));
-  await cp(join(ROOT, "tests/fixtures/suites"), folder, { recursive: true });
+  await cp(join(ROOT, "packages/hafen/tests/fixtures/suites"), folder, { recursive: true });
   const suite = join(folder, "smoke.hafen.yml");
   await writeFile(suite, (await readFile(suite, "utf8")).replace("http://127.0.0.1:8791", mock.url));
   const env = { ...process.env, HAFEN_LAB_DATA: data };

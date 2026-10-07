@@ -17,7 +17,8 @@ import { RUN_KEY } from "../lib/keys.js";
 import { app, deleteConversationTurn, deleteTurn, liveForTest, runForTest, runTests, select, stopRun, suiteOf, testOf, threadMode } from "../state.js";
 import { isOn } from "./check-types.js";
 import { checksText, describeCheck, instancesOf, pairResults, pairTurns, pickedInstance, repeatOf, spanFor, statsLine, testResult, testStatusText, turnChecksText, turnStatus, turnsOf, visibilityText } from "./derive.js";
-import { TurnIcon } from "./sections.jsx";
+import { OpenButton, TurnIcon } from "./sections.jsx";
+import { showProvider } from "./providers.jsx";
 
 function Thinking({ thinking, record, onSelect }) {
   if (!thinking?.length) return null;
@@ -64,15 +65,25 @@ function pick(e, select) {
   select?.();
 }
 
-// A turn that failed: the error, in the danger colour, and what came back (the body, or the text that
-// arrived before it failed) folded under it
-function ErrorReply({ record, reply }) {
+// A turn that failed: the error, in the danger colour, and what came back folded under it (the
+// body). One cut short after some of its text came (a stream cut off) shows that text as a reply's,
+// ending …, with the error under it: `cut short: network error`
+function ErrorReply({ record, reply, index }) {
   const body = record.response?.body;
-  const came = reply || (body === undefined || body === null || body === "" ? "" : typeof body === "string" ? body : JSON.stringify(body, null, 2));
+  const raw = body === undefined || body === null || body === "" ? "" : typeof body === "string" ? body : JSON.stringify(body, null, 2);
+  if (reply) {
+    return (
+      <>
+        <div className="msg-body md cut" id={`turn-${index}-partial`} dangerouslySetInnerHTML={{ __html: renderMarkdown(reply) }} />
+        <div className="msg-body error msg-cut" id={`turn-${index}-cut`}>{`cut short: ${record.error}`}</div>
+        {raw && raw !== reply && <details className="msg-sent msg-response"><summary>show the response</summary><pre>{raw}</pre></details>}
+      </>
+    );
+  }
   return (
     <>
       <div className="msg-body error">{record.error}</div>
-      {came && <details className="msg-sent msg-response"><summary>show the response</summary><pre>{came}</pre></details>}
+      {raw && <details className="msg-sent msg-response"><summary>show the response</summary><pre>{raw}</pre></details>}
     </>
   );
 }
@@ -141,7 +152,7 @@ function Turn({ index, label, user, record, badges, checked = false, selectedTur
           ))}
           {record
             ? failedTurn
-              ? <ErrorReply record={record} reply={reply} />
+              ? <ErrorReply record={record} reply={reply} index={index} />
               : record.skipped
                 ? <div className="msg-body hint">{`Skipped: ${record.skipped}`}</div>
                 : <div className={`msg-body md${live ? " streaming" : ""}`} dangerouslySetInnerHTML={{ __html: renderMarkdown(reply) }} />
@@ -181,7 +192,12 @@ export function Thread() {
     run = conversation?.run;
     const turns = run?.turns ?? [];
     if (!turns.length) {
-      content = <p className="empty" id="threadEmpty">{providers.length ? "Choose a provider, then send a message. Save the conversation as a test when it's worth keeping." : state.opened ? "Add a provider in Settings → Providers to start." : "Open a folder with your suites and providers, or a suite file, to start."}</p>;
+      // (its first step a button, not only words: opening a folder, then adding a provider)
+      content = providers.length
+        ? <p className="empty" id="threadEmpty">Choose a provider, then send a message. Save the conversation as a test when it's worth keeping.</p>
+        : state.opened
+          ? <div className="empty" id="threadEmpty"><p>Add a provider (an endpoint to talk to) to start.</p><button className="btn btn-primary empty-action" id="threadAddProvider" type="button" onClick={() => showProvider("new")}>Add a provider</button></div>
+          : <div className="empty" id="threadEmpty"><p>Open a folder with your suites and providers to start.</p><OpenButton id="threadOpenFolder" className="btn btn-primary empty-action" /></div>;
     } else {
       content = turns.map((record, i) => record && (
         <Turn key={i} index={i} label={`turn ${i + 1}`} user={record.user} record={{ ...record, globalIndex: i }} badges={[]}

@@ -31,7 +31,8 @@ corrected.
 - **Remembered.** Sections opened or closed, the sidebar's width and whether it's collapsed, dock
   heights, the theme: all kept between visits.
 - **Named.** Every control has an `id` and an accessible name, for automation and assistive tech.
-- **Light by default**, dark by choice (or following the system), switched on `<html data-theme>`.
+- **As the system's by default** (light or dark, following it as it changes), light or dark by choice,
+  switched on `<html data-theme>`.
 
 ## Where it comes from in hafen
 
@@ -70,7 +71,7 @@ A page's skeleton (from hafen's `web/build.html`, with the project's names in `<
 <link rel="icon" href="icons/favicon.ico" sizes="any">
 <link rel="icon" href="icons/<mark>.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
-<script>/* the theme, and in the desktop app its window's look, set before the page draws */ try { if (window.<appBridge>) document.documentElement.classList.add("app-window", `app-${window.<appBridge>.platform}`); const t = localStorage.getItem("<app>.theme") ?? "light"; document.documentElement.dataset.theme = t === "dark" || (t === "system" && matchMedia("(prefers-color-scheme: dark)").matches) ? "dark" : "light"; } catch {}</script>
+<script>/* the theme, and in the desktop app its window's look, set before the page draws */ try { if (window.<appBridge>) document.documentElement.classList.add("app-window", `app-${window.<appBridge>.platform}`); const t = localStorage.getItem("<app>.theme") ?? "system"; document.documentElement.dataset.theme = t === "dark" || (t === "system" && matchMedia("(prefers-color-scheme: dark)").matches) ? "dark" : "light"; } catch {}</script>
 <link rel="stylesheet" href="css/tokens.css">
 <link rel="stylesheet" href="css/components.css">
 <link rel="stylesheet" href="css/frame.css">

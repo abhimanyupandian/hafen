@@ -299,6 +299,9 @@ them is written.
   hafen` once published), needing Node 22 or newer. Publishing it as an npm package, and a
   single executable (`bun build --compile` or `deno compile`), come after the first release; the
   published name is decided then.
+- **Since:** the engine and the CLI are the `hafen` package, an npm workspace
+  (`evals/packages/hafen/`, bin `hafen`: `cli/hafen.js`), which installs on its own for CI with no
+  Electron, React or Playwright; the app depends on it. Publishing it is still to decide.
 - **Rationale:** Node 20 reached end of life in April 2026; Node 22 has `fetch`, `WebSocket`,
   `worker_threads` and the test runner built in, so the CLI needs no extra dependencies for them.
 
@@ -309,8 +312,11 @@ them is written.
   time). In the browser, where a WebSocket can't carry headers, credentials go in the address or a
   subprotocol, or the call goes through the relay.
 
-## 25. The relay: `hafen serve`
+## 25. The relay: `hafen serve`, now `npm run serve`
 
+- **Since:** it's the app's (`evals/server/serve.js`, `npm run serve`, same options), not the hafen
+  package's: it serves the app's build, and the package doesn't depend on the app. `hafen serve`
+  says so (exit `2`).
 - **Decision:** The CLI's `serve` command serves the browser build and relays the browser's calls
   to endpoints on an allowlist (`--allow-endpoint`, repeatable, or `HAFEN_ENDPOINTS`), only for
   its own pages (checked by `Origin`), streaming responses through unchanged. It listens on
@@ -337,7 +343,7 @@ them is written.
   - Engine and CLI tests use Node's built-in test runner (`node --test`), no new dependency.
   - Playwright (a development dependency) runs the same engine tests in a browser, the app's
     end-to-end tests, and the visual tests.
-  - `evals/tests/fixtures/mock-endpoint.mjs` is a local HTTP and WebSocket server with a scenario
+  - `evals/packages/hafen/tests/fixtures/mock-endpoint.mjs` is a local HTTP and WebSocket server with a scenario
     per path: JSON, SSE and NDJSON replies, thinking (full, summary, omitted, tags), tool calls,
     model APIs that ask for tool results, errors, rate limits, slow and cut-off streams, sessions,
     an endpoint without CORS, a mock System One API and a mock LLM judge.

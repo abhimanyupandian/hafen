@@ -37,6 +37,15 @@
 /* The scope button: its icon and the scope chosen; it opens Settings → Environments */
 .scope-button { max-width: 160px; gap: 6px; padding: 0 6px; }
 .scope-button .scope-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.scope-icon { position: relative; display: flex; flex: none; }
+/* No scope chosen: the icon alone, greyed out as a disabled field is (it still opens the choice), with
+   a small "!" over its top right corner (Additions: Scope button) */
+.scope-button.none .scope-icon { opacity: .5; }
+.scope-alert {
+  position: absolute; top: -6px; right: -6px; width: 10px; height: 10px;
+  font: 600 10px/10px var(--mono); text-align: center; color: var(--bg); background: var(--muted);
+}
+.scope-button.none:is(:hover, :focus-visible) .scope-alert { background: var(--fg); }
 
 /* Statuses colour a row's size (spec/design/patterns.md, Status) */
 .list-row:is([data-status="passed"], [data-status="pass"], [data-status="done"]) .list-size { color: var(--ok); }
@@ -108,7 +117,7 @@
   background: var(--bg); font: 11px/1 var(--mono);
 }
 .timeline:not(.open) .console-resizer { display: none; }
-.timeline-labels { flex: none; width: var(--timeline-labels, 200px); overflow: hidden; border-right: 1px solid var(--line); position: relative; }
+.timeline-labels { flex: none; width: min(var(--timeline-labels, 200px), 40%); overflow: hidden; border-right: 1px solid var(--line); position: relative; }
 .timeline-labels-inner { position: absolute; left: 0; right: 0; }
 /* Scrolls both ways without scrollbars: the wheel or trackpad, or Space and drag */
 .timeline-chart { flex: 1; min-width: 0; overflow: auto; position: relative; scrollbar-width: none; }
@@ -149,6 +158,11 @@
 .timeline-empty { margin: 0; padding: 14px 16px; text-align: center; }
 .timeline-labels-resizer { position: absolute; z-index: 6; top: 0; bottom: 0; width: 6px; cursor: col-resize; touch-action: none; }
 .timeline-labels-resizer:hover, .timeline-labels-resizer:focus-visible { box-shadow: inset -2px 0 0 var(--muted); outline: none; }
+/* Its zoom buttons are the corner cell over the label column, beside the axis (its height, its line
+   running on under them): never over a bar or a tick; the labels scroll under it as the bars do under
+   the axis */
+.timeline .zoom { top: 0; left: 0; right: auto; bottom: auto; width: min(var(--timeline-labels, 200px), 40%); border-width: 0 1px 1px 0; }
+.timeline .zoom .btn { height: 23px; }
 
 /* ---------- small charts (Additions: Small charts) ---------- */
 
@@ -418,7 +432,16 @@ button.check-card-text:focus-visible { outline: 1px solid var(--fg); outline-off
 /* A number field's label (Repeat, Pass rate), 6px over it as a field head is */
 .panel-body .controls > .grow > label.hint { display: block; margin-bottom: 6px; }
 /* A group's hint, under its field: what follows is spaced from it as from the field */
-.panel-body > :is(#suiteGroupHint, #testGroupHint) { margin-bottom: 0; }
+.panel-body > :is(#suiteGroupHint, #testGroupHint, .fixtures-hint) { margin-bottom: 0; }
+/* A provider's fixtures (Settings → Providers): a list for each of the four, each numbered in its order */
+.fixtures-hint { margin: 6px 0 0; }
+.fixture-phase { margin-top: 14px; }
+.fixture-phase-head { display: flex; flex-direction: column; gap: 4px; margin-bottom: 6px; }
+.fixture-order { flex: none; min-width: 16px; font: 12px/1 var(--mono); color: var(--muted); text-align: right; }
+.fixture-add { margin-top: 6px; }
+/* (right under its label, as any field: the label's own 6px) */
+.field-head + :is(.fixtures-facts, .fixtures-hint),
+.panel-body > .field-head + .hint.fixtures-hint { margin-top: 0; }
 .panel-body > .panel-check { margin-top: 10px; }
 .panel-foot { margin-top: 24px; }
 /* The request and the raw stream: folded, each on a row of its own */
@@ -438,11 +461,14 @@ button.check-card-text:focus-visible { outline: 1px solid var(--fg); outline-off
 
 /* ---------- small screens: the panel over the thread only when something's selected (or asked for) ---------- */
 
+/* (its own hide, before ×: it covers the top bar's button that shows it) */
+.panel-head .panel-hide { display: none; }
 @media (max-width: 860px) {
   .panel { z-index: 8; }  /* under the drawer (10) and its scrim (9) */
   .panel:not(.shown) { display: none; }
   .topbar .topbar-panel { margin-left: 0; color: var(--muted); }
   .topbar .topbar-panel[aria-expanded="true"] { color: var(--fg); }
+  .panel-head .panel-hide { display: inline-flex; color: var(--fg); }
 }
 
 /* ---------- the top bar's status: an error in the danger colour (#status's own grey is by id) ---------- */
@@ -534,3 +560,40 @@ button.check-card-text:focus-visible { outline: 1px solid var(--fg); outline-off
 /* ---------- Settings → Notifications ---------- */
 
 .notify-outcomes { display: flex; flex-wrap: wrap; gap: 8px 18px; }
+
+/* ---------- the console when empty (Additions: Console when empty) ---------- */
+
+/* Open with nothing to show, it's only as tall as its note (and it isn't resized) */
+.console-body.no-lines { height: auto; padding: 0; }
+.console.no-lines .console-resizer { display: none; }
+.console-empty { margin: 0; padding: 14px 16px; text-align: center; }
+
+/* ---------- Settings: the content's head stays as it scrolls (Additions: Settings) ---------- */
+
+/* Out to the content's edges, on --bg, so what scrolls goes under it and never under the close
+   button, which sits over its right end */
+/* (its row still 32px tall: the 14px above it is the content's top padding, which it now covers) */
+.settings-content-head { position: sticky; top: -14px; z-index: 2; min-height: calc(var(--control) + 14px); margin: -14px -20px 0; padding: 14px 56px 0 20px; background: var(--bg); }
+.settings-close { z-index: 3; }
+
+/* ---------- the Suites list: a suite's count is cut before its name (Additions: List rows) ---------- */
+
+#suiteList .list-row[data-file] .list-open { flex: 1 1 auto; }
+#suiteList .list-row[data-file] .list-size { flex: 0 1000 auto; min-width: 5ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ---------- a new suite, named first (Additions: New suite form) ---------- */
+
+.new-suite-form { flex: none; margin: 0 0 4px; }
+.new-suite-form .input { height: 28px; font-size: 11px; }
+.new-suite-form .btn { height: 28px; }
+#suitesBody > .new-suite-hint { flex: none; margin: 0 0 8px; overflow-wrap: anywhere; }
+
+/* ---------- the thread's first step: a button under its note (Additions: The thread's first step) ---------- */
+
+.empty > p { margin: 0; }
+.empty-action { margin-top: 14px; }
+
+/* ---------- a reply cut short: its text, ending …, then why (Additions: Reply parts) ---------- */
+
+.msg-body.md.cut > :last-child::after { content: " …"; color: var(--muted); }
+.msg-cut { margin-top: 8px; }

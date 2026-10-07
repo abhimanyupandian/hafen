@@ -7,7 +7,7 @@
 // message box hidden; a conversation's step; the Runs pane; an error turn's response.
 
 import { parse } from "yaml";
-import { chooseScope, expect, fileText, test } from "./fixtures.js";
+import { addScope, expect, fileText, test } from "./fixtures.js";
 
 const SUITE = "smoke.hafen.yml";
 const openFolder = async (page) => {
@@ -82,6 +82,7 @@ test("a suite's results follow it: a new suite by its old name doesn't take them
   await openFolder(page);
   // tests.hafen.yml, run, then renamed to refunds
   await page.click("#newSuite");
+  await page.press("#newSuiteName", "Enter");  // (+ asks for a name: the one it offers)
   await expect(page.locator('#suiteList .list-row[data-file="tests.hafen.yml"]')).toHaveCount(1);
   await page.locator('#suiteList .list-row[data-file="tests.hafen.yml"] .list-open').first().click();
   await page.click("#suiteRun");
@@ -91,6 +92,7 @@ test("a suite's results follow it: a new suite by its old name doesn't take them
   await expect(page.locator('#suiteList .list-row[data-file="refunds.hafen.yml"]')).toHaveCount(1);
   // A new tests.hafen.yml: not run yet; run, its run is its own, refunds keeps its
   await page.click("#newSuite");
+  await page.press("#newSuiteName", "Enter");  // (+ asks for a name: the one it offers)
   await expect(page.locator('#suiteList .list-row[data-file="tests.hafen.yml"]')).toHaveCount(1);
   await page.locator('#suiteList .list-row[data-file="tests.hafen.yml"] .list-open').first().click();
   await expect(page.locator("#status")).toHaveText("not run yet");
@@ -166,12 +168,11 @@ test("quick clicks on a check's on box: the last one is what's in the file", asy
   expect(parse(await fileText(page, SUITE)).tests[0].turns[0].expect[1].enabled).toBe(false);
 });
 
-test("the scope chosen last is chosen again, even one that has only secrets", async ({ app: { page } }) => {
-  await page.evaluate(() => localStorage.setItem("eval.secrets", JSON.stringify({ prod: { TOKEN: "t-123456" } })));
-  await page.reload();
-  await page.locator("html:not(.loading)").waitFor();
+test("the scope chosen last is chosen again", async ({ app: { page } }) => {
   await openFolder(page);
-  await chooseScope(page, "prod");
+  // (prod made last, and so chosen last: not the first there is)
+  await addScope(page, "stage");
+  await addScope(page, "prod");
   await page.reload();
   await page.locator("html:not(.loading)").waitFor();
   await openFolder(page);
@@ -340,7 +341,7 @@ test("the top bar's status is red when the test failed", async ({ app: { page } 
   expect(await page.locator("#status").evaluate((el) => getComputedStyle(el).color)).toBe(await token(page, "--danger"));
 });
 
-test("a scope's variable changed as YAML shows its new value in its row (and leaving the row doesn't put the old one back)", async ({ app: { page } }) => {
+test("a scope's value changed as a whole (its .env text) shows its new value in its row (and leaving the row doesn't put the old one back)", async ({ app: { page } }) => {
   await openFolder(page);
   await page.click("#openSettings");
   await page.click("#settings-tab-environments");
@@ -353,15 +354,16 @@ test("a scope's variable changed as YAML shows its new value in its row (and lea
   await expect(value).toHaveValue("a");
   await value.fill("b");
   await value.press("Enter");
-  await expect.poll(() => fileText(page, "environments/stage.yml")).toMatch(/X: b/);
-  await page.click("#envYaml");
-  await page.fill("#editorText", "X: c\n");
+  const stored = () => page.evaluate(() => JSON.parse(localStorage.getItem("eval.scope.stage")));
+  await expect.poll(stored).toEqual({ X: "b" });
+  await page.click("#envText");
+  await page.fill("#editorText", "X=c\n");
   await page.click("#editorSave");
   await expect(page.locator("#envVar-X input")).toHaveValue("c");
   await page.locator("#envVar-X input").click();
   await page.locator("#envVarName").click();
   await page.waitForTimeout(300);
-  expect(await fileText(page, "environments/stage.yml")).toBe("X: c\n");
+  expect(await stored()).toEqual({ X: "c" });
 });
 
 test("a suite's folding stays with it when another is added above it", async ({ app: { page } }) => {
@@ -378,7 +380,7 @@ test("a suite's folding stays with it when another is added above it", async ({ 
 test("the message box, hidden (a suite's view) and shown again, is empty: Send off, no old field problem", async ({ app: { page } }) => {
   await openFolder(page);
   await openTest(page, "refund for a broken item");
-  await page.fill("#input", "{{scope.nope}}");
+  await page.fill("#input", "{{env.nope}}");
   await expect(page.locator("#inputProblem")).toBeVisible();
   await page.locator(`#suiteList .list-row[data-file="${SUITE}"] .list-open`).first().click();
   await expect(page.locator("#input")).toHaveCount(0);

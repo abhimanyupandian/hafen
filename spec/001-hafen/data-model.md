@@ -32,8 +32,8 @@ A YAML or JSON file; see [test-file.md](contracts/test-file.md).
 | `group` | integer ≥ 1 | Suites in the same group run one after another, groups at once; none is one group ([Groups](contracts/test-file.md#groups)) |
 | `provider` | string \| Provider | A provider file's path, a preset name, a plugin name, or inline |
 | `providers` | `{ [name]: string \| Provider }` | Named providers, for judges and tests that use another |
-| `environments` | `{ [name]: { [var]: string } }` | Named variable sets; picked in the app or with `--env` |
-| `variables` | `{ [var]: string \| number \| boolean }` | Suite variables |
+| `environments` | `{ [name]: { [var]: string } }` | Named variable sets, by the chosen environment's name (the app's scope, `--env`); each is `{{env.NAME}}` where the environment's values passed don't have NAME ([Environments and secrets](contracts/test-file.md#environments-and-secrets)), and a `{{name}}` |
+| `variables` | `{ [var]: string \| number \| boolean }` | Suite variables. None (nor an environment's value, nor an extraction) is called `env`, `secret` or `secrets` |
 | `defaults` | TestSettings | Settings every test starts from |
 | `setup`, `teardown` | Step[] | Run once around the whole suite |
 | `plugins` | `string[]` | More plugin modules (paths or package names); the folder's `plugins/*.js` are used by name without them |
@@ -109,7 +109,7 @@ operator and no type is a setup error.
 
 | `kind` | Fields | Answers with |
 |---|---|---|
-| `systemone` | `endpoint?` (default TypeSafe's hosted Jev), `api_key?` (default `${env:JEV_API_KEY}`), `model?` | value, probabilities, confidence |
+| `systemone` | `endpoint?` (default TypeSafe's hosted Jev), `api_key?` (default `"{{secret.JEV_API_KEY}}"`), `model?` | value, probabilities, confidence |
 | `llm` | `provider` (a named provider), `samples` (default 3), `temperature?` | verdict per criterion, reasons, agreement |
 | `plugin` | `plugin`, its own fields | value, confidence, reason |
 
@@ -123,7 +123,7 @@ See [provider.md](contracts/provider.md).
 | Field | Type | Rules |
 |---|---|---|
 | `kind` | `"http"` \| `"websocket"` \| a preset (`openai-chat`, `openai-responses`, `anthropic-messages`, `gemini`) \| `plugin:<name>` | Required |
-| `url`, `method`, `headers`, `body` | | HTTP request template; variables and `${env:…}` resolved at send time |
+| `url`, `method`, `headers`, `body` | | HTTP request template; variables, `{{env.NAME}}` and `{{secret.NAME}}` resolved at send time |
 | `history` | `"messages"` \| `"session"` \| `"none"` | How a conversation is carried |
 | `stream` | `"none"` \| `"sse"` \| `"ndjson"` | How the reply arrives |
 | `response` | ResponseMap | Paths to text, thinking, tool calls, usage, session id (per event when streaming) |
@@ -204,7 +204,7 @@ running ───┼──────────► error        (setup or con
 |---|---|---|
 | `_id` | string | |
 | `parent` | string \| null | The span it's part of |
-| `kind` | SpanKind | `run`, `suite`, `test`, `repeat`, `row`, `turn`, `setup`, `teardown`, `request`, `first_byte`, `thinking`, `tool_call`, `tool_result`, `answer`, `check`, `judge_call`, `retry`, `error`, `user_sim` (a simulated user's message), `fixture` (a provider's fixture running: under the suite in a run, under the turn in a conversation; its metrics' `provides`, the names it gave) |
+| `kind` | SpanKind | `run`, `suite`, `test`, `repeat`, `row`, `turn`, `setup`, `teardown`, `request`, `first_byte`, `thinking`, `tool_call`, `tool_result`, `answer`, `check`, `judge_call`, `retry`, `error`, `user_sim` (a simulated user's message), `fixture` (a provider's fixture running, named `<fixture> · <phase>`: beforeAll under the suite, before and after under the instance, afterAll under the run, any under the turn in a conversation; its `fixture: { name, phase, provider }`, its metrics' `provides` and `calls`, its `error`), `call` (an HTTP call a plugin or fixture made, under what made it: its `plugin`, `request`, `response`, `error`; [provider.md](contracts/provider.md#plugins-calls)) |
 | `name` | string | What the timeline shows: `lookup_order`, `contains 4417` |
 | `start`, `end` | number | Milliseconds from the run's start, from a monotonic clock; `end` absent while running |
 | `status` | `"running"` \| `"ok"` \| `"pass"` \| `"fail"` \| `"unsure"` \| `"skipped"` \| `"error"` | Steps are `ok` or `error`; checks use check results |

@@ -3,7 +3,7 @@
 // resolve what a plugin imports from the folder, so here a plugin is one module (the desktop app and
 // the CLI load it from its file, imports and all).
 
-import { servePlugin } from "../../engine/plugin-worker-core.js";
+import { servePlugin } from "hafen/engine/plugin-worker-core.js";
 
 servePlugin({
   receive: (handler) => { self.onmessage = (e) => handler(e.data); },

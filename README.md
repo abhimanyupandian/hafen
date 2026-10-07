@@ -13,8 +13,9 @@ of files.
 
 ## Why Hafen
 
-- **Any chat endpoint.** Plain HTTP (one JSON reply, SSE or NDJSON streams), WebSocket, or presets
-  for OpenAI (Chat Completions and Responses), Anthropic Messages, Gemini and Ollama. Anything else
+- **Any chat endpoint.** Plain HTTP (one JSON reply, SSE or NDJSON streams), WebSocket, agents that
+  speak the A2A protocol, or presets for OpenAI (Chat Completions and Responses), Anthropic Messages,
+  Gemini and Ollama. Anything else
   takes a small plugin, and an endpoint behind a login takes a fixture that logs in first.
 - **See what really happened.** Each reply shows its thinking, tool calls, text, timings and a badge
   for every check, live as it streams. The timeline draws every step of the run as a bar: requests,
@@ -28,9 +29,10 @@ of files.
 - **The same tests in CI.** The command-line runner runs those files unchanged, exits with a clear
   code and writes JUnit, Markdown, JSON and run files. Open a CI run in the app to see its
   conversation and timeline.
-- **Secrets stay secret.** Secrets are `${env:NAME}` only, never written to files. The desktop app
-  stores them encrypted by the system. They're redacted from every run file and report, and plugins
-  never see their values.
+- **Secrets stay secret.** Files name a secret as `{{secret.NAME}}`, never its value. The desktop
+  app keeps secrets encrypted by the system, for each scope (staging, prod); the command line reads
+  them from a file you name, or the environment. They're redacted from every run file and report,
+  also where they show escaped, URL-encoded or in base64, and plugins never see their values.
 
 ## Screenshots
 
@@ -71,7 +73,12 @@ step of the run.
 | | Start it | For |
 |---|---|---|
 | **Desktop app** | `npm run app` | Exploring endpoints, building tests and reading results. The engine runs in a background process, so endpoints that refuse web pages still work |
-| **Command line** | `node cli/hafen.js run tests/` | CI. Runs suite files unchanged, exits `0`/`1`/`2`/`3`, writes reports, compares with a baseline |
+| **Command line** | `npx hafen run tests/ --env staging.env --secret staging.secret.env` | CI. Runs suite files unchanged, exits `0`/`1`/`2`/`3`, writes reports, compares with a baseline. `pack` puts suites and everything they need into one file that runs anywhere with Node alone |
+
+The engine and the command line are one package, [`hafen`](packages/hafen/README.md)
+(`packages/hafen/`), installed on its own for CI: `npm install hafen` brings no Electron, React or
+Playwright. The app (this repository's root: the UI, the desktop app and the browser build's server)
+depends on it.
 
 ## A test, in a file
 
@@ -81,7 +88,7 @@ version: 1
 name: Support bot · refunds
 provider: providers/acme.yml
 
-environments:
+environments:                                      # {{env.base_url}}, for the environment chosen
   local:   { base_url: "http://localhost:8791" }
   staging: { base_url: "https://staging.acme.example" }
 
@@ -108,7 +115,12 @@ tests:
 ```
 
 The app builds this file as you click (send messages, **Save as test**, click a value in a reply to
-check it), and the CLI runs it as it is.
+check it), and the CLI runs it as it is. `providers/acme.yml` says where to send it:
+`url: "{{env.base_url}}/chat"`, a value of the environment chosen (the app's scope, or an `--env`
+file, over the suite's own `environments:`), and `"Bearer {{secret.ACME_KEY}}"`, a secret the app
+keeps, or the CLI reads from a `--secret` file or the environment. (The old spellings, `${env:NAME}`,
+`{{scope.NAME}}` and a plugin's `{ secret: "NAME" }`, are problems now:
+[Old spellings](docs/test-files.md#old-spellings).)
 
 ## Quick start
 
@@ -121,7 +133,16 @@ npm run app       # the desktop app
 ```
 
 Then follow [Getting started](docs/getting-started.md): connect to the mock endpoint, send a
-message, save it as a test, and run it from the command line.
+message, save it as a test, and run it from the command line. Inside this repository the command
+line is `npx hafen …` (npm links the workspace's `hafen`), or `node packages/hafen/cli/hafen.js …`.
+
+In CI, the command line needs only the `hafen` package, and a pack needs no install at all: see
+[Running in CI](docs/ci.md).
+
+```sh
+npm install --save-dev hafen
+npx hafen run tests/ --env staging.env --secret staging.secret.env
+```
 
 ## Documentation
 
@@ -129,10 +150,10 @@ message, save it as a test, and run it from the command line.
 |---|---|
 | [Getting started](docs/getting-started.md) | Install, explore an endpoint, save your first test, run it from the command line |
 | [The app](docs/app.md) | The desktop app and the browser build: the layout, exploring, building tests, runs, the timeline, settings, shortcuts |
-| [Test files](docs/test-files.md) | The suite format: tests, turns, variables, environments and scopes, data files, groups, validation |
-| [Providers](docs/providers.md) | Connecting to an endpoint: HTTP, streams, WebSocket, presets, conversation history, thinking |
+| [Test files](docs/test-files.md) | The suite format: tests, turns, variables, environments and secrets, data files, groups, validation |
+| [Providers](docs/providers.md) | Connecting to an endpoint: HTTP, streams, WebSocket, presets, A2A agents, logins, conversation history, thinking |
 | [Checks and judges](docs/checks.md) | Every check, its operators, System One and LLM judges, confidence and unsure results |
-| [Plugins](docs/plugins.md) | Your own providers, checks and judges, in JavaScript |
-| [Command line](docs/cli.md) | `run`, `validate`, `report`, `compare`, `serve`: options, exit codes, output, reports |
-| [Running in CI](docs/ci.md) | A GitHub Actions workflow, secrets, baselines and regressions |
-| [Development](docs/development.md) | How the project is built, its tests, and how to work on it |
+| [Plugins](docs/plugins.md) | Your own providers, checks, judges and login fixtures, in JavaScript, importing any file or package |
+| [Command line](docs/cli.md) | `run`, `validate`, `report`, `compare`, `pack`: options, environments and secrets, exit codes, output, reports |
+| [Running in CI](docs/ci.md) | Installing the `hafen` package, a GitHub Actions workflow, running a pack, secrets and `.env` files, baselines and regressions |
+| [Development](docs/development.md) | How the project is built (the app, and the `hafen` package in `packages/hafen/`), its tests, and how to work on it |

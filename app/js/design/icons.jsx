@@ -8,6 +8,8 @@ const PATHS = {
   test: '<rect x="2.5" y="2.5" width="13" height="13"/><path d="M5.5 9l2.5 2.5 4.5-5"/>',
   // A check: a tick
   check: '<path d="M3.5 9.5l3.5 3.5 7.5-8"/>',
+  // A check that failed: a cross, the tick's size (smaller than close's ×)
+  fail: '<path d="M5 5l8 8M13 5l-8 8"/>',
   // A provider (an endpoint): a plug
   provider: '<path d="M6.5 2.5v4M11.5 2.5v4M4.5 6.5h9v2.5a4.5 4.5 0 0 1-9 0zM9 13.5v2.5"/>',
   // The timeline: bars at different starts

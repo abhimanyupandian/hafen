@@ -7,8 +7,8 @@ import { chromium } from "@playwright/test";
 import { createServer } from "node:http";
 import { mkdir } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
-import { createRelay } from "../../cli/relay.js";
-import { startMock } from "../../tests/fixtures/mock-endpoint.mjs";
+import { createRelay } from "../../server/relay.js";
+import { startMock } from "../../packages/hafen/tests/fixtures/mock-endpoint.mjs";
 
 const OUT = fileURLToPath(new URL(".", import.meta.url));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
