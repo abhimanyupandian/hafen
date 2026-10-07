@@ -367,7 +367,7 @@ export function panes() {
     { id: "secrets", group: "Configurations", label: "Secrets", title: "Secrets", Body: SecretsPane },
     {
       id: "plugins", group: "Configurations", label: "Plugins", title: "Plugins", Body: PluginsPane,
-      description: "Plugins add a provider, a check or a judge that configuration can't describe: an ES module in the folder's plugins/, named by the suites that use it (plugins: [./plugins/acme.js]). The command line runs them as the app does.",
+      description: "Plugins add what configuration can't describe: a provider, a check, a judge, or a fixture that logs in first. Each is an ES module in the folder's plugins/ (or one a suite names: plugins: [./lib/acme.js]), and it can import any other file or package. The command line runs them as the app does.",
     },
     { id: "appearance", group: "App", label: "Appearance", title: "Appearance", Body: AppearancePane },
     { id: "notifications", group: "App", label: "Notifications", title: "Notifications", Body: NotificationsPane },

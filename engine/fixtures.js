@@ -58,7 +58,7 @@ async function runFixture(ref, config, { plugins, scope, spans, parent, signal }
     try {
       out = await plugin.setup({ settings: scope?.plain ? scope.plain(fields) : fields, variables: scope?.variables?.() ?? {} }, { signal: anySignal([signal, limit.signal]) });
     } catch (err) {
-      throw limit.signal.aborted ? new Error(`timed out after ${Math.round(ms / 1000)} s`) : err;
+      throw limit.signal.aborted ? new Error(`timed out after ${ms >= 1000 ? `${Math.round(ms / 100) / 10} s` : `${ms} ms`}`) : err;
     }
     const given = valuesOf(out, plugin.meta.provides ?? []);
     spans?.end(span, "ok", { provides: Object.keys(given) });

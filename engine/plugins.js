@@ -5,7 +5,8 @@
 // worker_threads with no environment in Node. A plugin reaches the network only through the engine, to
 // the hosts it names; a header, or a value in a JSON body, can name a secret
 // ({ secret: "ACME_KEY", prefix: "Bearer " }), which the engine fills in, so the plugin never holds a
-// secret's value. A plugin is one module: it can't import other files (bundle it if it needs to).
+// secret's value. Where the host loads it from its file (Node: the desktop app, the CLI), a plugin
+// imports other files and packages as any module does; in the browser build it's one module.
 //
 // host.pluginWorker(): a new worker: { post(message), onMessage(handler), onError(handler), terminate() }
 
@@ -130,7 +131,7 @@ export async function startPlugin(host, { file, source }) {
     });
   };
   try {
-    meta = await request({ type: "load", source });
+    meta = await request({ type: "load", source, url: host.moduleUrl?.(file) });
   } catch (err) {
     worker.terminate();
     throw new Error(`the plugin ${file} can't be loaded: ${err.message}`);

@@ -38,10 +38,34 @@ can try it in a conversation straight away.
   Hafen fills them in from the chosen scope's secrets (and what a fixture gave). The plugin never
   holds a secret's value. In a body, only an object with just `secret` (and `prefix`) is taken as
   one.
-- A plugin is one module: it can't import other files. Bundle it if it needs to.
+- What it imports runs in the same worker, with the same limits: no environment variables.
 
 Plugins are trusted code. The guarantee is that they never hold secret values. The one exception is
 a fixture, which reads its login's response, so it sees the values it gives.
+
+## Imports
+
+A plugin can import any other file or package, as any ES module can. In the desktop app and the CLI,
+Hafen loads it from its own file, so imports resolve as Node resolves them:
+
+```js
+// plugins/acme.js
+import { sign } from "../lib/acme-auth.js";          // a file anywhere in the project
+import { parse } from "../../shared/protocol.js";    // or outside it
+import { nanoid } from "nanoid";                     // a package, from node_modules
+import limits from "./limits.json" with { type: "json" };
+```
+
+The plugin itself must be in the opened folder: in `plugins/`, or a path a suite names. What it
+imports can be anywhere. To use a plugin kept elsewhere, re-export it from `plugins/`:
+
+```js
+// plugins/acme.js
+export { default } from "../../shared/hafen-plugins/acme.js";
+```
+
+The browser build can't resolve imports from your folder, so there a plugin must be one file. A
+plugin that imports something says so when it loads; bundle it (with esbuild, say) to use it there.
 
 ## Provider plugins
 

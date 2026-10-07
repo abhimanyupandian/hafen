@@ -4,7 +4,8 @@
 // names), so the plugin never holds a secret's value. Platform-free: the Node and browser workers
 // (plugin-worker-node.js, app/js/plugin-worker.js) give it their messaging and module loading.
 //
-//   engine → worker  { type: "load", id, source }                 → { type: "loaded", id, meta } | { type: "error", id, message }
+//   engine → worker  { type: "load", id, source, url? }           → { type: "loaded", id, meta } | { type: "error", id, message }
+//                    (url: its file, where the host has one: loaded from there, so its imports resolve)
 //                    { type: "call", id, method, args }           → send: { type: "event", id, event }…, { type: "done", id }
 //                                                                    check/judge/setup: { type: "result", id, value }
 //                    { type: "abort", id }
@@ -107,7 +108,7 @@ export function servePlugin({ receive, send, importSource }) {
     if (!m) return;
     if (m.type === "load") {
       try {
-        const mod = await importSource(m.source);
+        const mod = await importSource(m.source, m.url);
         plugin = mod?.default ?? mod;
         if (!plugin || typeof plugin !== "object") throw new Error("its default export isn't a plugin");
         if (!["provider", "check", "judge", "fixture"].includes(plugin.kind)) throw new Error(`its kind is "${plugin.kind}": a plugin is a provider, a check, a judge or a fixture`);

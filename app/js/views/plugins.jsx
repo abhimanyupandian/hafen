@@ -83,7 +83,7 @@ export function PluginsPane() {
         <input className="input grow" id="newPluginName" type="text" placeholder="its name: acme, polite…" autoComplete="off" spellCheck={false} value={name} onChange={(e) => setName(e.target.value)} />
         <button className="btn" type="submit" disabled={!name.trim()}>add</button>
       </form>
-      <p className="hint">{"A plugin is one ES module (it can't import other files: bundle it if it needs to). It runs in a worker of its own, reaches only the hosts it names, and names secrets in headers ({ secret: \"NAME\", prefix: \"Bearer \" }) for the engine to fill in, so it never holds their values."}</p>
+      <p className="hint">{"A plugin is an ES module, and can import any other file or package (in the desktop app and the CLI; in a browser it's one module). It runs in a worker of its own with no environment variables, reaches only the hosts it names, and names secrets in headers or a JSON body ({ secret: \"NAME\", prefix: \"Bearer \" }) for the engine to fill in, so it never holds their values."}</p>
       {editing && <Editor field={{ value: editing.value, code: true, spellcheck: false, language: "javascript" }} label={editing.file} onClose={() => setEditing(null)} onSave={async (next) => {
         try {
           await writeFile(editing.file, next);

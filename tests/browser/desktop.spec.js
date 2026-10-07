@@ -118,6 +118,10 @@ test("in development on macOS the app runs as Hafen (not Electron; Hafen Lab ins
   await mkdir(join(folder, "plugins"));
   const { pluginTemplate } = await import("../../engine/plugin-templates.js");
   await writeFile(join(folder, "plugins", "polite.js"), pluginTemplate("check", "polite"));
+  // One that imports a file outside plugins/: loaded from its file, its import resolves
+  await mkdir(join(folder, "lib"));
+  await writeFile(join(folder, "lib", "version.js"), 'export const version = "2.3.4";\n');
+  await writeFile(join(folder, "plugins", "imported.js"), 'import { version } from "../lib/version.js";\nexport default { kind: "check", name: "imported", version, async check() { return { status: "pass", reason: "" }; } };\n');
   const executable = devElectron({ into });
   expect(executable).toContain("Hafen.app/Contents/MacOS/Electron");
   const { execFileSync } = await import("node:child_process");
@@ -144,6 +148,7 @@ test("in development on macOS the app runs as Hafen (not Electron; Hafen Lab ins
     await page.click("#openSettings");
     await page.click("#settings-tab-plugins");
     await expect(page.locator("#plugin-polite")).toContainText("polite · check · 1.0.0");
+    await expect(page.locator("#plugin-imported")).toContainText("imported · check · 2.3.4");
   } finally {
     await app.close();
     await rm(into, { recursive: true, force: true });

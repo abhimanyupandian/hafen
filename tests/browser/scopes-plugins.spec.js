@@ -312,3 +312,15 @@ response: { text: $.data.reply }
   await expect(page.locator("#secretsFromFixtures")).toHaveText("Given by a provider's fixture when a run starts, so not set here: ACME_TOKEN");
   await expect(page.locator("#secret-ACME_TOKEN")).toHaveCount(0);
 });
+
+test("Settings → Plugins: in the browser build a plugin that imports another file says it can't, and why", async ({ app: { page } }) => {
+  await writeFile(page, "lib/helper.js", "export const word = 'please';\n");
+  await writeFile(page, "plugins/imports.js", `import { word } from "../lib/helper.js";
+export default { kind: "check", name: "imports", version: "1.0.0", async check({ value }) { return { status: String(value).includes(word) ? "pass" : "fail", reason: word }; } };
+`);
+  await page.click("#openFolder");
+  await page.click("#openSettings");
+  await page.click("#settings-tab-plugins");
+  await expect(page.locator("#plugin-plugins-imports-js")).toContainText("it imports ../lib/helper.js, and the browser build loads a plugin as one module: use the desktop app or the CLI, or bundle it");
+  await expect(page.getByText("A plugin is an ES module, and can import any other file or package")).toBeVisible();
+});

@@ -1127,3 +1127,43 @@ tests:
     assert.match(failed.all, /the fixture "acme-login" failed: login failed: 401/);
   });
 });
+
+describe("plugins' imports", () => {
+  it("a plugin imports any file (in the project, outside it), a package and JSON: loaded from its file", async () => {
+    const dir = await project({
+      "project/plugins/polite.js": `import { words } from "../lib/words.js";
+import { lower } from "../../shared/text.js";
+import { count } from "fake-counter";
+import extra from "./extra.json" with { type: "json" };
+export default {
+  kind: "check",
+  name: "polite",
+  version: "1.0.0",
+  async check({ value }) {
+    const text = lower(value);
+    const found = [...words, ...extra.words].filter((w) => text.includes(w));
+    return { status: found.length ? "pass" : "fail", reason: \`found \${count(found)}: \${found.join(", ")}\` };
+  },
+};
+`,
+      "project/plugins/extra.json": `{ "words": ["said"] }`,
+      "project/lib/words.js": `export const words = ["please", "sorry"];\n`,
+      "shared/text.js": `export const lower = (s) => String(s).toLowerCase();\n`,
+      "project/node_modules/fake-counter/package.json": `{ "name": "fake-counter", "type": "module", "exports": "./index.js" }`,
+      "project/node_modules/fake-counter/index.js": `export const count = (list) => list.length;\n`,
+      "project/providers/json.yml": JSON_PROVIDER,
+      "project/s.hafen.yml": `version: 1
+provider: providers/json.yml
+environments:
+  local: { base_url: "MOCK_URL" }
+tests:
+  - name: polite
+    turns: [ { user: hello, expect: [ { type: polite } ] } ]
+`,
+    });
+    const r = await cli(join(dir, "project"), ["run", "s.hafen.yml", "--report", "run:out/run.json"]);
+    assert.equal(r.code, 0, said(r));
+    const run = await readJSON(join(dir, "project"), "out/run.json");
+    assert.equal(run.turns[0].results[0].reason, "found 1: said");
+  });
+});

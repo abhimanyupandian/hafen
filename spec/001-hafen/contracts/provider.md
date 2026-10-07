@@ -254,8 +254,11 @@ It yields [TurnEvents](../data-model.md#turnevent) (without `t`: the engine stam
 
 Plugins run in a worker of their own (a Web Worker in the browser build; `worker_threads` in Node,
 started with an empty environment, so `process.env` holds nothing) and talk to the engine by
-messages (`engine/plugin-worker-core.js`); the same module runs in the app and in CI. A plugin is
-one module: it can't import other files (bundle it if it needs to). Its `transport.fetch` requests
+messages (`engine/plugin-worker-core.js`); the same module runs in the app and in CI. Where the host
+loads a plugin from its file (Node: the desktop app and the CLI), it imports other files and packages
+as any module does, wherever they are (only the plugin's own file must be in the opened folder), and
+what it imports runs in its worker; in the browser build a plugin is one module, and one that imports
+anything says so when it loads ("use the desktop app or the CLI, or bundle it"). Its `transport.fetch` requests
 are made by the engine: to the plugin's `hosts` only (an exact name, or `*.example.com` for its
 subdomains; none named, none reached); a header given as `{ secret, prefix? }` is filled in by the
 engine from the chosen scope's secrets (and redacted wherever it shows), so the plugin never holds

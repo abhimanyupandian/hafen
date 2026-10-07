@@ -7,6 +7,7 @@ import { Worker } from "node:worker_threads";
 import { realpathSync } from "node:fs";
 import { mkdir, readdir, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { pathToFileURL } from "node:url";
 import { fetchTransport } from "../engine/transport.js";
 
 const SKIP = new Set(["node_modules", ".git", ".hafen", "dist", "release"]);
@@ -97,6 +98,9 @@ export function nodeHost({ root = process.cwd(), secrets = (name) => process.env
     },
     saveRun,
     pluginWorker: nodePluginWorker,
+    // A plugin's module, by its file: loaded from there, so it imports other files and packages as
+    // any module does (relative to it; packages from its node_modules up)
+    moduleUrl: (file) => pathToFileURL(resolve(abs(file))).href,
     // A plugin package, found from the root (as Node would find it from there)
     resolvePackage: async (name) => createRequire(join(resolve(root), "package.json")).resolve(name),
   };
