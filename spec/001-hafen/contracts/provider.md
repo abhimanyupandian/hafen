@@ -76,7 +76,7 @@ body:
 |---|---|
 | `messages` | The whole conversation each turn, as `{{messages}}`, shaped by `messages_format`: `openai` (`[{role, content}]`: each earlier turn as its query and its reply's text, not the provider's whole assistant message), `anthropic` (`[{role, content: [blocks]}]`, with earlier blocks replayed unchanged), `gemini` (`[{role, parts}]`) or `text` (one string, `User: …\nAssistant: …`) |
 | `session` | Only this turn's message; the endpoint keeps the conversation. `session.extract` reads the session from each reply; `session.send` puts it back (`body`, the default, via `{{session}}`; `header` with `session.name`; or `cookie`) |
-| `none` | Only this turn's message; no conversation |
+| `none` | Only this turn's message; no conversation: `{{messages}}` is this message alone, `{{history}}` is `[]`, the presets and A2A send it alone, and no session goes back (`{{session}}` empty, no `contextId` or `taskId`). In a run and in a conversation (Try it) alike |
 
 The presets in the OpenAI shape (`openai-chat`, `ollama`) send earlier turns the same way: the
 user's message and the reply's text, without the thinking or tool calls the reply came with.
@@ -298,7 +298,7 @@ Plugins run in a worker of their own (a Web Worker in the browser build; `worker
 started with an empty environment, so `process.env` holds nothing) and talk to the engine by
 messages (`engine/plugin-worker-core.js`); the same module runs in the app and in CI. Where the host
 loads a plugin from its file (Node: the desktop app and the CLI), it imports other files and packages
-as any module does, wherever they are (only the plugin's own file must be in the opened folder), and
+as any module does, wherever they are (only the plugin's own file must be among the suites' files), and
 what it imports runs in its worker; in the browser build a plugin is one module, and one that imports
 anything says so when it loads ("use the desktop app or the CLI, or bundle it"). Its `transport.fetch` requests
 are made by the engine: to the plugin's `hosts` only (an exact name, or `*.example.com` for its
@@ -309,7 +309,12 @@ wherever it shows), so the plugin never holds the value. Before a run, each `{{s
 `{ secret: "NAME" }`, the old way, is a problem there, saying the new way:
 [test-file.md](test-file.md#old-spellings)); a name it builds as it runs can't be, and is said when its request fails. A provider plugin's events are its stream: each is kept as a raw JSON line, and the reply
 is assembled from them for `on: response` checks. They are trusted code: the guarantee is that they
-never hold secret values ([research §22](../research.md#22-plugins)).
+never hold secret values ([research §22](../research.md#22-plugins)). It's no sandbox: `hosts` limits
+`transport.fetch` only. The worker's own `fetch`, `WebSocket`, `XMLHttpRequest` and `EventSource`
+are taken away (`engine/plugin-worker-core.js`), so one used by mistake throws `a plugin has no fetch
+(use transport.fetch: it's the one that reaches the plugin's hosts)` rather than going around
+`hosts`; but in Node (the desktop app and the CLI) a plugin can still import `node:fs` and read files,
+or `node:http` and reach the network its own way.
 
 Settings → Plugins (in the app) lists the folder's plugins, and makes a new one from a starting file;
 a new provider plugin comes with its provider file (`providers/<name>.yml`, `kind: plugin:<name>`, its
@@ -317,7 +322,7 @@ other fields given to the plugin as `settings`), so it's in Settings → Provide
 any provider is: tried in a conversation, named by a suite or a test. A provider plugin with no
 provider file is listed in Providers too, with `add provider`, which makes one.
 
-The folder's plugins (`plugins/*.js`: the app's opened folder, the CLI's current folder) are there for
+The folder's plugins (`plugins/*.js`: the app's workspace; the CLI's current folder, and each folder it's given) are there for
 every suite, used by name: `kind: plugin:acme` (in a suite, or a provider file it names), a judge's
 `plugin: acme`, a check's `type: acme`. They're loaded only for a run that uses one. A suite can
 name more, in `plugins: [./plugins/acme-provider.js]` (a path from the suite) or as a package name.
@@ -350,14 +355,17 @@ fixtures:
 
 In a conversation: `beforeAll` and `before` run before the first message (spans under that turn);
 `beforeAll` again for another scope, and either again after it failed (that message's turn is an error
-saying why); `after` and `afterAll` when the conversation is let go (another opened or started).
+saying why) or said to stop (that message is refused: below); `after` and `afterAll` when the
+conversation is let go (another opened or started).
 
 The key `fixture:` (one name, before the lists) is no longer read: a provider that has it has a
 problem saying to use `fixtures: { beforeAll: [name] }`. A list that isn't one of the four, a list
 that isn't names, a name that isn't a plugin in the folder's or the suite's plugins, a plugin that
-isn't a fixture, a version outside its range, or a fixture a list names twice (`acme-login` and
-`acme-login@^1` are one; another list can name it): a setup error before anything's sent, said of the
-provider's file.
+isn't a fixture, a version outside its range, a fixture a list names twice (`acme-login` and
+`acme-login@^1` are one; another list can name it), or a fixture in a list its `phases` leave out
+(`the fixture "acme-login" runs only in beforeAll and afterAll: it can't be in fixtures.after`): a
+setup error before anything's sent, said of the provider's file at that name in its list
+(`fixtures.<list>[i]`).
 
 ```js
 // plugins/acme-login.js
@@ -366,37 +374,89 @@ export default {
   name: "acme-login",
   version: "1.0.0",
   hosts: ["auth.acme.example"],
+  phases: ["beforeAll"],
   provides: ["ACME_COOKIE", "ACME_CSRF"],
   async run({ phase, settings, variables, env, test, transport, signal }) {
     const res = await transport.fetch({ url: settings.login_url, method: "POST",
       body: { user: "qa-bot", password: "{{secret.ACME_PASSWORD}}" }, signal });
+    if (res.status === 503) return false;
     const cookies = [res.headers["set-cookie"] ?? []].flat().map((c) => c.split(";")[0]);
-    return { ACME_COOKIE: cookies.join("; "), ACME_CSRF: (await res.json()).csrf_token };
+    const { csrf_token, region } = await res.json();
+    if (region) env.set("ACME_REGION", region);
+    return { ACME_COOKIE: cookies.join("; "), ACME_CSRF: csrf_token };
   },
 };
 ```
 
 Its method is `run()` (`setup()`, its first name, is still read).
 
+| Field | What |
+|---|---|
+| `phases` | The lists it can be in: a non-empty list of `beforeAll`, `before`, `after`, `afterAll` (default all four). Anything else (not a list, empty, another name) fails its load: `its phases is a list of when it runs: any of beforeAll, before, after, afterAll, and "beforeEach" isn't one`. Its meta has them in the lists' order, each once. The engine calls `run()` only for these |
+| `provides` | The names it gives (below) |
+| `sets` | The environment's names it sets with `env.set` that its code doesn't write as `env.set("NAME", …)` (a name it builds): for the check before a run. Names, by the one rule |
+
+Its meta (the worker's `loaded`, and serve-port's `load` and `plugins` lists) is `{ kind, name,
+version, hosts, provides, phases, sets }`; the lists' `sets` are its own `sets` and the names its code
+writes as `env.set("NAME", …)` (`env?.set`, any quotes), found in its text.
+
 | `run` gets | What |
 |---|---|
-| `phase` | `beforeAll`, `before`, `after` or `afterAll` |
-| `settings` | The provider's other fields (not `fixtures`), as a provider plugin's `settings` are: `{{name}}`s filled in, never a secret |
-| `variables`, `env` | As a provider plugin's |
-| `test` | `before` and `after`: `{ name, id?, repeat, row? }`, and in `after` its `status` |
+| `phase` | `beforeAll`, `before`, `after` or `afterAll` (one of its `phases`) |
+| `settings` | The provider's other fields (not `fixtures`), as a provider plugin's `settings` are: `{{name}}`s filled in, never a secret; an `{{env.NAME}}` not set (yet: one a fixture sets) stays as written |
+| `variables` | As a provider plugin's |
+| `env` | The environment's values as a provider plugin's `env`, with what fixtures have set so far over them, and a method `set(NAME, value)` (not enumerable; a value of the environment named `set` is behind it) |
+| `test` | `before` and `after`: `{ name, id?, repeat, row?, row_name? }` (`row_name`: the data row's name, [test-file.md](test-file.md#data-rows)), and in `after` its `status` |
 | `transport` | As a provider plugin's. A request's `redirect` (`follow`, `manual`, `error`) is passed on; a response's `set-cookie` is a list, one per cookie, where the platform lets it be read (Node: the desktop app and the CLI; a browser doesn't) |
 | `signal` | Aborts when the run stops, or after the provider's `timeout_ms` (default 60 s) |
 
-In `beforeAll` and `before` it returns `{ NAME: text }`: every name in `provides`, and no other (with
-no `provides`, any names; nothing returned is no names). Names are letters, digits and `_`, not
-starting with a digit; a value is text (or a number or boolean, made text), never empty. What `after`
-and `afterAll` return is ignored.
+What it returns: nothing (`undefined`, `null`) or `true`, go on; `false`, stop (below); `{ NAME: text }`,
+go on with those values. In `beforeAll` and `before` the values are every name in `provides`, and no
+other (with no `provides`, any names; nothing returned, or `true`, is no names). Names follow the one
+rule for names (`engine/env-file.js`, `NAME`): letters, digits, `_`, `.` and `-`, not starting with a
+digit; a value is text (or a number or boolean, made text), never empty. Anything else (a string, a
+list) fails it: `its run() returns the values it gives, by name ({ ACME_COOKIE: "…" }), true or
+nothing to go on, or false to stop`. What `after` and `afterAll` return is ignored, but `false`,
+which is recorded.
+
+`false` (its reason: `the fixture "acme-login" (beforeAll) said to stop`):
+- `beforeAll`: the fixtures after it in the list don't run, and the run stops (`status: "stopped"`,
+  `stopped` that reason; the CLI exits `3`) before this suite's setup steps: each of its chosen tests
+  is `skipped` with `reason` that reason (JUnit's `<skipped message>`, the Markdown's Skipped), and
+  the suites the run hadn't reached are `(not run)` cases (`not run: <reason>`). The suite's span is
+  `skipped`; `afterAll` fixtures run as ever.
+- `before`: the fixtures after it don't run; that instance is `stopped` with that `reason` (its setup
+  steps and turns don't run: each turn `skipped` with that reason, its checks too; its `after`
+  fixtures run, told `status: "stopped"`), the other instances and tests go on. The test is `stopped`
+  (its `reason` the instance's) unless what went wrong already rules out its pass rate.
+- `after`, `afterAll`: nothing changes.
+- A conversation: `false` in `beforeAll` or `before` refuses the message: nothing is sent, its turn
+  is `{ user, skipped: <reason>, reply: "" }` (its span `skipped`), it isn't part of the history the
+  next message goes with, and they run again with the next message.
+
+`env.set(NAME, value)` (any phase) sets one of the environment's values for the rest of the run, in
+its scope (`{{env.NAME}}`: before the values passed and the suite's `environments.<name>`; with no
+environment chosen too), and in a conversation for that conversation and scope until it's let go.
+Requests, checks, judges, plugins' `env` and later fixtures have it. It's kept by the run's fixtures
+(engine/fixtures.js) as an overlay on its scopes, applied only when `run()` returns (one that throws
+sets nothing), never written (not to a file, the host's store, the environment passed, or
+run.settings), and gone when the run ends. A value set isn't a template (its `{{…}}` aren't filled)
+and isn't a secret (redacted only when it's one's value). The `env` run() was given shows what it set
+at once. A name that breaks the rule, or a value that isn't text, number or boolean, fails the fixture:
+`env.set: "1x" isn't a name (…)`, `env.set("x", …) takes text (a number or true/false is made text)`.
+
+Before a run, an `{{env.NAME}}` a provider's `beforeAll` or `before` fixture sets counts as set (in the
+suite's files and its plugins' code): the names its code writes as `env.set("NAME", …)`, and its
+`sets`.
 
 What `beforeAll` gives is kept for the run, as secrets of the scope it ran for; what `before` gives,
 for that instance (its names over `beforeAll`'s). Files and plugins' requests use them as
 `{{secret.NAME}}` (before the host's secrets of the same name), and each value is redacted wherever it would show: from the
-moment it's given (a fixture's calls' response bodies are kept back until then, so the token a login
-answered with is redacted in its own call's step). Nothing is written: the next run runs them again.
+moment it's given (a fixture's calls' requests and responses, headers and bodies, are kept back until
+then, the status shown as each ends: so the token a login answered with is redacted in its own call's
+step, and in a call the fixture made with it). A value written `<scheme> <credential>` (`Bearer
+tok_…`) is two secrets: itself, and the credential, as the login's answer has it
+(`{"access_token":"[redacted]"}`). Nothing is written: the next run runs them again.
 
 When one fails (it throws, times out, or gives the wrong names):
 - `beforeAll`: the suite is a setup error (`<suite>: the fixture "acme-login" (beforeAll) failed: …`),
@@ -411,9 +471,11 @@ Before a run, the names in `provides` of a provider's `beforeAll` and `before` f
 (`validate --env-check`, and the checks before anything is sent).
 
 Each fixture that runs is recorded in the run (run.fixtures: `{ name, phase, provider?, test?,
-status: "ok" | "error", ms, provides: [names], calls, error? }`), told as it ends (`fixture:end`),
-and is a `fixture` span (its `fixture: { name, phase, provider }`, its metrics' `provides` and
-`calls`, its `error`).
+status: "ok" | "error", ms, provides: [names], sets?: [names it set with env.set], stop?: true (it
+returned false), calls, error? }`), told as it ends (`fixture:end`), and is a `fixture` span (its
+`fixture: { name, phase, provider }`, its metrics' `provides`, `sets`, `stop` and `calls`, its
+`error`). The console says one that failed or said to stop without `--verbose`; JUnit's and the
+Markdown's fixture lines add `said to stop` and `set NAMES`.
 
 A fixture holds what it reads from its login's response: the one place a plugin sees a secret's
 value. Like any plugin, it reaches only its `hosts`, and the secrets it sends (a password) it names.

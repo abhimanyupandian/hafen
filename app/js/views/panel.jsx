@@ -17,9 +17,11 @@ import { copyText } from "../lib/clipboard.js";
 import { ago, money, sec, tokens as tokenText, when } from "../lib/format.js";
 import * as idb from "../lib/idb.js";
 import {
-  app, chooseProvider, compareRuns, providerChoices, deleteCheck, deleteConversation, deleteFile, deleteRun, deleteTest, deleteTurn, editSuite, freeSuiteFile, newTest, openFolder, problemsOf, warningsOf, relativePath, renameSuite, exportRun, openRun, readFile, renameConversation, runForTest, runTests,
+  app, chooseProvider, compareRuns, providerChoices, deleteCheck, deleteConversation, deleteFile, deleteRun, deleteTest, deleteTurn, editSuite, freeSuiteFile, newTest, problemsOf, warningsOf, relativePath, renameSuite, exportRun, openRun, readFile, renameConversation, runForTest, runTests,
   liveForSuite, liveForTest, liveIn, runAgain, saveConversation, select, setCheckOn, stopRun, suiteOf, suiteRunFor, testOf, writeFile,
 } from "../state.js";
+import { ciCommand, ciFiles, written } from "../lib/ci.js";
+import { openExport } from "../transfer.js";
 import { CheckCard, CheckOnBox } from "./check-card.jsx";
 import { runTestDefinition } from "./thread.jsx";
 import { isOn, kindOf } from "./check-types.js";
@@ -27,7 +29,7 @@ import { Facts, FieldHead, NumberField, Pre, Problems, TextField } from "./field
 import { showProvider } from "./providers.jsx";
 import { showPlugin } from "./plugins.jsx";
 import { FixturesSummary, sendProblem } from "./fixtures-field.jsx";
-import { instancesOf, pairResults, pairTurns, pickedInstance, spanFor, statsLine, testResult, testStatusText, turnsOf, visibilityText } from "./derive.js";
+import { countedResult, instancesOf, pairResults, pairTurns, pickedInstance, refusedRun, rowLabel, spanFor, statsLine, stoppedTurn, testResult, testStatusText, turnsOf, visibilityText } from "./derive.js";
 
 // The run a turn or check is shown from (the open run when picked in its thread, else the test's
 // latest), its record of turn i, and each of the turn's checks' results as the file has them now
@@ -69,7 +71,7 @@ const stem = (file) => file.split("/").pop().replace(/\.hafen\.(ya?ml|json)$/i, 
 // A provider reference's name: a file's (providers/ollama.yml → ollama), a preset's, or "inline"
 const refName = (ref) => (typeof ref === "string" ? ref.split("/").pop().replace(/\.(ya?ml|json)$/i, "") : ref ? "inline" : "");
 
-// Which provider a suite (or one test) runs on: the folder's providers, by name. The file says it as
+// Which provider a suite (or one test) runs on: the providers kept, by name. The file says it as
 // a path relative to itself. A reference that isn't one of them (a missing file, a preset, an inline
 // provider, one of the suite's named providers) shows as it is, so it can be seen and replaced.
 // used: the provider file the test or suite runs with (its own, or the one it inherits): its fixtures.
@@ -99,32 +101,31 @@ function ProviderPicker({ id, label, file, current, resolved, used, named, inher
   );
 }
 
-// The files a CI run takes the scope chosen from, as Settings → Environments' and Secrets' Export write
-// them: <scope>.env (its values), and <scope>.secret.env (its secrets, with every scope's) when it has any
-function ciFiles({ env, scopeSecrets = {} }) {
-  const secrets = (scopeSecrets[env ?? ""]?.length ?? 0) + (env ? scopeSecrets[""]?.length ?? 0 : 0);
-  return { env: env ? `${env}.env` : null, secret: secrets ? `${env || "every-scope"}.secret.env` : null };
-}
-
-const ciCommand = (file, test, state) => {
-  const files = ciFiles(state);
-  return [
-    "npx hafen run", JSON.stringify(file),
-    files.env && `--env ${files.env}`,
-    files.secret && `--secret ${files.secret}`,
-    test && `--test ${JSON.stringify(test.name)}`,
-    "--report junit:results/junit.xml", "--report run:results/run.hafen-run.json",
-  ].filter(Boolean).join(" ");
-};
-
-// Under Copy CI command: where the files it names come from
-function CiHint({ id }) {
-  const files = ciFiles(useStore(app));
-  const named = [files.env, files.secret].filter(Boolean);
-  if (!named.length) return null;
-  const where = files.env && files.secret ? "Environments and Secrets" : files.env ? "Environments" : "Secrets";
-  const keep = files.secret ? ` (keep ${files.env ? "the secrets file" : "it"} out of version control)` : "";
-  return <p className="hint panel-note" id={id}>{`Export in Settings → ${where} writes ${named.join(" and ")}, which it reads${keep}.`}</p>;
+// Under Copy CI command: the folder CI runs (where the suite was last exported to), with the files that
+// export wrote there (the ones the command names); not exported yet, it says so, and offers Export
+function CiHint({ id, file }) {
+  const state = useStore(app);
+  const now = useNow();
+  const where = state.exports[file];
+  if (!where) {
+    return (
+      <p className="hint panel-note" id={id}>
+        {"Not exported yet: CI runs the folder it's exported to. "}
+        <button className="btn btn-ghost inline-link" id={`${id}Export`} type="button" onClick={() => openExport([file])}>Export it</button>
+        {" first."}
+      </p>
+    );
+  }
+  const envs = written(where.env);
+  const files = [...envs, ...written(where.secret)];
+  // (values there are now, that no .env file went with: CI runs without them)
+  const missing = !envs.length && ciFiles(state).env.length > 0;
+  return (
+    <p className="hint panel-note" id={id}>
+      {`Runs ${where.path}, exported ${ago(where.at, now)}${files.length ? ` with ${files.join(", ").replace(/, ([^,]*)$/, " and $1")}` : ""}: export again after a change.`}
+      {missing && " No .env file went with it: CI runs without your values, unless you export them too."}
+    </p>
+  );
 }
 
 function CopyButton({ id, text, label = "Copy CI command", className = "btn" }) {
@@ -135,6 +136,15 @@ function CopyButton({ id, text, label = "Copy CI command", className = "btn" }) 
       setTimeout(() => setSaid(label), 1500);
     }}>{said}</button>
   );
+}
+
+// Copy CI command, for a suite (or one of its tests): the command that runs the folder it was last
+// exported to; never exported, the button offers Export instead (CI runs an exported folder)
+function CopyCi({ id, file, test }) {
+  const state = useStore(app);
+  const text = ciCommand(file, test, state);
+  if (text) return <CopyButton id={id} text={text} />;
+  return <button className="btn" id={id} type="button" title="Export it first: CI runs the folder it's exported to" onClick={() => openExport([file])}>Copy CI command</button>;
 }
 
 // Edit a YAML file in the large editor: a button that reads the file as it is when it's pressed (so the
@@ -167,7 +177,8 @@ function EditFile({ file, id, label }) {
   );
 }
 
-// Which repeat and data row the thread shows, when a run has more than one
+// Which repeat and data row the thread shows, when a run has more than one: "run 2 of 3 · passed", a
+// row by its name, "row 3: a refund please · run 2 · failed"
 function InstancePicker({ run, file, test, selection, id }) {
   const instances = instancesOf(run, file, test);
   if (instances.length < 2) return null;
@@ -176,9 +187,9 @@ function InstancePicker({ run, file, test, selection, id }) {
   const current = pickedInstance(instances, selection);
   const result = testResult(run, file, test);
   const statusOf = (x) => result?.instances?.find((i) => i.repeat === x.repeat && (i.row ?? null) === (x.row ?? null))?.status;
-  const options = instances.map((x) => [key(x), `${x.row ? `row ${x.row}` : `run ${x.repeat}`}${x.row && instances.some((y) => y.repeat > 1) ? ` · run ${x.repeat}` : ""} of ${instances.length}${statusOf(x) ? ` · ${statusOf(x)}` : ""}`]);
-  // Failed ones first, so they're easy to find
-  options.sort((a, b) => (a[1].includes("failed") ? -1 : 0) - (b[1].includes("failed") ? -1 : 0));
+  // Failed ones first, so they're easy to find (by status: a row's name may say "failed")
+  const failedFirst = [...instances].sort((a, b) => (statusOf(a) === "failed" ? -1 : 0) - (statusOf(b) === "failed" ? -1 : 0));
+  const options = failedFirst.map((x) => [key(x), `${x.row ? `${rowLabel(x.row, x.row_name)}${instances.some((y) => y.repeat > 1) ? ` · run ${x.repeat}` : ""}` : `run ${x.repeat} of ${instances.length}`}${statusOf(x) ? ` · ${statusOf(x)}` : ""}`]);
   return (
     <>
       <FieldHead label="Showing" htmlFor={id} />
@@ -248,10 +259,8 @@ function ConversationView({ close }) {
     <>
       <Head icon="provider" label="Conversation" onClose={close} />
       <div className="panel-body">
-        {/* (no folder open yet: a provider is a file in one, so the first step is opening one) */}
-        <FieldHead label="Provider" htmlFor="convProvider" actions={state.opened || providers.length
-          ? <button className="btn btn-ghost" id="convProviders" type="button" title="Settings → Providers" onClick={() => showProvider(providers.length ? conversation?.provider ?? null : "new")}>{providers.length ? "manage" : "add one"}</button>
-          : <button className="btn btn-ghost" id="convProviders" type="button" title="Providers are files in a folder: open one first" onClick={openFolder}>open a folder</button>
+        <FieldHead label="Provider" htmlFor="convProvider" actions={
+          <button className="btn btn-ghost" id="convProviders" type="button" title="Settings → Providers" onClick={() => showProvider(providers.length ? conversation?.provider ?? null : "new")}>{providers.length ? "manage" : "add one"}</button>
         } />
         <label className="select">
           <Select id="convProvider" value={conversation?.provider ?? ""} options={[["", providers.length ? "Choose a provider" : "No providers yet", true], ...choices.map((p) => [p.file, p.name])]}
@@ -310,7 +319,7 @@ function ConversationView({ close }) {
 }
 
 function SuiteView({ file, close }) {
-  const state = useStore(app);
+  useStore(app);
   const now = useNow();
   const [tries, setTries] = useState(0);  // a rename that didn't happen puts the name back
   const suite = suiteOf(file);
@@ -352,9 +361,12 @@ function SuiteView({ file, close }) {
         <div className="controls">
           <button className={"btn btn-primary" + (running ? " stop" : "")} id="suiteRun" type="button" disabled={busy} title={busy ? "A test of it is running" : undefined} onClick={() => (running ? stopRun(going.token) : runTests(file).catch(() => {}))}>{running ? "Stop" : "Run suite"}</button>
           <button className="btn" id="suiteAddTest" type="button" onClick={() => newTest(file).catch(() => {})}>Add test</button>
-          <CopyButton id="suiteCopyCi" text={ciCommand(file, null, state)} />
         </div>
-        <CiHint id="suiteCiHint" />
+        <div className="controls">
+          <button className="btn" id="suiteExport" type="button" title="Write it, with everything it uses, to a folder: for git and npx hafen run" onClick={() => openExport([file])}>Export…</button>
+          <CopyCi id="suiteCopyCi" file={file} />
+        </div>
+        <CiHint id="suiteCiHint" file={file} />
         <div className="controls"><EditFile file={file} id="suiteYaml" label="Edit the file as YAML" /></div>
         <div className="panel-foot">
           <p className="hint">{suite.file}</p>
@@ -424,16 +436,37 @@ function TestView({ file, index, close }) {
         <FieldHead label="On failure" htmlFor="testOnFail" />
         <label className="select"><Select id="testOnFail" value={test.on_fail ?? suite.data?.defaults?.on_fail ?? "continue"} options={[["continue", "continue with the next turn"], ["stop", "stop the test"]]} onChange={(e) => set("on_fail", e.target.value)} /></label>
         <FieldHead label="Unsure results" htmlFor="testUnsure" />
-        <label className="select"><Select id="testUnsure" value={test.unsure ?? suite.data?.defaults?.unsure ?? "warn"} options={[["warn", "warn (count as passed)"], ["pass", "pass"], ["fail", "fail"]]} onChange={(e) => set("unsure", e.target.value)} /></label>
+        <label className="select"><Select id="testUnsure" value={test.unsure ?? suite.data?.defaults?.unsure ?? "fail"} options={[["fail", "fail (count as failed)"], ["warn", "warn (count as passed, with a warning)"], ["pass", "pass"]]} onChange={(e) => set("unsure", e.target.value)} /></label>
         <TextField id="testData" label="Data file (CSV or JSON lines)" single value={typeof test.data === "string" ? test.data : test.data?.file ?? ""} placeholder="data/rows.csv" onSave={(v) => (!v.trim() ? unset("data") : test.data && typeof test.data === "object" ? editSuite(file, [{ op: "set", path: ["tests", index, "data", "file"], value: v.trim() }]) : set("data", v.trim()))} />
+        {/* (each data row's name: shown with a data file, or while the file has one; empty removes it) */}
+        {(test.data || test.row_name !== undefined) && (
+          <>
+            <TextField id="testRowName" label="Row names" single value={test.row_name ?? ""} placeholder="first column" onSave={(v) => (!v.trim() ? unset("row_name") : set("row_name", v.trim()))} />
+            <p className="hint" id="testRowNameHint">{"Each row's name in the reports and the thread (row 3: …): its first column's value, or a template such as {{row.question}} ({{row.order}}). Cut at 60 characters; never a secret."}</p>
+          </>
+        )}
         <div className="controls">
           <button className={"btn btn-primary" + (isLive ? " stop" : "")} id="testRun" type="button" onClick={() => (isLive ? stopRun(going.token) : runTests(file, index).catch(() => {}))}>{isLive ? "Stop" : "Run"}</button>
-          <CopyButton id="testCopyCi" text={ciCommand(file, test, state)} />
+          <CopyCi id="testCopyCi" file={file} test={test} />
         </div>
-        <CiHint id="testCiHint" />
+        <CiHint id="testCiHint" file={file} />
         <Problems problems={problemsOf(file)} file={file} />
         <InstancePicker run={run} file={file} test={test} selection={state.selection} id="testInstance" />
-        {result && (
+        {/* (its last run broke off before it: how, and why, each problem its check found for one that
+            couldn't run; nothing of it ran, so nothing else to count) */}
+        {result?.unreached && (
+          <>
+            <FieldHead label="Last run" actions={<span className="hint error" id="testLastStatus">{testStatusText(result).text}</span>} />
+            <Facts id="testFacts" facts={[
+              ["status", testStatusText(result).text],
+              ["when", run?.started ? `${when(run.started)} · ${ago(run.started, now)}` : undefined],
+            ]} />
+            <ul className="problems" id="testRunError">{(result.refused ? run.error.all : [{ message: result.reason }]).map((p, i) => (
+              <li key={i}>{`${p.file && p.line ? `${p.file}:${p.line}: ` : ""}${p.message}`}</li>
+            ))}</ul>
+          </>
+        )}
+        {result && !result.unreached && (
           <>
             <FieldHead label="Last run" actions={<span className="hint">{testStatusText(result).text}</span>} />
             <Facts id="testFacts" facts={[
@@ -451,7 +484,7 @@ function TestView({ file, index, close }) {
               ]),
               ["when", run?.started ? `${when(run.started)} · ${ago(run.started, now)}` : undefined],
             ]} />
-            {result.reason && <p className="hint panel-note">{result.reason}</p>}
+            {result.reason && <p className={`hint panel-note${result.status === "error" ? " error" : ""}`}>{result.reason}</p>}
           </>
         )}
         {history.length >= 2 && (
@@ -525,19 +558,20 @@ function TurnRecord({ record, index, onAddCheck }) {
         ["cost", m.cost !== undefined ? money(m.cost) : undefined],
         ["checks", m.checks ? `${m.checks.passed}/${m.checks.total - m.checks.skipped}` : undefined],
         ["confidence", m.confidence !== undefined ? `lowest ${m.confidence}` : undefined],
-        ["finish", record.finish],
-        ["error", record.error],
+        // (a request stopped on purpose finished that way: it isn't an error)
+        ["finish", record.finish ?? (stoppedTurn(record) ? "stopped" : undefined)],
+        ["error", stoppedTurn(record) ? undefined : record.error],
       ]} />
     </>
   );
 }
 
-// A turn (or a check) of a run's test the open folder doesn't have (a CI run, say): as the run recorded
+// A turn (or a check) of a run's test the app doesn't have (a CI run, say): as the run recorded
 // it, read-only. (record: the run's record of the turn, or null)
 function recordedTurn(selection) {
   const run = app.get().openRun;
   if (selection.in !== "run" || !run || run._id !== selection.run) return null;
-  // (the test selected, if the folder has it; else the one picked in the run's list)
+  // (the test selected, if the app has it; else the one picked in the run's list)
   const inFolder = selection.test !== undefined ? testOf(selection.file, selection.test) : null;
   const test = inFolder ? { id: inFolder.id, name: inFolder.name, turns: [] } : runTestDefinition(run, selection);
   const instance = pickedInstance(instancesOf(run, selection.file ?? test?.suite, test), selection);
@@ -551,12 +585,12 @@ function RunTurnView({ selection, record, close }) {
     <>
       <Head icon="test" label={`Turn ${i + 1}`} onClose={close} backLabel="Back to the run" onBack={() => backToRun(selection)} />
       <div className="panel-body">
-        <p className="hint panel-note" id="turnFromRun">As the run recorded it: its test isn't in the open folder.</p>
+        <p className="hint panel-note" id="turnFromRun">As the run recorded it: its test isn't in your suites.</p>
         <FieldHead label="Message" />
         <Pre id="turnUser" value={typeof record.user === "string" ? record.user : JSON.stringify(record.user, null, 2)} />
         <FieldHead label="Checks" />
         {(record.results ?? []).length > 0
-          ? <ul className="check-cards" id="turnChecks" aria-label="Checks">{record.results.map((r, j) => <CheckCard key={j} id={`turnCheck-${j}`} check={r.check ?? {}} result={r} onOpen={() => select({ ...selection, kind: "check", check: j })} />)}</ul>
+          ? <ul className="check-cards" id="turnChecks" aria-label="Checks">{record.results.map((r, j) => <CheckCard key={j} id={`turnCheck-${j}`} check={r.check ?? {}} result={countedResult(r)} onOpen={() => select({ ...selection, kind: "check", check: j })} />)}</ul>
           : <p className="note placeholder">No checks.</p>}
         <TurnRecord record={record} index={i} />
       </div>
@@ -565,13 +599,13 @@ function RunTurnView({ selection, record, close }) {
 }
 
 function RunCheckView({ selection, record, close }) {
-  const r = record.results?.[selection.check];
+  const r = countedResult(record.results?.[selection.check]);
   if (!r) return <Missing close={close} what="check" />;
   return (
     <>
       <Head icon="check" label={`Check · ${kindOf(r.check ?? {}).name}`} onClose={close} backLabel="Back to its turn" onBack={() => select({ ...selection, kind: "turn", check: undefined })} />
       <div className="panel-body">
-        <p className="hint panel-note">As the run recorded it: its test isn't in the open folder.</p>
+        <p className="hint panel-note">As the run recorded it: its test isn't in your suites.</p>
         {r.check && <><FieldHead label="The check" /><Pre id="checkYaml" value={yaml(r.check).trimEnd()} /></>}
         <FieldHead label="Last result" />
         <ul className="check-cards" id="checkResult" aria-label="Result"><CheckCard id="checkResultCard" check={r.check ?? {}} result={r} /></ul>
@@ -634,7 +668,7 @@ function TurnView({ selection, close }) {
         {(turn.expect ?? []).length > 0 && (
           <ul className="check-cards" id="turnChecks" aria-label="Checks">
             {(turn.expect ?? []).map((c, j) => (
-              <CheckCard key={j} id={`turnCheck-${j}`} check={c} result={paired[j]}
+              <CheckCard key={j} id={`turnCheck-${j}`} check={c} result={countedResult(paired[j])}
                          onOpen={() => select({ kind: "check", file, test: t, turn: i, check: j, repeat: selection.repeat, row: selection.row, in: selection.in, run: selection.run })}
                          onToggle={(on) => setCheckOn(file, t, i, j, on)}
                          onDelete={() => deleteCheck(file, t, i, j).catch(() => {})} />
@@ -662,6 +696,7 @@ function CheckView({ selection, close }) {
   }
   const { run: from, record, results } = turnRecordOf(selection, test, i);
   const r = results[j];
+  const counted = countedResult(r);  // (shown as it counted; r, as recorded, finds its judge's request)
   const type = check.type ?? (check.path ? "path" : "text");
   // A System One check: the request it was judged with, or is being judged with as the run goes on
   // (a turn running has no results yet: its checks are the file's, in order)
@@ -685,11 +720,11 @@ function CheckView({ selection, close }) {
         <FieldHead label="Last result" />
         {r || !isOn(check) ? (
           <>
-            <ul className="check-cards" id="checkResult" aria-label="Last result"><CheckCard id="checkResultCard" check={check} result={r} /></ul>
+            <ul className="check-cards" id="checkResult" aria-label="Last result"><CheckCard id="checkResultCard" check={check} result={counted} /></ul>
             {r && <Facts className="panel-facts" id="checkFacts" facts={[
-              ["status", r.status], ["value", r.value !== undefined ? String(r.value) : undefined], ["confidence", r.confidence !== undefined ? String(r.confidence) : undefined],
+              ["status", counted.status], ["value", r.value !== undefined ? String(r.value) : undefined], ["confidence", r.confidence !== undefined ? String(r.confidence) : undefined],
               ["expected", r.expected !== undefined ? JSON.stringify(r.expected) : undefined], ["actual", r.actual !== undefined ? JSON.stringify(r.actual).slice(0, 400) : undefined],
-              ["reason", r.reason], ["judge", r.judge ? [r.judge.kind, r.judge.model ?? r.judge.provider].filter(Boolean).join(" · ") : undefined],
+              ["reason", counted.reason], ["judge", r.judge ? [r.judge.kind, r.judge.model ?? r.judge.provider].filter(Boolean).join(" · ") : undefined],
               ["tokens", r.usage ? tokenText(r.usage) : undefined], ["cost", r.cost !== undefined ? money(r.cost) : undefined],
             ]} />}
             {r?.judge?.raw && <><FieldHead label="The judge's answer" /><Pre value={r.judge.raw} /></>}
@@ -730,7 +765,10 @@ function StepView({ span, run, close, back }) {
           <Facts className="panel-facts" id="stepFixture" facts={[
             ["fixture", span.fixture?.name && <button className="btn btn-ghost inline-link" type="button" id="stepFixtureCode" title="Its code (Settings → Plugins)" onClick={() => showPlugin(span.fixture.name)}>{span.fixture.name}</button>],
             ["when", span.fixture?.phase], ["provider", span.fixture?.provider],
-            ["gave", m.provides?.length ? m.provides.join(", ") : undefined], ["calls", m.calls ? String(m.calls) : undefined], ["error", span.error],
+            ["gave", m.provides?.length ? m.provides.join(", ") : undefined],
+            // (the environment's names it set with env.set, for the rest of the run; and whether its run() said to stop)
+            ["set", m.sets?.length ? m.sets.join(", ") : undefined], ["stop", m.stop ? "said to stop" : undefined],
+            ["calls", m.calls ? String(m.calls) : undefined], ["error", span.error],
           ]} />
         )}
         {span.kind === "call" && <CallDetails span={span} />}
@@ -803,6 +841,8 @@ function RunView({ close }) {
           return t ? <InstancePicker run={run} file={file} test={t} selection={sel} id="runInstance" /> : null;
         })()}
         <FieldHead label="Tests" />
+        {/* (one that broke off before its tests ran none: the thread says why) */}
+        {!run.tests.length && run.status === "error" && <p className="note placeholder" id="runTestsNone">{refusedRun(run) ? "None ran: it was refused before anything was sent." : "None ran: it broke off before its tests."}</p>}
         <ul className="list" id="runTests" aria-label="Tests in this run">
           {run.tests.map((t, i) => {
             const index = (suiteOf(t.suite)?.data?.tests ?? []).findIndex((x) => (x.id ?? x.name) === (t.id ?? t.name));

@@ -1,7 +1,8 @@
 # Getting started
 
 This walk-through connects Hafen to a local mock endpoint, sends a few messages, turns them into a
-test with checks, and runs that test from the command line. It needs no API keys and costs nothing.
+test with checks, exports it to a folder, and runs it from the command line. It needs no API keys
+and costs nothing.
 
 ## Install
 
@@ -30,15 +31,17 @@ a scenario: `/json` (one JSON reply), `/sse` and `/ndjson` (streams), `/thinking
 npm run app
 ```
 
-Press **Open a folder** in the middle of the window (or the folder icon beside **+** under
-**Suites**). Pick an empty folder, or the folder in your repository where your tests will live. Hafen reads and writes plain files there: suites
-(`*.hafen.yml`), providers (`providers/*.yml`), and runs (`.hafen/runs/`, which you can git-ignore).
+There's nothing to open or pick: Hafen keeps your suites, providers and plugins itself. The first
+time, the middle of the window offers the first steps: **Add a provider**, **New conversation** and
+**New suite**.
 
 ## Add a provider
 
-A provider tells Hafen how to talk to one endpoint. Open **Settings** (the gear at the bottom of the
-sidebar) → **Providers** → **new provider**. Choose the kind **HTTP endpoint · one JSON reply**, name
-it `mock`, and add it. Then replace its YAML with this (it's saved when you click outside the box):
+A provider tells Hafen how to talk to one endpoint. Press **Add a provider** (it's **Settings**, the
+gear at the bottom of the sidebar, → **Providers** → **new provider**). The kinds listed are the
+built-in ones, and any provider plugins you add later (`plugin:<name>`). Choose **HTTP endpoint · one
+JSON reply**, name it `mock`, and add it. Then replace its YAML with this (it's saved when you click
+outside the box):
 
 ```yaml
 # providers/mock.yml
@@ -72,8 +75,8 @@ calls show as `↳ lookup_order · …`, in the order they happened.
 
 With the conversation open, in the panel under **Save as test**: leave **Suite** on *New suite*, set
 **Suite name** to `smoke` and **Test name** to `refund`, and press **Save as test**. `smoke.hafen.yml`
-appears in your folder and in the Suites tree, with your two messages as the test's turns, each
-starting with one check: `type: status, equals: 200`. The test opens.
+appears in the Suites tree, with your two messages as the test's turns, each starting with one
+check: `type: status, equals: 200`. The test opens.
 
 ## Run it
 
@@ -83,8 +86,8 @@ a badge appears under each reply, one per check. Both pass.
 ## Add checks
 
 A turn's response is there once the test has run. Click turn 1's reply. In the panel's **Response**,
-click the value `4417` (beside `order.id`), keep `equals`, and press **Add check**. Your file gains
-the check under that turn:
+click the value `4417` (beside `order.id`), keep `equals`, and press **Add check**. The suite's file
+gains the check under that turn:
 
 ```yaml
           - path: $.data.order.id
@@ -92,7 +95,7 @@ the check under that turn:
 ```
 
 It's written in the style of the checks beside it. Comments, key order and formatting in the rest of
-the file stay as they were, so `git diff` shows just those lines.
+the file stay as they were, so once it's exported and committed, `git diff` shows just those lines.
 
 Now click turn 2's reply, open **Checks** in the sidebar, and click **Text**. Turn 2 gains
 `contains: text`, and the panel shows it: change its YAML to `contains: refund`.
@@ -107,8 +110,9 @@ what the reply was, and the reason (`didn't find refund`).
 
 A scope holds the values that change between places you test, such as an address and a key, so the
 same files run against each. Click the scope button at the top of the sidebar (greyed out, with a
-small **!**: no scope is chosen yet): **Settings → Environments** opens. Type `local` and press **add
-scope**, add the value `base_url` = `http://localhost:8791`, and press **choose it**. Then change the
+small **!**: no scope is chosen yet): **Settings → Environments** opens, with **Globals** at the top
+of its list and **Scopes** under it. Type `local` under Scopes and press **add**; in the table's last
+row add the value `base_url` = `http://localhost:8791`, and press **choose it**. Then change the
 provider's `url` to:
 
 ```yaml
@@ -116,21 +120,28 @@ url: "{{env.base_url}}/json"
 ```
 
 Press **▷**: the test runs as before, its address now from the scope. Add a `staging` scope with
-another `base_url`, and the scope button swaps between them. A key goes in **Settings → Secrets** the
-same way, for a scope (or for every scope), and a provider uses it as `{{secret.NAME}}`: it's kept
-encrypted by the system, never in your files. A name the scope hasn't got stops the run before it
-sends anything, and says which.
+another `base_url` (Scopes' **+**), and the scope button swaps between them. What's the same
+everywhere goes in **Globals**: a scope's own value of a name overrides it. A key goes in **Settings →
+Secrets** the same way, for a scope (or in Globals), and a provider uses it as `{{secret.NAME}}`: it's
+kept encrypted by the system, never in your files, and shown only when you press **show**. A name
+neither the scope nor Globals has stops the run before it sends anything, and says which.
 
-## Run it from the command line
+## Export it, and run it from the command line
 
-The same file runs unchanged in a terminal or in CI. The provider's address is in the `local` scope
-now, so give the command line that scope too: in Settings → Environments, **Export .env** writes
-`local.env` (give its path wherever you saved it). Then, from Hafen's folder (where `npm ci` linked
-the `hafen` command; anywhere else, `npm install hafen` first):
+The same suite runs unchanged in a terminal or in CI: export it to a folder. Click the suite in the
+Suites tree, and in its panel press **Export…**. The dialog lists what goes with it
+(`providers/mock.yml` and `smoke.hafen.yml`, never a secret), and **Also write local.env** (the
+scope's values, which the provider's address now comes from) is on. Press **Export** and pick a
+folder: an empty one, or the folder in your repository where your tests will live. Hafen writes the
+suite, its provider and `local.env` there as plain files, with the same paths. (**Suites** →
+**export all** does every suite at once.)
+
+Then, from Hafen's folder (where `npm ci` linked the `hafen` command; anywhere else, `npm install
+hafen` first):
 
 ```sh
-npx hafen validate path/to/your/folder --env local.env
-npx hafen run path/to/your/folder --env local.env
+npx hafen validate path/to/that/folder --env path/to/that/folder/local.env
+npx hafen run path/to/that/folder --env path/to/that/folder/local.env
 echo "exit $?"
 ```
 
@@ -142,9 +153,12 @@ and exits `1` here, because a check failed. Without `--env`, both stop before an
 providers/mock.yml:3:7  {{env.base_url}} isn't set: no environment is chosen (the app's scope, or --env <file> in the CLI)
 ```
 
-A scope's secrets go the same way: Settings → Secrets' **Export .env** writes `local.secret.env`
-(plain text: keep it out of version control), and `--secret local.secret.env` reads it. A suite's
-panel has **Copy CI command**, which names both for the scope chosen.
+A scope's secrets go the same way: Export's **Export with secrets** (or Settings → Secrets' **export
+.env**) writes `local.secret.env` (and Globals' `globals.secret.env`, when it has any), in plain text,
+so it asks first: keep them out of version control, and `--secret local.secret.env` reads it (Globals'
+first: `--secret globals.secret.env --secret local.secret.env`; Globals' values likewise, as
+`globals.env`). The suite's panel has **Copy CI command**, which copies the command that runs the
+folder you exported it to, naming exactly the files it wrote there.
 
 With no `--report` options, `run` writes a run file to `.hafen/runs/<id>.hafen-run.json` in the
 current folder. Open it in the app (**Runs** → open) to see the same conversation, results and
@@ -156,4 +170,5 @@ timeline. In CI you'll usually ask for reports instead, such as
 - [Test files](test-files.md): repeats and pass rates, data files, variables, environments.
 - [Checks and judges](checks.md): JSONPath operators, tool calls, thinking, and judged checks.
 - [Providers](providers.md): connect to your own endpoint, or to OpenAI, Anthropic, Gemini or Ollama.
-- [Running in CI](ci.md): run your suites on every pull request.
+- [Running in CI](ci.md): commit the folder you export, and run your suites on every pull request.
+- [The app](app.md#import-and-export): importing suites, and exporting them again after a change.

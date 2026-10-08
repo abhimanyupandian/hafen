@@ -18,8 +18,16 @@ import { FIXTURE_PHASES, fixturesOf } from "./fixture-lists.js";
 import { canRead, envHas, providerPlace, whyMissing } from "./files/suite-file.js";
 import { joinPath, missingFile, textChunks } from "./util.js";
 import { createScope, missingMessage, oldWay, placeholders, secretsWhere } from "./vars.js";
+import { pluginsWhere } from "./plugin-place.js";
 
 export const PLUGIN_FILE = /^plugins\/[^/]+\.m?js$/i;
+// The folder's plugins (plugins/*.js), which any suite may use by name without naming them: the
+// host's own list where it has one (the command line's: the plugins/ of each folder it names too),
+// else the files in plugins/ at its root
+export async function folderPluginFiles(host) {
+  if (host.pluginFiles) return host.pluginFiles();
+  return host.list ? (await host.list()).filter((f) => PLUGIN_FILE.test(f)) : [];
+}
 // How much of a plugin call's response body is kept for its step (the plugin reads all of it)
 const CALL_CAP = 64 * 1024;
 const isPath = (entry) => /^(\.{1,2}\/|\/)/.test(entry) || /\.m?js$/i.test(entry);
@@ -48,10 +56,14 @@ const SECRET_TEXT = /\{\{\s*secrets?\.([A-Za-z_][\w.-]*)\s*\}\}/g;
 const ENV_TEXT = /\{\{\s*env\.([A-Za-z_][\w.-]*)\s*\}\}/g;
 // (the old way to name one: { secret: "ACME_PASSWORD" }, with a prefix or not)
 const SECRET_OBJECT = /\bsecret\s*:\s*["'`]([A-Za-z_][A-Za-z0-9_]*)["'`]/g;
+// (a fixture's env.set("NAME", …): a name it sets in the environment, written as it is)
+const ENV_SET = /\benv\s*\??\.\s*set\s*\(\s*["'`]([A-Za-z_][A-Za-z0-9_.-]*)["'`]/g;
 const namedBy = (pattern) => (source) => namedAt(String(source ?? ""), [...String(source ?? "").matchAll(pattern)]);
 export const secretsNamed = namedBy(SECRET_TEXT);
 // The {{env.NAMES}} its code writes, each where it's first written: [{ name, line, column }]
 export const envNamed = namedBy(ENV_TEXT);
+// The environment's names a fixture's code sets, as env.set("NAME", …), each where it's first written
+export const envSetNamed = namedBy(ENV_SET);
 // The secrets its code names the old way ({ secret: "NAME" }), each where it's first written
 export const oldSecretsNamed = namedBy(SECRET_OBJECT);
 function namedAt(text, found) {
@@ -162,7 +174,8 @@ export async function startPlugin(host, { file, source }) {
     if (m.type === "event") w.onEvent?.(m.event);
     else if (m.type === "loaded" || m.type === "result" || m.type === "done") {
       waiting.delete(m.id);
-      w.resolve(m.meta ?? m.value);
+      // (a fixture's run: its value and what it set, sets)
+      w.resolve(w.whole ? m : m.meta ?? m.value);
     } else if (m.type === "error") {
       waiting.delete(m.id);
       w.reject(new Error(m.message));
@@ -190,11 +203,13 @@ export async function startPlugin(host, { file, source }) {
     // each where: for the check before a run)
     secrets: secretsNamed(source),
     envNamed: envNamed(source),
+    envSets: envSetNamed(source),
     oldSecrets: oldSecretsNamed(source),
     // A method of it: opts { signal, transport, scope (the turn's, the run's or the conversation's:
     // where its requests' {{secret.…}}s and {{env.…}}s come from), secrets(NAME) (with no scope, where
-    // its {{secret.…}}s come from), used (a Set for redaction), onEvent }
-    call: (method, args, opts = {}) => request({ type: "call", method, args }, { opts, onEvent: opts.onEvent, fill: fillerFor(args, opts) }),
+    // its {{secret.…}}s come from), used (a Set for redaction), onEvent, whole (the result's message:
+    // { value, sets? }) }
+    call: (method, args, opts = {}) => request({ type: "call", method, args }, { opts, onEvent: opts.onEvent, fill: fillerFor(args, opts), whole: opts.whole }),
     close: () => worker.terminate(),
   };
 }
@@ -213,7 +228,7 @@ function fillerFor(args, opts) {
 // What the engine uses: a provider, a check or a judge, by its plugin's kind
 function adapter(running, defaults) {
   const { meta } = running;
-  const base = { meta, file: running.file, kind: meta.kind, secrets: running.secrets ?? [], envNamed: running.envNamed ?? [], oldSecrets: running.oldSecrets ?? [], close: running.close };
+  const base = { meta, file: running.file, kind: meta.kind, secrets: running.secrets ?? [], envNamed: running.envNamed ?? [], envSets: running.envSets ?? [], oldSecrets: running.oldSecrets ?? [], close: running.close };
   if (meta.kind === "provider") {
     return {
       ...base,
@@ -265,8 +280,16 @@ function adapter(running, defaults) {
   if (meta.kind === "check") {
     return { ...base, check: (args, opts = {}) => running.call("check", args, { ...defaults, ...opts }) };
   }
+  // (what a fixture's run set with env.set, told to opts.onSets({ NAME: text }) as it returns)
   if (meta.kind === "fixture") {
-    return { ...base, run: (args, opts = {}) => running.call("run", args, { ...defaults, ...opts }) };
+    return {
+      ...base,
+      run: async (args, opts = {}) => {
+        const out = await running.call("run", args, { ...defaults, ...opts, whole: true });
+        if (out.sets) opts.onSets?.(out.sets);
+        return out.value;
+      },
+    };
   }
   return {
     ...base,
@@ -331,7 +354,7 @@ export function versionProblems(suite, plugins) {
     if (!m) continue;
     const plugin = plugins[m[1]];
     const where = providerPlace(suite, key, ["kind"]);
-    if (!plugin) out.push({ ...where, message: `the provider plugin "${m[1]}" isn't in the folder's plugins/ or the suite's plugins` });
+    if (!plugin) out.push({ ...where, message: `the provider plugin "${m[1]}" isn't in ${pluginsWhere()}` });
     else if (plugin.kind !== "provider") out.push({ ...where, message: `the plugin "${m[1]}" is a ${plugin.kind}, not a provider` });
     else if (m[2] && !satisfies(plugin.meta.version, m[2])) out.push({ ...where, message: `the plugin "${m[1]}" is version ${plugin.meta.version}, not ${m[2]}` });
   }
@@ -353,9 +376,10 @@ export function fixtureIssues(config, plugins) {
     for (const [i, ref] of lists[phase].entries()) {
       const plugin = plugins[ref.name];
       const path = ["fixtures", phase, i];
-      if (!plugin) out.push({ path, message: `the fixture "${ref.name}" (fixtures.${phase}) isn't in the folder's plugins/ or the suite's plugins` });
+      if (!plugin) out.push({ path, message: `the fixture "${ref.name}" (fixtures.${phase}) isn't in ${pluginsWhere()}` });
       else if (plugin.kind !== "fixture") out.push({ path, message: `the plugin "${ref.name}" (fixtures.${phase}) is a ${plugin.kind}, not a fixture` });
       else if (ref.range && !satisfies(plugin.meta.version, ref.range)) out.push({ path, message: `the fixture "${ref.name}" is version ${plugin.meta.version}, not ${ref.range}` });
+      else if (!runsIn(plugin, phase)) out.push({ path, message: notIn(ref.name, plugin, phase) });
     }
   }
   const seen = new Set();
@@ -365,11 +389,22 @@ export function fixtureIssues(config, plugins) {
 // The same, as messages
 export const fixtureProblems = (config, plugins) => fixtureIssues(config, plugins).map((p) => p.message);
 
+// Whether a fixture runs in a list (its phases: all four when it doesn't say), and what's said when
+// a provider names it in one it doesn't: "the fixture "acme-login" runs only in beforeAll and afterAll:
+// it can't be in fixtures.after"
+export const runsIn = (plugin, phase) => (plugin.meta?.phases ?? FIXTURE_PHASES).includes(phase);
+export function phasesText(plugin) {
+  const phases = plugin.meta?.phases ?? FIXTURE_PHASES;
+  return phases.length > 1 ? `${phases.slice(0, -1).join(", ")} and ${phases.at(-1)}` : phases[0];
+}
+export const notIn = (name, plugin, phase) => `the fixture "${name}" runs only in ${phasesText(plugin)}: it can't be in fixtures.${phase}`;
+
 // The secrets the plugins a suite uses name in their code ("{{secret.NAME}}"): each must be set, or be
 // one its providers' fixtures give (given); and the {{env.NAMES}} it writes, each the environment's
-// (environment: the chosen one, { name, values, suite }, or null). One that isn't is a problem where
-// the plugin's file names it. secret(NAME): where secrets come from (the run's)
-export function pluginSecretProblems(suite, plugins, given, secret, environment, secretsFrom) {
+// (environment: the chosen one, { name, values, suite }, or null), or one its providers' fixtures set
+// (envGiven). One that isn't is a problem where the plugin's file names it. secret(NAME): where
+// secrets come from (the run's)
+export function pluginSecretProblems(suite, plugins, given, secret, environment, secretsFrom, envGiven = new Set()) {
   const out = [];
   for (const name of pluginNames(suite)) {
     const plugin = plugins[name];
@@ -384,7 +419,7 @@ export function pluginSecretProblems(suite, plugins, given, secret, environment,
       out.push({ ...where(use), variable: use.name, message: `${missingMessage(use.name, "secret", secretsWhere(environment, secretsFrom))} (the ${plugin.kind} plugin "${name}" names it)` });
     }
     for (const use of environment === undefined ? [] : plugin?.envNamed ?? []) {
-      if (environment && envHas(environment, use.name)) continue;
+      if ((environment && envHas(environment, use.name)) || envGiven.has(use.name)) continue;
       out.push({ ...where(use), variable: `env.${use.name}`, message: `${missingMessage(use.name, "environment", environment ? environment.name ?? "" : null)} (the ${plugin.kind} plugin "${name}" names it)` });
     }
   }
@@ -416,17 +451,37 @@ export function fixtureProvides(configs, plugins) {
   return names;
 }
 
+// The environment's names the fixtures that run before these providers' requests set with env.set
+// (beforeAll's and before's plugins'): the names their code writes as env.set("NAME", …), and their
+// sets (for a name it builds as it runs). A Set: {{env.NAME}}s of them count as set before a run.
+export function fixtureEnvSets(configs, plugins) {
+  const names = new Set();
+  for (const config of configs) {
+    const lists = fixturesOf(config);
+    for (const ref of [...lists.beforeAll, ...lists.before]) {
+      const plugin = plugins[ref.name];
+      if (plugin?.kind === "fixture") for (const n of fixtureSets(plugin)) names.add(n);
+    }
+  }
+  return names;
+}
+// A fixture's names it sets in the environment: its sets, and what its code writes as env.set("NAME", …)
+export const fixtureSets = (plugin) => [...new Set([...(plugin.meta?.sets ?? []), ...(plugin.envSets ?? []).map((use) => use.name)])];
+
 // The names a suite's fixtures give, for checking its {{secret.…}}s before a run (when a fixture is
 // what sets them): its providers' fixtures, loaded from its plugins and the folder's, then closed
-export async function suiteFixtureNames(host, suite) {
+export const suiteFixtureNames = async (host, suite) => (await suiteFixtureGives(host, suite)).secrets;
+// The same, with the environment's names they set with env.set: { secrets: Set, env: Set }
+export async function suiteFixtureGives(host, suite) {
   const configs = Object.values(suite.providers ?? {}).filter(hasFixtures);
-  if (!configs.length) return new Set();
+  if (!configs.length) return { secrets: new Set(), env: new Set() };
   const own = await loadPlugins(host, suite.data?.plugins ?? [], suite.file);
-  const folder = await loadPlugins(host, host.list ? (await host.list()).filter((f) => PLUGIN_FILE.test(f)) : [], null);
-  const names = fixtureProvides(configs, { ...folder.plugins, ...own.plugins });
+  const folder = await loadPlugins(host, await folderPluginFiles(host), null);
+  const all = { ...folder.plugins, ...own.plugins };
+  const gives = { secrets: fixtureProvides(configs, all), env: fixtureEnvSets(configs, all) };
   own.close();
   folder.close();
-  return names;
+  return gives;
 }
 
 // A JSON body with its texts' {{secret.…}}s and {{env.…}}s filled in (fill). A value that names a

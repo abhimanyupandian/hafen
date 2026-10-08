@@ -1,7 +1,6 @@
 // Scopes as the app has them now (contracts/ui.md, Head; spec/design/components.md, Additions: Scope
 // button, Message box problems): the scopes are only the ones made in the app, and the engine is always
-// given the one chosen (or none), so a folder's environments/<scope>.yml files, the old way, aren't
-// read; deleting a scope deletes all of it, for good (its entry, values and secrets: in the browser's
+// given the one chosen (or none), so environments/<scope>.yml files, the old way, aren't read; deleting a scope deletes all of it, for good (its entry, values and secrets: in the browser's
 // storage, and in the desktop app's keystore, after it's started again too); with none chosen, the
 // scope button is its icon alone, greyed out, with a small "!"; a provider's problem known before
 // sending is said only in the panel, by its fixtures; and the old ways to write a secret or a value,
@@ -13,21 +12,21 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parse } from "yaml";
-import { addScope, expect, fileText, test } from "./fixtures.js";
+import { addScope, addSecret, expect, fileText, reopen, showEntry, test } from "./fixtures.js";
 
 const ROOT = fileURLToPath(new URL("../../", import.meta.url));
 const NO_SCOPE = "No scope chosen: choose one";
 
 const writeFile = (page, path, text) => page.evaluate(async ([path, text]) => {
   const parts = path.split("/");
-  let dir = await navigator.storage.getDirectory();
+  let dir = await navigator.storage.getDirectory().then((root) => root.getDirectoryHandle("workspace", { create: true }));
   for (const p of parts.slice(0, -1)) dir = await dir.getDirectoryHandle(p, { create: true });
   const w = await (await dir.getFileHandle(parts.at(-1), { create: true })).createWritable();
   await w.write(text);
   await w.close();
 }, [path, text]);
-const openFolder = async (page) => {
-  await page.click("#openFolder");
+const openApp = async (page) => {
+  await reopen(page);
   await expect(page.locator('#suiteList .list-row[data-file="smoke.hafen.yml"]')).toHaveCount(1);
 };
 const reload = async (page) => {
@@ -49,13 +48,6 @@ const box = async (locator) => {
   const b = await locator.boundingBox();
   return { left: Math.round(b.x), top: Math.round(b.y), right: Math.round(b.x + b.width), bottom: Math.round(b.y + b.height), width: Math.round(b.width), height: Math.round(b.height) };
 };
-// A secret added in Settings → Secrets, in the scope shown
-const addSecret = async (page, name, value) => {
-  await page.fill("#secretName", name);
-  await page.fill("#secretValue", value);
-  await page.click("#secretAdd button[type=submit]");
-  await expect(page.locator(`#secret-${name} .hint`)).toContainText("set");
-};
 // What the browser build keeps of the scopes: their names, each one's values, the one chosen, the secrets
 const kept = (page) => page.evaluate(() => {
   const scopes = JSON.parse(localStorage.getItem("eval.scopes") ?? "[]");
@@ -64,6 +56,8 @@ const kept = (page) => page.evaluate(() => {
 });
 
 test.describe("in the browser build", () => {
+  // (from no scope: these make their own)
+  test.use({ scope: null });
   test.afterEach(async ({ app: { errors } }) => {
     expect(errors).toEqual([]);
   });
@@ -117,7 +111,7 @@ test.describe("in the browser build", () => {
     expect(await style(page.locator("#scopeIcon"), "opacity")).toBe("1");
     // None chosen again (Environments' "no scope"): the badge is back, and stays after a reload
     await page.click("#scopeButton");
-    await page.selectOption("#envScope", "");
+    await showEntry(page, "");
     await page.click("#envChoose");
     await page.click("#settingsClose");
     await expect(page.getByRole("button", { name: NO_SCOPE })).toBeVisible();
@@ -131,23 +125,23 @@ test.describe("in the browser build", () => {
 
   test("a provider's problem known before sending is said only in the panel, under its fixtures, with edit the provider (not under the box, nor in the top bar); Send is off, its title saying why", async ({ app: { page, servers } }) => {
     await writeFile(page, "providers/ollama.yml", `kind: http\nurl: "${servers.mock.url}/json"\nfixtures: { beforeAll: [test] }\nbody: { message: "{{user}}" }\nresponse: { text: $.data.reply }\n`);
-    await openFolder(page);
+    await openApp(page);
     await page.selectOption("#convProvider", "providers/ollama.yml");
     await page.fill("#input", "hello");
-    const said = "ollama: the fixture \"test\" (fixtures.beforeAll) isn't in the folder's plugins/ or the suite's plugins";
+    const said = "ollama: the fixture \"test\" (fixtures.beforeAll) isn't one of your plugins (Settings → Plugins)";
     const problem = page.locator("#convFixturesProblem");
     await expect(problem).toHaveText(`${said} · edit the provider`);
     await expect(problem).toHaveAttribute("role", "alert");
     // In the panel, under the provider's fixtures, and only there
     await expect(page.locator("#panel #convFixturesProblem")).toBeVisible();
     expect((await box(problem)).top).toBeGreaterThan((await box(page.locator("#convFixturesEdit"))).bottom);
-    await expect(page.getByText("isn't in the folder's plugins/ or the suite's plugins")).toHaveCount(1);
+    await expect(page.getByText("isn't one of your plugins (Settings → Plugins)")).toHaveCount(1);
     await expect(page.locator("#sendProblem")).toHaveCount(0);
     await expect(page.locator("#composer")).not.toContainText("plugins");
     await expect(page.locator("#topbar")).not.toContainText("plugins");
     // Send is off, its title says why; Enter sends nothing, and what's typed stays
     await expect(page.locator("#send")).toBeDisabled();
-    await expect(page.locator("#send")).toHaveAttribute("title", "Can't send: the fixture \"test\" (fixtures.beforeAll) isn't in the folder's plugins/ or the suite's plugins");
+    await expect(page.locator("#send")).toHaveAttribute("title", "Can't send: the fixture \"test\" (fixtures.beforeAll) isn't one of your plugins (Settings → Plugins)");
     await fetch(`${servers.mock.url}/_log`, { method: "DELETE" });
     await page.press("#input", "Enter");
     await expect(page.locator("#input")).toHaveValue("hello");
@@ -170,18 +164,17 @@ test.describe("in the browser build", () => {
 
   test("Delete scope deletes all of it: its entry, values and secrets, from the scope button, Environments, Secrets and storage; chosen, none is after it; nothing brings it back", async ({ app: { page } }) => {
     // (smoke.hafen.yml has an environment named local: it gives a scope of that name values, and isn't one)
-    await openFolder(page);
     await expect(page.getByRole("button", { name: NO_SCOPE })).toBeVisible();
     await addScope(page, "prod", { who: "prod-team" });
     await addScope(page, "local", { who: "local-team" });
     // Its secrets, and others'
     await page.click("#openSettings");
     await page.click("#settings-tab-secrets");
-    await expect(page.locator("#secretsEnv")).toHaveValue("local");
+    await expect(page.locator("#secretsScope-local")).toHaveClass(/active/);
     await addSecret(page, "LOCAL_KEY", "k-local");
-    await page.selectOption("#secretsEnv", "prod");
+    await showEntry(page, "prod", "secrets");
     await addSecret(page, "PROD_KEY", "k-prod");
-    await page.selectOption("#secretsEnv", "");
+    await showEntry(page, "", "secrets");
     await addSecret(page, "SHARED", "s-every");
     await page.click("#settingsClose");
     expect(await kept(page)).toEqual({
@@ -190,42 +183,41 @@ test.describe("in the browser build", () => {
     });
     // Deleted, asking first: the scope chosen
     await page.click("#scopeButton");
-    await expect(page.locator("#envScope")).toHaveValue("local");
+    await expect(page.locator("#envScope-local")).toHaveClass(/active/);
     await page.click("#envDelete");
     await expect(page.locator("#envDelete")).toHaveText("delete its values and secrets?");
     await page.click("#envDelete");
     // Gone from Environments, Secrets, the scope button (none chosen now) and storage
-    await expect(page.locator("#envScope option")).toHaveText(["no scope", "prod"]);
+    await expect(page.locator("#envScopes .list-open")).toHaveText(["prod"]);
     await page.click("#settings-tab-secrets");
-    await expect(page.locator("#secretsEnv option")).toHaveText(["every scope", "prod"]);
+    await expect(page.locator("#secretsScopes .list-open")).toHaveText(["prod"]);
     await page.click("#settingsClose");
     await expect(page.getByRole("button", { name: NO_SCOPE })).toBeVisible();
     expect(await kept(page)).toEqual({
       scopes: ["prod"], keys: ["eval.scope.prod"], env: "",
       secrets: { prod: { PROD_KEY: "k-prod" }, "": { SHARED: "s-every" } },
     });
-    // Nothing brings it back: a reload, the folder opened again (its suite's environment named local)
+    // Nothing brings it back: a reload, the suites read again (the one whose environment is named local)
     await reload(page);
-    await openFolder(page);
     await expect(page.getByRole("button", { name: NO_SCOPE })).toBeVisible();
     await page.click("#scopeButton");
-    await expect(page.locator("#envScope option")).toHaveText(["no scope", "prod"]);
+    await expect(page.locator("#envScopes .list-open")).toHaveText(["prod"]);
     await page.click("#settings-tab-secrets");
-    await expect(page.locator("#secretsEnv option")).toHaveText(["every scope", "prod"]);
+    await expect(page.locator("#secretsScopes .list-open")).toHaveText(["prod"]);
     await page.click("#settingsClose");
     // Made again, it starts empty: its old values and secrets went with it
     await addScope(page, "local");
     await page.click("#scopeButton");
     await expect(page.locator("#envVar-who")).toHaveCount(0);
     await page.click("#settings-tab-secrets");
-    await expect(page.locator("#secretsEnv")).toHaveValue("local");
+    await expect(page.locator("#secretsScope-local")).toHaveClass(/active/);
     await expect(page.locator("#secret-LOCAL_KEY")).toHaveCount(0);
     // Another scope deleted (not the one chosen): the one chosen stays
     await page.click("#settings-tab-environments");
-    await page.selectOption("#envScope", "prod");
+    await showEntry(page, "prod");
     await page.click("#envDelete");
     await page.click("#envDelete");
-    await expect(page.locator("#envScope option")).toHaveText(["no scope", "local"]);
+    await expect(page.locator("#envScopes .list-open")).toHaveText(["local"]);
     await page.click("#settingsClose");
     await expect(page.locator("#scopeName")).toHaveText("local");
     expect((await kept(page)).secrets).toEqual({ "": { SHARED: "s-every" } });
@@ -234,22 +226,21 @@ test.describe("in the browser build", () => {
   test("secrets kept for a name the app has no scope of don't make one: the scopes are only the ones made here", async ({ app: { page } }) => {
     await page.evaluate(() => localStorage.setItem("eval.secrets", JSON.stringify({ ghost: { TOKEN: "t-123456" } })));
     await reload(page);
-    await openFolder(page);
     await expect(page.getByRole("button", { name: NO_SCOPE })).toBeVisible();
     await page.click("#scopeButton");
     await expect(page.locator("#environmentsEmpty")).toBeVisible();
     await page.click("#settings-tab-secrets");
-    await expect(page.locator("#secretsEnv option")).toHaveText(["every scope"]);
+    await expect(page.locator("#secretsScopes .list-open")).toHaveCount(0);
   });
 
-  /* ---------- a folder's scope files, the old way: not read ---------- */
+  /* ---------- scope files, the old way: not read ---------- */
 
-  test("a folder's environments/<scope>.yml files (the old way) aren't read: they make no scope, nothing offers to import them, and a scope of the same name made here has only its own values", async ({ app: { page, servers } }) => {
+  test("environments/<scope>.yml files (the old way) aren't read: they make no scope, nothing offers to import them, and a scope of the same name made here has only its own values", async ({ app: { page, servers } }) => {
     await writeFile(page, "providers/plain.yml", "kind: http\nurl: \"{{env.base_url}}/json\"\nheaders: { X-Who: \"{{env.who}}\" }\nbody: { message: \"{{user}}\" }\nresponse: { text: $.data.reply }\n");
     await writeFile(page, "plain.hafen.yml", "version: 1\nname: Plain\nprovider: providers/plain.yml\ntests:\n  - name: plain hello\n    id: t_plain001\n    turns:\n      - user: hello\n        expect: [{ type: status, equals: 200 }]\n");
     const old = `base_url: ${servers.mock.url}\nwho: file-team\n`;
     await writeFile(page, "environments/stage.yml", old);
-    await openFolder(page);
+    await openApp(page);
     await expect(page.locator('#suiteList .list-row[data-file="plain.hafen.yml"]')).toHaveCount(1);
     // No scope from it, and no offer to import it
     await expect(page.locator("#scopeImport")).toHaveCount(0);
@@ -269,7 +260,7 @@ test.describe("in the browser build", () => {
     await page.click("#scopeButton");
     await page.fill("#envVarName", "base_url");
     await page.fill("#envVarValue", servers.mock.url);
-    await page.click("#envVarAdd button[type=submit]");
+    await page.press("#envVarValue", "Enter");
     await expect(page.locator("#envVar-base_url input")).toHaveValue(servers.mock.url);
     await page.click("#settingsClose");
     await page.click("#testRun");
@@ -284,7 +275,7 @@ test.describe("in the browser build", () => {
 
   test("an old way to write a secret or a value (${env:NAME}, {{scope.NAME}}) fills nothing: a field says what to write instead, and Secrets doesn't count it as a name the files use", async ({ app: { page } }) => {
     await writeFile(page, "providers/old.yml", "kind: http\nurl: \"http://127.0.0.1:1/json\"\nheaders: { Authorization: \"Bearer ${env:OLD_KEY}\" }\nbody: { message: \"{{user}}\" }\nresponse: { text: $.data.reply }\n");
-    await openFolder(page);
+    await openApp(page);
     await addScope(page, "stage", { who: "stage-team" });
     await page.fill("#input", "hi ${env:API_KEY}");
     await expect(page.locator("#inputProblem")).toHaveText("${env:API_KEY} is the old way to write a secret: write {{secret.API_KEY}}");
@@ -296,7 +287,7 @@ test.describe("in the browser build", () => {
     // Settings → Secrets: OLD_KEY, written the old way, isn't a name the open files use
     await page.click("#openSettings");
     await page.click("#settings-tab-secrets");
-    await expect(page.locator("#secretsList, #secretsEmpty")).toHaveCount(1);
+    await expect(page.locator("#secretsList")).toHaveCount(1);
     await expect(page.locator("#secret-OLD_KEY")).toHaveCount(0);
   });
 });
@@ -305,8 +296,9 @@ plain.describe("in the desktop app", () => {
   plain.skip(process.platform === "linux" && !process.env.DISPLAY, "needs a display (run under xvfb-run on Linux)");
 
   plain("Delete scope leaves no trace of it in the keystore's secrets.json or the window's storage, and starting the app again doesn't bring it back", async () => {
-    const folder = await mkdtemp(join(tmpdir(), "hafen-desktop-"));
     const data = await mkdtemp(join(tmpdir(), "hafen-data-"));
+    // (the app's workspace, in its data folder: filled before it starts)
+    const folder = join(data, "workspace");
     // (smoke.hafen.yml has an environment named local, as the scope deleted is)
     await cp(join(ROOT, "packages/hafen/tests/fixtures/suites"), folder, { recursive: true });
     const env = { ...process.env, HAFEN_LAB_DATA: data };
@@ -314,27 +306,25 @@ plain.describe("in the desktop app", () => {
     const secretsFile = () => readFile(join(data, "secrets.json"), "utf8");
     let app = await electron.launch({ args: [ROOT], cwd: ROOT, env });
     try {
-      await app.evaluate(({ dialog }, f) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [f] }); }, folder);
       let page = await app.firstWindow();
-      await page.click("#openFolder");
       await expect(page.locator('#suiteList .list-row[data-file="smoke.hafen.yml"]')).toHaveCount(1);
       await expect(page.getByRole("button", { name: NO_SCOPE })).toBeVisible();
       await addScope(page, "prod", { who: "prod-team" });
       await addScope(page, "local", { who: "local-team" });
       await page.click("#openSettings");
       await page.click("#settings-tab-secrets");
-      await expect(page.locator("#secretsEnv")).toHaveValue("local");
+      await expect(page.locator("#secretsScope-local")).toHaveClass(/active/);
       await addSecret(page, "LOCAL_KEY", "k-local-secret");
-      await page.selectOption("#secretsEnv", "prod");
+      await showEntry(page, "prod", "secrets");
       await addSecret(page, "PROD_KEY", "k-prod-secret");
       await page.click("#settingsClose");
       expect(Object.keys(JSON.parse(await secretsFile())).sort()).toEqual(["local", "prod"]);
       // Deleted, asking first
       await page.click("#scopeButton");
-      await page.selectOption("#envScope", "local");
+      await showEntry(page, "local");
       await page.click("#envDelete");
       await page.click("#envDelete");
-      await expect(page.locator("#envScope option")).toHaveText(["no scope", "prod"]);
+      await expect(page.locator("#envScopes .list-open")).toHaveText(["prod"]);
       await page.click("#settingsClose");
       await expect(page.getByRole("button", { name: NO_SCOPE })).toBeVisible();
       // No trace: the keystore's file (not even an empty entry), what the main process lists, the window's storage
@@ -351,15 +341,14 @@ plain.describe("in the desktop app", () => {
       await expect(page.locator('#suiteList .list-row[data-file="smoke.hafen.yml"]')).toHaveCount(1);
       await expect(page.getByRole("button", { name: NO_SCOPE })).toBeVisible();
       await page.click("#scopeButton");
-      await expect(page.locator("#envScope option")).toHaveText(["no scope", "prod"]);
+      await expect(page.locator("#envScopes .list-open")).toHaveText(["prod"]);
       await page.click("#settings-tab-secrets");
-      await expect(page.locator("#secretsEnv option")).toHaveText(["every scope", "prod"]);
+      await expect(page.locator("#secretsScopes .list-open")).toHaveText(["prod"]);
       await page.click("#settingsClose");
       expect(await secretsFile()).not.toContain("local");
       expect(await page.evaluate(() => localStorage.getItem("eval.scopes"))).toBe('["prod"]');
     } finally {
       await app.close();
-      await rm(folder, { recursive: true, force: true });
       await rm(data, { recursive: true, force: true });
     }
   });

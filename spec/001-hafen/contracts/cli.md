@@ -28,12 +28,12 @@ Folders are searched for `*.hafen.yml`, `*.hafen.yaml` and `*.hafen.json`.
 |---|---|---|
 | `--test <name>` | Only tests whose name contains this (repeatable) | all |
 | `--tag <tag>` | Only tests with this tag (repeatable; any) | all |
-| `--env <file>` | The environment: a `KEY=VALUE` file anywhere on the disk (`engine/env-file.js`), read by the command line, its values given to the engine as `environment: { name, values }` (and `env: name`). They fill `{{env.NAME}}`; its name, the file's without its extension (`staging.env`: `staging`), picks the suites' environment of that name. See Environments and secrets below | the suite's first environment |
-| `--env <name>` | The suites' environment of that name, with no values given (`env: name`). Nothing is read from the folder: an `environments/<name>.yml` isn't | |
-| `--secret <file>` | Secrets: a `KEY=VALUE` file anywhere on the disk. They fill `{{secret.NAME}}` (`host.secrets(NAME)`: the file's value, then the environment variable `NAME`). Also `--secrets`; one file | the environment's variables |
+| `--env <file>` | The environment: a `KEY=VALUE` file anywhere on the disk (`engine/env-file.js`), read by the command line, its values given to the engine as `environment: { name, values }` (and `env: name`). They fill `{{env.NAME}}`; its name, the file's without its extension (`staging.env`: `staging`), picks the suites' environment of that name. Repeatable: the files' values merged in order, a later file's winning; the name is the last `--env`'s. See Environments and secrets below | the suite's first environment |
+| `--env <name>` | The suites' environment of that name, with no values given (`env: name`); after `--env <file>`s, with theirs (`environment: { name, values }`). Nothing is read from the folder: an `environments/<name>.yml` isn't | |
+| `--secret <file>` | Secrets: a `KEY=VALUE` file anywhere on the disk. They fill `{{secret.NAME}}` (`host.secrets(NAME)`: the files' value, then the environment variable `NAME`). Repeatable, a later file's winning. Also `--secrets` (one list with `--secret`, in the order given) | the environment's variables |
 | `--var name=value` | Set a variable (repeatable) | |
 | `--repeat <n>` | Override every test's repeat count | the file's |
-| `--unsure pass\|warn\|fail` | Override how unsure results count | the file's |
+| `--unsure fail\|warn\|pass` | Override how unsure results count, every test's and check's ([checks.md, Unsure](checks.md#unsure)) | the file's, else `fail` |
 | `--max-cost <usd>` | Stop when the run's cost reaches this | none |
 | `--bail` | Stop at the first failed test | off |
 | `--timeout <ms>` | Override every turn's timeout | the file's |
@@ -60,7 +60,10 @@ Paths: files and folders (a folder is searched for `*.hafen.yml`, `.yaml`, `.jso
 `node_modules`, `.git`, `.hafen`, `dist` and `release`), in the current folder or anywhere. Files are
 read only in the current folder and in the project of each path given (the nearest folder above it
 with a `.git` or a `package.json`; else the path's own folder): a suite that names a file elsewhere
-(`data: /home/me/.aws/credentials`) has a problem saying so, and exits `2`.
+(`data: /home/me/.aws/credentials`) has a problem saying so, and exits `2`. The folder's plugins (the
+ones any suite may use by name) are `plugins/*.js` in the current folder and in each folder given (a
+suite file's own folder), so a folder the app exported runs as it is from anywhere: `hafen run
+exported/`.
 
 **Load tests** (`load:`): skipped without `--load`, saying so. Load mode (many requests at once,
 ramped up, with percentiles: spec US11) isn't built yet, so with `--load` a load test that's chosen
@@ -84,21 +87,31 @@ reads an environment's values from the project's folder: the command line passes
 - `--env`'s value is a file when it has a `/` or `\` in it, or ends in `.env`, or a file of that name
   exists; otherwise it's an environment's name, with no values (the suites' environment of that name;
   a folder's `environments/<name>.yml` isn't read).
-- `--secret`: the host's `secrets(NAME)` is the file's value (one it leaves empty, `NAME=`, isn't
-  set by it), then `process.env[NAME]`, so CI's secrets as environment variables work with or without
-  a file. Every value in the file is redacted from the output, every event and every report and run
-  file (as the engine redacts each secret it fills in), wherever it shows, even one no file uses.
+- Both are repeatable (`--env globals.env --env staging.env --secret globals.secret.env --secret
+  staging.secret.env`): the files are read in the order given and their values merged, a later
+  file's winning. The environment's name is the last `--env`'s (a file's, or a plain name). With any
+  `--env <file>`, the engine is given `environment: { name, values }` (the merged values); with
+  names alone, `env: name` only. A pack's run and `validate` take them the same way.
+- `--secret`: the host's `secrets(NAME)` is the files' value (one a file leaves empty, `NAME=`, isn't
+  set by it: an earlier file's stays), then `process.env[NAME]` (its own entry only), so CI's secrets
+  as environment variables work with or without a file. Every value in the files (one a later file
+  overrides too) is given to the engine as `host.knownSecrets()`, and redacted from the output, every
+  event and every report and run file (as the engine redacts each secret it fills in), wherever it
+  shows, even one no file uses. `validate`'s problems are redacted the same way.
 - A file that doesn't exist or can't be read is a setup error, exit `2`, nothing sent (`the
   environment file staging.env doesn't exist`, `the secrets file … can't be read: it's a folder`); so
   is a line that isn't `NAME=value`, at its file, line and column (`staging.env:4:1  line 4 isn't
-  NAME=value`, then `1 problem: nothing was sent.`). A secrets file's problems never quote its lines.
-  More than one secrets file is a setup error.
-- A `{{env.NAME}}` the environment hasn't (its file's values, then the suite's environment of its
-  name), or a `{{secret.NAME}}` that isn't set, is a setup error before anything is sent (exit `2`),
-  at the file, line and column where it's used.
+  NAME=value`, then `1 problem: nothing was sent.`). With several files, every file's problems are
+  said together. A secrets file's problems never quote its lines.
+- A `{{env.NAME}}` the environment hasn't (its files' values, then the suite's environment of its
+  name), or a `{{secret.NAME}}` that isn't set (`not in the --secret file or the environment`; `files`
+  with several), is a setup error before anything is sent (exit `2`), at the file, line and column
+  where it's used. Only the chosen environment's block of the suite's `environments:` is read for the
+  names it needs: a secret only another environment's values name doesn't stop the run.
 
 The app's **Copy CI command** gives `npx hafen run <paths> --env <file> --secret <file>
---report …`.
+--report …` (with the global scope's files first when it has values: `--env globals.env --env
+staging.env --secret globals.secret.env --secret staging.secret.env`).
 
 ## `pack`
 
@@ -160,7 +173,7 @@ the user why.
 
 | Code | Meaning |
 |---|---|
-| `0` | Every test ran and passed (unsure results counted as the unsure policy says) |
+| `0` | Every test ran and passed (an unsure result counts as failed unless the unsure policy, `--unsure` or the file's, is `warn` or `pass`) |
 | `1` | At least one test failed, or the run regressed past `--fail-on` thresholds |
 | `2` | Setup or configuration error: a file that doesn't parse or validate, a newer `version`, a missing variable, environment value, secret, file or plugin, an `--env` or `--secret` file that doesn't exist or has a line that isn't `NAME=value`; or no tests ran (the suites have none, or none match `--test` / `--tag`). Nothing was sent, or what was sent can't be trusted |
 | `3` | Stopped early: `--max-cost` reached, `--bail`, or cancelled (SIGINT, SIGTERM). Reports are written for what ran |
@@ -175,12 +188,12 @@ While running, one line per test as it ends, then a summary:
 ```
 ✓ refunds › refund for a broken item   3/3   6/6 checks   4.1 s   $0.0124
 ✗ refunds › refund questions from the data file   188/200 rows   188/200 checks   41.2 s   $0.21
-    row 17 · turn 1 · $.reply.order.id = {{row.order}}: 4413 ≠ 4431
-    row 18 · turn 1 · error: timed out after 60 s
-    row 19 · conversation · $[*].reply contains refund: didn't find refund
+    row 17: where is order 4431 · turn 1 · $.reply.order.id = {{row.order}}: 4413 ≠ 4431
+    row 18: a refund for a gift · turn 1 · error: timed out after 60 s
+    row 19: cancel my order · conversation · $[*].reply contains refund: didn't find refund
     …9 more (see the report)
 ! billing › proration   3/3   3/4 checks   2.0 s
-    unsure: noul 0.58 (confidence 0.41)
+    unsure: noul 0.58: 0.58 within 0.5–1, but confidence 0.41 is below 0.6 (counted as passed: unsure is warn)
 ✗ billing › logged in   0/1   0/2 checks   0.3 s
     setup "log in" failed: status 500
 – billing › soak   a load test (needs --load, or confirming in the app)
@@ -191,8 +204,12 @@ Run file: .hafen/runs/k3f9….hafen-run.json
 
 A test's line: its runs (or rows) that passed, its checks that passed (one turned off isn't
 counted), its time and its cost (when priced); then what went wrong, a line each, at most three: where
-(the row, the run when it repeats, the turn, or `conversation`), the check and why, or why the turn
-broke (once, not for each of its checks), or why a setup step failed. The summary counts errors
+(the row, by its number and name, `row 17: where is order 4431` ([test-file.md, Data
+rows](test-file.md#data-rows)); the run when it repeats; the turn, or `conversation`), the check and why, or why the turn
+broke (once, not for each of its checks), or why a setup step failed; an unsure result that counts as
+failed as `turn 1 · noul 0.58: unsure: 0.58 within 0.5–1, but confidence 0.41 is below 0.6 (unsure
+counts as failed; --unsure warn to let it pass)`. A test that passed with unsure results that warn
+(`!`) has a line for each, at most two, as `billing` (`unsure: warn`) above. The summary counts errors
 apart from failures (`1 error`, when there are any), and the fixtures that ran (`3 fixtures (1
 failed)`, when there are any). A provider's fixture that fails has a line as it ends, always
 (`⚙ fixture acme-logout · afterAll · providers/acme.yml  failed: …`: an after or afterAll one changes no
@@ -212,10 +229,10 @@ tests/support/refund.hafen.yml:14:18  {{secret.ACME_QA_PASSWORD}} isn't set
 
 | Format | Contents |
 |---|---|
-| `junit` | One `<testsuite>` per suite file; one `<testcase>` per test (per row for data tests: `name [row 17]`); a `<failure>` per failed check (message: the check and why; text: the turn's message and reply excerpt), an `<error>` per error, `<skipped>` for skipped tests; `<properties>` with pass rate, checks, p50 and p95 latency, tokens and cost (and fixtures, fixtures_failed). Unsure results with `warn` go in `<system-out>`; so does a line for each provider fixture that ran for the case (a failed one in `<system-err>` too), and the run's own (beforeAll, afterAll) in each suite's |
+| `junit` | One `<testsuite>` per suite file; one `<testcase>` per test, however many runs it has, with one status, as the run's summary counts it ([docs/cli.md, How the reports count](../../../docs/cli.md#how-the-reports-count)): passed, no element; failed (its pass rate missed), one `<failure>` listing every problem (the check and why; the turn's message and reply excerpt); an error, one `<error>`; skipped or stopped, one `<skipped>` saying why. A test with data rows that passed, failed or errored is one `<testcase>` per row instead, `<test> [row N: <its name>]` (`orders [row 3: a refund please]`; the number keeps them in order and two rows of the same name apart; a row with no name, or a run file from before row names, `<test> [row N]`; its repeats within it), its status agreeing with the test's (`reports/outcome.js`, `rowsOf`): a row passed when its runs met the test's pass rate (no element; its failed runs in `<system-out>`); otherwise, in a test that missed its pass rate, a `<failure>` (an `<error>` when its runs only errored; `<skipped>` when the run stopped it before it failed anything), and in one that met it, a `<skipped message="failed, within the test's pass rate (6/8 ≥ 0.75): <the first problem>">`; so JUnit's failures and errors are there exactly when the run failed. Each `<testsuite>`'s and the `<testsuites>`' `tests`, `failures`, `errors` and `skipped` count its cases. Runs that failed inside a passing test or row go in `<system-out>`, never in the counts. A suite whose setup step or `beforeAll` fixture failed, or with problems found before anything was sent, is a case `(setup)`, an error; one the run never reached is `(not run)`, skipped. `<properties>` with pass_rate, checks, p50 and p95 latency, tokens and cost (and fixtures, fixtures_failed, stopped). Unsure results with `warn` go in `<system-out>`; so does a line for each provider fixture that ran for the case (a failed one in `<system-err>` too), and the run's own (beforeAll, afterAll) in each suite's |
 | `run` | The run file ([run-file.md](run-file.md)): open it in the app to see the chat and timeline |
 | `md` | A summary for a CI job page or pull request comment: totals, a table of tests, failures with reasons, a table of the fixtures that ran, the baseline comparison |
-| `json` | The run's summary, every check result, every fixture that ran (`fixtures`) and every HTTP call a plugin or fixture made (`calls`: plugin, call, status, error, ms, what made it), for dashboards |
+| `json` | The run's summary, each test and what went wrong in it (`problems`), every check result (a data row's problems and results with its `row` and `row_name`), every fixture that ran (`fixtures`) and every HTTP call a plugin or fixture made (`calls`: plugin, call, status, error, ms, what made it), for dashboards |
 
 ## Environment
 

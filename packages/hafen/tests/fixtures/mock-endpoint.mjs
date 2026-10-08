@@ -38,7 +38,9 @@
 //                              pieces, completed. "ping" → a Message (no task). "break" → failed. Else → an
 //                              artifact "You said: …", completed. contextId: the one sent, else a new one.
 //   POST /systemone/v1/systemone   a System One API: noul 0.91 when the state asks "why", else 0.12; questions
-//                                  whose instructions say UNSURE answer 0.55 (confidence 0.1)
+//                                  whose instructions say UNSURE answer 0.55 (confidence 0.1); CONFIDENCE=0.42
+//                                  in them, that confidence (any type); a choice's NO-CONFIDENCE, none (and no
+//                                  probabilities)
 //   GET  /systemone/v1/models
 //   POST /judge/chat/completions   an OpenAI-compatible LLM judge (streamed): criteria met unless they say NOT-MET;
 //                                  criteria that say FLAKY alternate between met and not
@@ -301,17 +303,21 @@ export function createMock({ delayMs = Number(process.env.MOCK_DELAY_MS ?? 0), c
         const answers = {};
         for (const [name, q] of Object.entries(body?.questions ?? {})) {
           const unsure = /UNSURE/.test(q.instructions ?? "");
+          const said = (q.instructions ?? "").match(/CONFIDENCE=([\d.]+)/);
           if (q.type === "noul") answers[name] = { noul: unsure ? 0.55 : /why/i.test(state) ? 0.91 : 0.12 };
           else if (q.type === "choice") {
             const options = Object.keys(q.criteria ?? {});
             const picked = options.find((o) => state.toLowerCase().includes(o.toLowerCase())) ?? options[0];
             const p = unsure ? 0.4 : 0.86;
-            answers[name] = { choice: picked, confidence: p, probabilities: Object.fromEntries(options.map((o) => [o, o === picked ? p : (1 - p) / Math.max(1, options.length - 1)])) };
+            answers[name] = /NO-CONFIDENCE/.test(q.instructions ?? "")
+              ? { choice: picked }
+              : { choice: picked, confidence: p, probabilities: Object.fromEntries(options.map((o) => [o, o === picked ? p : (1 - p) / Math.max(1, options.length - 1)])) };
           } else if (q.type === "score") {
             const levels = Array.isArray(q.criteria) ? q.criteria : [];
             const score = state.length > 40 ? levels.length - 1 : 0;
             answers[name] = { score, confidence: unsure ? 0.3 : 0.8, legend: levels, probabilities: Object.fromEntries(levels.map((_, i) => [i, i === score ? 0.8 : 0.2 / Math.max(1, levels.length - 1)])) };
           }
+          if (said && answers[name]) answers[name].confidence = Number(said[1]);
         }
         return json(res, 200, { model: body?.model ?? "jev-mock", answers, usage: { input_tokens: state.length, output_tokens: Object.keys(answers).length } });
       }

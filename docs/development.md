@@ -32,8 +32,8 @@ app's.
 | `packages/hafen/engine/` | Everything about running tests: files and schemas, variables, JSONPath (RFC 9535, json-p3), transports and retries, stream parsers, providers and presets, checks, judges, the runner, spans and metrics, redaction, reports. Runs unchanged in Node, a Web Worker and Electron's utility process |
 | `packages/hafen/cli/` | The command-line runner (`hafen`, `cli/hafen.js`), its Node host, and `pack` |
 | `packages/hafen/tests/` | The package's tests (`node --test`): `engine/`, `cli/`, and `fixtures/` (the mock endpoint, suites and providers for it, the JSONPath compliance suite) |
-| `app/` | The UI (React). `design/` is Hafen's design system and its additions (check badge, JSON tree, timeline, charts); `views/`; `state.js`; `host.js` connects to the engine; `worker.js` runs it in a browser |
-| `desktop/` | Electron: the window, the engine's utility process, folders and secrets |
+| `app/` | The UI (React). `design/` is Hafen's design system and its additions (check badge, JSON tree, timeline, charts); `views/`; `state.js`; `transfer.js` imports and exports suites; `host.js` connects to the engine; `worker.js` runs it in a browser, on the app's workspace in the browser's private file system |
+| `desktop/` | Electron: the window, the engine's utility process, the app's workspace (`<data folder>/workspace`), the dialogs that pick what to import and where to export, and secrets |
 | `server/` | The browser build's server (`npm run serve`, `serve.js`) and its relay (`relay.js`), which calls only the endpoints it's allowed |
 | `tests/` | The app's tests: `app/` (`node --test`: the app's helpers, the page's bundle, design parity, the relay and `npm run serve`, the desktop app's data carried over); `browser/` and `visual/` (Playwright) |
 | `spec/` | The product spec: user stories, data model, contracts, research, and the design system |

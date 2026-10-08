@@ -1,67 +1,80 @@
 // The desktop app (spec US3; research §4–5): Electron, the engine in a utility process (Node, as in
-// CI), the window without a title bar, and each run written to the folder's .hafen/runs.
+// CI), on the app's own workspace (<its data folder>/workspace: the suites and providers it keeps, as
+// plain files), the window without a title bar, and each run kept by the app.
 
 import { _electron as electron, expect, test } from "@playwright/test";
-import { cp, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parse } from "yaml";
 import { startMock } from "../../packages/hafen/tests/fixtures/mock-endpoint.mjs";
+import { addScope } from "./fixtures.js";
 
 const ROOT = fileURLToPath(new URL("../../", import.meta.url));
 
 test.skip(process.platform === "linux" && !process.env.DISPLAY, "needs a display (run under xvfb-run on Linux)");
 
-test("runs a test in the desktop app and writes the run file", async () => {
-  const mock = await startMock({ chunkMs: 10 });
-  const folder = await mkdtemp(join(tmpdir(), "hafen-desktop-"));
-  await cp(join(ROOT, "packages/hafen/tests/fixtures/suites"), folder, { recursive: true });
-  const suite = join(folder, "smoke.hafen.yml");
-  await writeFile(suite, (await readFile(suite, "utf8")).replace("http://127.0.0.1:8791", mock.url));
+// The app's workspace in a data folder of a test's own (HAFEN_LAB_DATA), filled with the fixture
+// suites before the app starts, the mock's address in them: { data, folder (the workspace) }
+async function workspaceWith(mock) {
   const data = await mkdtemp(join(tmpdir(), "hafen-data-"));
+  const folder = join(data, "workspace");
+  await mkdir(folder, { recursive: true });
+  await cp(join(ROOT, "packages/hafen/tests/fixtures/suites"), folder, { recursive: true });
+  if (mock) {
+    const suite = join(folder, "smoke.hafen.yml");
+    await writeFile(suite, (await readFile(suite, "utf8")).replace("http://127.0.0.1:8791", mock.url));
+  }
+  return { data, folder };
+}
+
+test("runs a test in the desktop app, on its own workspace, and keeps the run", async () => {
+  const mock = await startMock({ chunkMs: 10 });
+  const { data, folder } = await workspaceWith(mock);
   const env = { ...process.env, HAFEN_LAB_DATA: data };
   delete env.ELECTRON_RUN_AS_NODE;
   const app = await electron.launch({ args: [ROOT], cwd: ROOT, env });
   try {
-    await app.evaluate(({ dialog }, f) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [f] }); }, folder);
     const page = await app.firstWindow();
     await expect(page.locator("html")).toHaveClass(/app-window/);
     // Its icon, as Electron loads it (the Dock's when run from here; the window's on Windows and Linux)
     expect(await app.evaluate(({ nativeImage }, p) => nativeImage.createFromPath(p).getSize(), join(ROOT, "desktop/icons/icon.png"))).toEqual({ width: 1024, height: 1024 });
-    await page.click("#openFolder");
+    // No folder asked for: the suites are the workspace's from the start. (Their environment is local:
+    // the scope of that name, made and chosen, gives it.)
+    await addScope(page, "local");
     await page.locator("#suiteList .list-open", { hasText: "refund for a broken item" }).click();
     await page.click("#testRun");
     await expect(page.locator("#status")).toContainText("failed 0/1");
-    const runs = await readdir(join(folder, ".hafen", "runs"));
-    expect(runs).toHaveLength(1);
-    const run = JSON.parse(await readFile(join(folder, ".hafen", "runs", runs[0]), "utf8"));
-    expect(run.where.app).toBe("desktop");
-    expect(await readFile(join(folder, ".hafen", ".gitignore"), "utf8")).toContain("*");
+    // The run is the app's (Runs), from the desktop app's engine; nothing is written beside the suites
+    await expect(page.locator("#runList .list-row")).toHaveCount(1);
+    const where = await page.evaluate(async () => {
+      const done = (req) => new Promise((resolve, reject) => { req.onsuccess = () => resolve(req.result); req.onerror = () => reject(req.error); });
+      const db = await done(indexedDB.open("hafen"));
+      const runs = await done(db.transaction("runs").objectStore("runs").getAll());
+      db.close();
+      return runs.map((r) => r.where.app);
+    });
+    expect(where).toEqual(["desktop"]);
+    expect(await readdir(folder)).not.toContain(".hafen");
   } finally {
     await app.close();
     await mock.close();
-    await rm(folder, { recursive: true, force: true });
     await rm(data, { recursive: true, force: true });
   }
 });
 
-test("the desktop app edits the files on disk, and gets its engine back if it stops", async () => {
+test("the desktop app edits the files in its workspace, and gets its engine back if it stops", async () => {
   const mock = await startMock({ chunkMs: 10 });
-  const folder = await mkdtemp(join(tmpdir(), "hafen-desktop-"));
-  const data = await mkdtemp(join(tmpdir(), "hafen-data-"));
-  await cp(join(ROOT, "packages/hafen/tests/fixtures/suites"), folder, { recursive: true });
+  const { data, folder } = await workspaceWith(mock);
   const suite = join(folder, "smoke.hafen.yml");
-  await writeFile(suite, (await readFile(suite, "utf8")).replace("http://127.0.0.1:8791", mock.url));
   const env = { ...process.env, HAFEN_LAB_DATA: data };
   delete env.ELECTRON_RUN_AS_NODE;
   const app = await electron.launch({ args: [ROOT], cwd: ROOT, env });
   const disk = async (file = "smoke.hafen.yml") => parse(await readFile(join(folder, file), "utf8"));
   const onDisk = (check, file) => expect.poll(async () => { try { return check(await disk(file)); } catch { return false; } }, { timeout: 5000 }).toBe(true);
   try {
-    await app.evaluate(({ dialog }, f) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [f] }); }, folder);
     const page = await app.firstWindow();
-    await page.click("#openFolder");
     await page.locator("#suiteList .list-open", { hasText: "refund for a broken item" }).click();
     // A test's name, a turn added and deleted
     await page.fill("#testName", "renamed on disk");
@@ -91,7 +104,7 @@ test("the desktop app edits the files on disk, and gets its engine back if it st
     await page.click("#testDelete");
     await onDisk((d) => Array.isArray(d.tests) && d.tests.length === 0);
     expect(await readFile(suite, "utf8")).toContain("tests: []");
-    // The engine stops: it's started again, and the folder is open again
+    // The engine stops: it's started again, and the workspace is open again
     const metrics = await app.evaluate(({ app: a }) => a.getAppMetrics());
     const engine = metrics.find((m) => m.type === "Utility" && m.name === "Hafen engine");
     expect(engine).toBeTruthy();
@@ -104,7 +117,6 @@ test("the desktop app edits the files on disk, and gets its engine back if it st
   } finally {
     await app.close();
     await mock.close();
-    await rm(folder, { recursive: true, force: true });
     await rm(data, { recursive: true, force: true });
   }
 });
@@ -113,10 +125,7 @@ test("in development on macOS the app runs as Hafen (not Electron; Hafen Lab ins
   test.skip(process.platform !== "darwin", "macOS names apps by their bundle");
   const { devElectron } = await import("../../desktop/start.js");
   const into = await mkdtemp(join(tmpdir(), "hafen-dev-"));
-  const folder = await mkdtemp(join(tmpdir(), "hafen-desktop-"));
-  const data = await mkdtemp(join(tmpdir(), "hafen-data-"));
-  await cp(join(ROOT, "packages/hafen/tests/fixtures/suites"), folder, { recursive: true });
-  const { mkdir } = await import("node:fs/promises");
+  const { data, folder } = await workspaceWith();
   await mkdir(join(folder, "plugins"));
   const { pluginTemplate } = await import("hafen/engine/plugin-templates.js");
   await writeFile(join(folder, "plugins", "polite.js"), pluginTemplate("check", "polite"));
@@ -142,10 +151,8 @@ test("in development on macOS the app runs as Hafen (not Electron; Hafen Lab ins
     const menu = await app.evaluate(({ Menu }) => Menu.getApplicationMenu().items[0].submenu.items.map((i) => i.label).filter(Boolean));
     expect(menu).toEqual(expect.arrayContaining(["About Hafen", "Hide Hafen", "Quit Hafen"]));
     expect(menu.join(" ")).not.toContain("Lab");
-    await app.evaluate(({ dialog }, f) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [f] }); }, folder);
     const page = await app.firstWindow();
     expect(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].getTitle())).toBe("Hafen");
-    await page.click("#openFolder");
     await expect(page.locator('#suiteList .list-row[data-file="smoke.hafen.yml"]')).toHaveCount(1);
     await page.click("#openSettings");
     await page.click("#settings-tab-plugins");
@@ -154,19 +161,14 @@ test("in development on macOS the app runs as Hafen (not Electron; Hafen Lab ins
   } finally {
     await app.close();
     await rm(into, { recursive: true, force: true });
-    await rm(folder, { recursive: true, force: true });
     await rm(data, { recursive: true, force: true });
   }
 });
 
 test("what the app kept as hafen eval (its data folder, its database) is carried over to Hafen once", async () => {
   const mock = await startMock({ chunkMs: 10 });
-  const folder = await mkdtemp(join(tmpdir(), "hafen-desktop-"));
-  const legacy = await mkdtemp(join(tmpdir(), "hafen-legacy-"));
+  const { data: legacy } = await workspaceWith(mock);
   const fresh = await mkdtemp(join(tmpdir(), "hafen-data-"));
-  await cp(join(ROOT, "packages/hafen/tests/fixtures/suites"), folder, { recursive: true });
-  const suite = join(folder, "smoke.hafen.yml");
-  await writeFile(suite, (await readFile(suite, "utf8")).replace("http://127.0.0.1:8791", mock.url));
   const launch = (env) => {
     const e = { ...process.env, ...env };
     delete e.ELECTRON_RUN_AS_NODE;
@@ -175,15 +177,14 @@ test("what the app kept as hafen eval (its data folder, its database) is carried
   try {
     // The old app's data: a run in its database ("hafen-eval"), and the dark theme chosen
     let app = await launch({ HAFEN_LAB_DATA: legacy });
-    await app.evaluate(({ dialog }, f) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [f] }); }, folder);
     let page = await app.firstWindow();
-    await page.click("#openFolder");
+    await addScope(page, "local");
     await page.locator("#suiteList .list-open", { hasText: "refund for a broken item" }).click();
     await page.click("#testRun");
     await expect(page.locator("#status")).toContainText("failed 0/1");
     await page.click("#openSettings");
     await page.click("#settings-tab-appearance");
-    await page.selectOption("#themeSelect", "dark");
+    await page.click("#themeDark");
     const runId = await page.evaluate(async () => {
       const done = (req) => new Promise((resolve, reject) => { req.onsuccess = () => resolve(req.result); req.onerror = () => reject(req.error); });
       const now = await done(indexedDB.open("hafen"));
@@ -223,29 +224,24 @@ test("what the app kept as hafen eval (its data folder, its database) is carried
     await app.close();
   } finally {
     await mock.close();
-    for (const d of [folder, legacy, fresh]) await rm(d, { recursive: true, force: true });
+    for (const d of [legacy, fresh]) await rm(d, { recursive: true, force: true });
   }
 });
 
 test("a run that ends while the window is in the background: the system's notification (on by default here); clicked, the window comes forward on what ran", async () => {
   const mock = await startMock({ chunkMs: 10 });
-  const folder = await mkdtemp(join(tmpdir(), "hafen-desktop-"));
-  const data = await mkdtemp(join(tmpdir(), "hafen-data-"));
-  await cp(join(ROOT, "packages/hafen/tests/fixtures/suites"), folder, { recursive: true });
-  const suite = join(folder, "smoke.hafen.yml");
-  await writeFile(suite, (await readFile(suite, "utf8")).replace("http://127.0.0.1:8791", mock.url));
+  const { data } = await workspaceWith(mock);
   const env = { ...process.env, HAFEN_LAB_DATA: data };
   delete env.ELECTRON_RUN_AS_NODE;
   const app = await electron.launch({ args: [ROOT], cwd: ROOT, env });
   try {
-    await app.evaluate(({ dialog }, f) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [f] }); }, folder);
     // The system's notifications, kept rather than shown (each one's click can then be made)
     await app.evaluate(({ Notification }) => {
       globalThis.__notes = [];
       Notification.prototype.show = function show() { globalThis.__notes.push(this); };
     });
     const page = await app.firstWindow();
-    await page.click("#openFolder");
+    await addScope(page, "local");
     await page.locator("#suiteList .list-open", { hasText: "refund for a broken item" }).click();
     // In the background (the page told it isn't in front), another view open
     await page.click("#newConversation");
@@ -264,7 +260,6 @@ test("a run that ends while the window is in the background: the system's notifi
   } finally {
     await app.close();
     await mock.close();
-    await rm(folder, { recursive: true, force: true });
     await rm(data, { recursive: true, force: true });
   }
 });

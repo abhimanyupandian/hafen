@@ -1,7 +1,8 @@
 // Scopes as the app keeps them (contracts/ui.md, Settings → Environments and Secrets; the scope
 // button): any number of scopes, each a name, its environment values (kept by the app in localStorage,
 // one key a scope) and its secrets (the desktop app's keystore, encrypted; the browser build's
-// storage), swapped with the scope button, as the command line's --env and --secret files are. Runs and
+// storage), with Globals' for every scope, swapped with the scope button, as the command line's --env
+// and --secret files are. (Globals, and the panes themselves: env-panes.spec.js.) Runs and
 // conversations take the scope chosen now ({{env.NAME}}, {{secret.NAME}}, {{secrets.NAME}}), and a name
 // it hasn't got is an error, said where it happened. .env files are imported and exported; forgetting
 // a secret and deleting a scope ask first. (Deleting a scope, all of it, for good: scope-ui.spec.js.)
@@ -13,7 +14,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseEnvText } from "hafen/engine/env-file.js";
 import { startMock } from "../../packages/hafen/tests/fixtures/mock-endpoint.mjs";
-import { chooseScope, expect, fileText, test } from "./fixtures.js";
+import { addSecret, chooseScope, expect, fileText, newScope, pickFolder, reopen, showEntry, storedFiles, test } from "./fixtures.js";
 
 const ROOT = fileURLToPath(new URL("../../", import.meta.url));
 
@@ -36,7 +37,7 @@ tests:
         expect: [{ type: status, equals: 200 }]
 `;
 const FILES = { "providers/stored.yml": PROVIDER, "stored.hafen.yml": SUITE };
-// Each scope's values and secrets ("" holds the secrets for every scope: prod's ALIAS is that one)
+// Each scope's values and secrets ("" holds Globals' secrets: prod's ALIAS is that one)
 const values = (mockUrl) => ({ stage: { base_url: mockUrl, who: "stage-team" }, prod: { base_url: mockUrl, who: "prod-team" }, qa: { base_url: mockUrl, who: "qa-team" } });
 const SECRETS = { "": { ALIAS: "a-every" }, stage: { API_KEY: "k-stage", ALIAS: "a-stage" }, prod: { API_KEY: "k-prod" } };
 const sentIn = (scope, message) => ({ auth: `Bearer k-${scope}`, who: `${scope}-team`, alias: scope === "stage" ? "a-stage" : "a-every", message });
@@ -47,7 +48,7 @@ const lastSent = async (mockUrl) => {
 };
 const writeFile = (page, path, text) => page.evaluate(async ([path, text]) => {
   const parts = path.split("/");
-  let dir = await navigator.storage.getDirectory();
+  let dir = await navigator.storage.getDirectory().then((root) => root.getDirectoryHandle("workspace", { create: true }));
   for (const p of parts.slice(0, -1)) dir = await dir.getDirectoryHandle(p, { create: true });
   const w = await (await dir.getFileHandle(parts.at(-1), { create: true })).createWritable();
   await w.write(text);
@@ -57,9 +58,9 @@ const reload = async (page) => {
   await page.reload();
   await page.locator("html:not(.loading)").waitFor();
 };
-const openFolder = async (page, files = FILES) => {
+const openApp = async (page, files = FILES) => {
   for (const [path, text] of Object.entries(files)) await writeFile(page, path, text);
-  await page.click("#openFolder");
+  await reopen(page);
   await expect(page.locator('#suiteList .list-row[data-file="smoke.hafen.yml"]')).toHaveCount(1);
 };
 const kept = (page) => page.evaluate(() => {
@@ -80,7 +81,7 @@ const openEnvironments = async (page) => {
 const addValue = async (page, name, value) => {
   await page.fill("#envVarName", name);
   await page.fill("#envVarValue", value);
-  await page.click("#envVarAdd button[type=submit]");
+  await page.press("#envVarValue", "Enter");
   await expect(page.locator(`#envVar-${name} input`)).toHaveValue(value);
 };
 const runTest = async (page, status = "passed 1/1") => {
@@ -101,6 +102,8 @@ const envFile = (name, text) => ({ name, mimeType: "text/plain", buffer: Buffer.
 const noScope = (page) => expect(page.locator("#scopeButton")).toHaveAttribute("aria-label", "No scope chosen: choose one");
 
 test.describe("in the browser build", () => {
+  // (from no scope: these make or seed their own)
+  test.use({ scope: null });
   test.afterEach(async ({ app: { errors } }) => {
     expect(errors).toEqual([]);
   });
@@ -112,23 +115,21 @@ test.describe("in the browser build", () => {
     // No folder needed: a scope is the app's
     await page.fill("#newScopeName", "stage");
     await page.click("#newScopeForm button[type=submit]");
-    await expect(page.locator("#envScope")).toHaveValue("stage");
+    await expect(page.locator("#envScope-stage")).toHaveClass(/active/);
     await expect(page.locator("#envVarsEmpty")).toBeVisible();
     await addValue(page, "base_url", "https://stage.example");
     await addValue(page, "who", "stage-team");
-    await expect(page.locator("#envVar-who .hint")).toHaveText("{{env.who}} · not used by the open files");
-    await page.fill("#newScopeName", "prod");
-    await page.click("#newScopeForm button[type=submit]");
-    await expect(page.locator("#envScope")).toHaveValue("prod");
-    await expect(page.locator("#envVars")).toHaveCount(0);
+    await expect(page.locator("#envVar-who .vars-use")).toHaveText("{{env.who}} · not used by the open files");
+    await newScope(page, "prod");
+    await expect(page.locator("#envVars .vars-row:not(.vars-add)")).toHaveCount(0);
     await addValue(page, "who", "prod-team");
     // A name that won't do is refused, and said why
     await page.fill("#envVarName", "2nd");
     await page.fill("#envVarValue", "x");
-    await page.click("#envVarAdd button[type=submit]");
-    await expect(page.locator("#environmentsError")).toContainText("doesn't start with a digit");
+    await page.press("#envVarValue", "Enter");
+    await expect(page.locator("#environmentsError")).toContainText("not starting with a digit");
     // A value changed in place, and one deleted (asking first)
-    await page.selectOption("#envScope", "stage");
+    await showEntry(page, "stage");
     await page.locator("#envVar-who input").fill("stage-crew");
     await page.locator("#envVar-who input").press("Enter");
     await page.click("#envVar-base_url-delete");
@@ -144,12 +145,12 @@ test.describe("in the browser build", () => {
     await reload(page);
     await expect(page.locator("#scopeButton .scope-name")).toHaveText("stage");
     await openEnvironments(page);
-    await expect(page.locator("#envScope")).toHaveValue("stage");
+    await expect(page.locator("#envScope-stage")).toHaveClass(/active/);
     await expect(page.locator("#envVar-who input")).toHaveValue("stage-crew");
     // Renamed: its values (and secrets) go with it, and it stays chosen
     await page.fill("#envScopeName", "staging");
     await page.press("#envScopeName", "Enter");
-    await expect(page.locator("#envScope")).toHaveValue("staging");
+    await expect(page.locator("#envScope-staging")).toHaveClass(/active/);
     await expect(page.locator("#envChosen")).toBeVisible();
     await expect(page.locator("#scopeButton .scope-name")).toHaveText("staging");
     expect(await kept(page)).toEqual({ scopes: ["staging", "prod"], values: { staging: { who: "stage-crew" }, prod: { who: "prod-team" } }, secrets: {} });
@@ -160,19 +161,19 @@ test.describe("in the browser build", () => {
     await expect(page.locator("#environmentsError")).toContainText('There\'s a scope "prod" already');
     await expect(page.locator("#envScopeName")).toHaveValue("staging");
     // "no scope" can be chosen too
-    await page.selectOption("#envScope", "");
-    await expect(page.locator("#envNone")).toBeVisible();
+    await showEntry(page, "");
+    await expect(page.locator("#envChoose")).toHaveText("choose no scope");
     await page.click("#envChoose");
     await noScope(page);
     await reload(page);
     await noScope(page);
     // Deleted, asking first: its values go
     await openEnvironments(page);
-    await page.selectOption("#envScope", "prod");
+    await showEntry(page, "prod");
     await page.click("#envDelete");
     await expect(page.locator("#envDelete")).toHaveText("delete its values and secrets?");
     await page.click("#envDelete");
-    await expect(page.locator("#envScope option")).toHaveText(["no scope", "staging"]);
+    await expect(page.locator("#envScopes .list-open")).toHaveText(["staging"]);
     expect(await kept(page)).toEqual({ scopes: ["staging"], values: { staging: { who: "stage-crew" } }, secrets: {} });
     expect(await page.evaluate(() => localStorage.getItem("eval.scope.prod"))).toBeNull();
   });
@@ -184,8 +185,9 @@ test.describe("in the browser build", () => {
     });
     await reload(page);
     await openEnvironments(page);
-    await page.selectOption("#envScope", "qa");
-    await page.click("#envChoose");
+    // (the first scope made is chosen as the app starts, none having been chosen before)
+    await expect(page.locator("#envScope-qa")).toHaveClass(/active/);
+    await expect(page.locator("#envChosen")).toBeVisible();
     // (no values of its own: it's deletable all the same)
     await expect(page.locator("#envVarsEmpty")).toBeVisible();
     await page.click("#envDelete");
@@ -196,24 +198,25 @@ test.describe("in the browser build", () => {
     expect(Object.keys((await kept(page)).secrets).sort()).toEqual(["", "prod", "qa"]);
     await page.click("#envDelete");
     await page.click("#envDelete");
-    await expect(page.locator("#envScope option")).toHaveText(["no scope", "prod"]);
+    await expect(page.locator("#envScopes .list-open")).toHaveText(["prod"]);
     expect((await kept(page)).secrets).toEqual({ "": { SHARED: "s" }, prod: { TOKEN: "t-prod" } });
     // It was chosen: now none is
     await noScope(page);
   });
 
   test("forgetting a secret, and System One's key, asks first", async ({ app: { page } }) => {
-    await openFolder(page);
+    await openApp(page);
     await page.click("#openSettings");
     await page.click("#settings-tab-secrets");
-    await page.selectOption("#secretsEnv", "");
+    await showEntry(page, "", "secrets");
     await page.fill("#secretName", "SHOP_TOKEN");
     await page.fill("#secretValue", "every");
-    await page.click("#secretAdd button[type=submit]");
-    await expect(page.locator("#secret-SHOP_TOKEN .hint")).toHaveText("set · not used by the open files");
+    await page.press("#secretValue", "Enter");
+    await expect(page.locator("#secret-SHOP_TOKEN .vars-use")).toHaveText("{{secret.SHOP_TOKEN}} · not used by the open files");
+    await expect(page.locator("#secret-SHOP_TOKEN .vars-source")).toHaveText("Globals");
     await page.click("#secret-SHOP_TOKEN-forget");
     await expect(page.locator("#secret-SHOP_TOKEN-forget")).toHaveText("forget it?");
-    await expect(page.locator("#secret-SHOP_TOKEN .hint")).toHaveText("set · not used by the open files");
+    await expect(page.locator("#secret-SHOP_TOKEN .vars-source")).toHaveText("Globals");
     expect((await kept(page)).secrets).toEqual({ "": { SHOP_TOKEN: "every" } });
     await page.click("#secret-SHOP_TOKEN-forget");
     await expect(page.locator("#secret-SHOP_TOKEN")).toHaveCount(0);
@@ -254,36 +257,36 @@ test.describe("in the browser build", () => {
     await page.click("#editorSave");
     await expect(page.locator("#envVar-keep input")).toHaveValue("changed");
     expect((await kept(page)).values.stage).toEqual({ keep: "changed", REGION: "us" });
-    // Secrets: imported into the scope, and exported with every scope's, after a confirm
+    // Secrets: imported into Globals and the scope, and the scope's own exported, after a confirm
     await page.click("#settings-tab-secrets");
-    await page.selectOption("#secretsEnv", "");
+    await showEntry(page, "", "secrets");
     await page.setInputFiles("#secretsImportFile", envFile("every.secret.env", "ALIAS=a-every\n"));
-    await expect(page.locator("#secret-ALIAS .hint")).toContainText("set");
-    await page.selectOption("#secretsEnv", "stage");
+    await expect(page.locator("#secret-ALIAS .vars-source")).toHaveText("Globals");
+    await showEntry(page, "stage", "secrets");
     await page.setInputFiles("#secretsImportFile", envFile("stage.secret.env", "API_KEY=k-stage\nPASSWORD='p a#ss'\n"));
-    await expect(page.locator("#secret-API_KEY .hint")).toContainText("set");
-    await expect(page.locator("#secret-ALIAS .hint")).toContainText("set for every scope");
+    await expect(page.locator("#secret-API_KEY .vars-source")).toHaveText("this scope");
+    await expect(page.locator("#secret-ALIAS .vars-source")).toHaveText("from Globals");
     // (values never shown)
     await expect(page.locator("#secret-API_KEY input")).toHaveValue("");
     await expect(page.locator("#secret-API_KEY input")).toHaveAttribute("type", "password");
     expect((await kept(page)).secrets).toEqual({ "": { ALIAS: "a-every" }, stage: { API_KEY: "k-stage", PASSWORD: "p a#ss" } });
-    // A secret's name that won't do: nothing is imported
-    await page.setInputFiles("#secretsImportFile", envFile("bad.secret.env", "GOOD=1\ndb.pass=x\n"));
-    await expect(page.locator("#secretsError")).toContainText("doesn't start with a digit");
+    // A secret's name that won't do: nothing is imported (a dotted one does: the engine's names)
+    await page.setInputFiles("#secretsImportFile", envFile("bad.secret.env", "GOOD=1\n2nd=x\n"));
+    await expect(page.locator("#secretsError")).toContainText("not starting with a digit");
     expect((await kept(page)).secrets.stage).not.toHaveProperty("GOOD");
-    await expect(page.locator("#secretsExportHint")).toContainText("stage.secret.env");
+    await expect(page.locator("#secretsExport")).toHaveAttribute("title", "Write stage.secret.env, in plain text");
     await page.click("#secretsExport");
     await expect(page.locator("#secretsExport")).toHaveText("write them in plain text?");
     const secrets = await download(page, () => page.click("#secretsExport"));
     expect(secrets.name).toBe("stage.secret.env");
     expect(secrets.text).toContain("plain text");
-    expect(parseEnvText(secrets.text)).toMatchObject({ errors: [], values: { ALIAS: "a-every", API_KEY: "k-stage", PASSWORD: "p a#ss" } });
+    // (the scope's own: Globals' go in globals.secret.env, read before it)
+    expect(parseEnvText(secrets.text)).toMatchObject({ errors: [], values: { API_KEY: "k-stage", PASSWORD: "p a#ss" } });
   });
 
-  test("a run and a conversation take the scope chosen now: its {{env.…}} values and {{secret.…}} secrets (every scope's where it has none); one it hasn't got is an error, said where it happened", async ({ app: { page, servers } }) => {
+  test("a run and a conversation take the scope chosen now: its {{env.…}} values and {{secret.…}} secrets (Globals' where it has none); one it hasn't got is an error, said where it happened", async ({ app: { page, servers } }) => {
     await seed(page, servers.mock.url);
-    await reload(page);
-    await openFolder(page);
+    await openApp(page);
     await chooseScope(page, "stage");
     await runTest(page);
     expect(await lastSent(servers.mock.url)).toEqual(sentIn("stage", "hello stage-team"));
@@ -320,23 +323,44 @@ test.describe("in the browser build", () => {
     // As the fields say before anything is run
     await page.locator("#suiteList .list-open", { hasText: "stored hello" }).first().click();
     await page.fill("#input", "and {{secret.API_KEY}} {{env.nope}}");
-    await expect(page.locator("#inputProblem")).toHaveText('{{env.nope}} isn\'t in the scope "qa": add it in Settings → Environments');
+    await expect(page.locator("#inputProblem")).toHaveText('{{env.nope}} isn\'t in the scope "qa" or in Globals: add it in Settings → Environments');
     await page.fill("#input", "and {{secret.API_KEY}}");
-    await expect(page.locator("#inputProblem")).toHaveText('{{secret.API_KEY}} isn\'t a secret of the scope "qa" (or of every scope): add it in Settings → Secrets');
+    await expect(page.locator("#inputProblem")).toHaveText('{{secret.API_KEY}} isn\'t a secret of the scope "qa" or of Globals: add it in Settings → Secrets');
   });
 
-  test("Copy CI command names the scope's .env files, which Export writes; the new provider's address takes a template", async ({ app: { page } }) => {
+  test("Copy CI command runs the folder the suite was exported to, with exactly the .env files written beside it (none, when none was); the new provider's address takes a template", async ({ app: { page } }) => {
     await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
     await seed(page, "http://127.0.0.1:1", { env: "stage" });
-    await reload(page);
-    await openFolder(page);
+    await openApp(page);
     await page.locator('#suiteList .list-row[data-file="stored.hafen.yml"] .list-open').first().click();
+    // Not exported yet: it says so, and Copy CI command offers Export instead
+    await expect(page.locator("#suiteCiHint")).toHaveText("Not exported yet: CI runs the folder it's exported to. Export it first.");
     await page.click("#suiteCopyCi");
-    expect(await page.evaluate(() => navigator.clipboard.readText())).toBe('npx hafen run "stored.hafen.yml" --env stage.env --secret stage.secret.env --report junit:results/junit.xml --report run:results/run.hafen-run.json');
-    await expect(page.locator("#suiteCiHint")).toHaveText("Export in Settings → Environments and Secrets writes stage.env and stage.secret.env, which it reads (keep the secrets file out of version control).");
+    await expect(page.locator("#exportDialog")).toBeVisible();
+    await page.click("#exportCancel");
+    // Exported without the scope's values: the command names no file (none was written), and the hint says
+    // CI would run without them
+    await pickFolder(page, "ci-out");
+    await page.click("#suiteCiHintExport");
+    await page.uncheck("#exportEnv");
+    await page.click("#exportGo");
+    await expect(page.locator("#exportDialog")).toHaveCount(0);
+    await page.click("#suiteCopyCi");
+    expect(await page.evaluate(() => navigator.clipboard.readText())).toBe('npx hafen run "ci-out" --report junit:results/junit.xml --report run:results/run.hafen-run.json');
+    await expect(page.locator("#suiteCiHint")).toHaveText("Runs ci-out, exported just now: export again after a change. No .env file went with it: CI runs without your values, unless you export them too.");
+    // Exported with them: stage.env beside the suite (Globals has none: no globals.env), which it names there
+    await page.click("#suiteExport");
+    await page.click("#exportGo");
+    await expect(page.locator("#exportDialog")).toHaveCount(0);
+    const out = await storedFiles(page, "ci-out");
+    expect(parseEnvText(out["stage.env"]).values).toEqual({ base_url: "http://127.0.0.1:1", who: "stage-team" });
+    expect(out["globals.env"]).toBeUndefined();
+    await page.click("#suiteCopyCi");
+    expect(await page.evaluate(() => navigator.clipboard.readText())).toBe('npx hafen run "ci-out" --env ci-out/stage.env --report junit:results/junit.xml --report run:results/run.hafen-run.json');
+    await expect(page.locator("#suiteCiHint")).toHaveText("Runs ci-out, exported just now with stage.env: export again after a change.");
     await page.locator("#suiteList .list-open", { hasText: "stored hello" }).first().click();
     await page.click("#testCopyCi");
-    expect(await page.evaluate(() => navigator.clipboard.readText())).toBe('npx hafen run "stored.hafen.yml" --env stage.env --secret stage.secret.env --test "stored hello" --report junit:results/junit.xml --report run:results/run.hafen-run.json');
+    expect(await page.evaluate(() => navigator.clipboard.readText())).toBe('npx hafen run "ci-out" --env ci-out/stage.env --test "stored hello" --report junit:results/junit.xml --report run:results/run.hafen-run.json');
     // A provider's address, URL and model take templates as any field does
     await page.click("#openSettings");
     await page.click("#settings-tab-providers");
@@ -367,8 +391,9 @@ plain.describe("in the desktop app", () => {
 
   plain("scopes' values (the window's storage) and secrets (the system's keystore, encrypted) per scope: made in Settings, used by runs as the scope changes, kept when the app starts again, exported only on purpose; forgetting and deleting ask first", async () => {
     const mock = await startMock({ chunkMs: 10 });
-    const folder = await mkdtemp(join(tmpdir(), "hafen-desktop-"));
     const data = await mkdtemp(join(tmpdir(), "hafen-data-"));
+    // (the app's workspace, in its data folder: filled before it starts)
+    const folder = join(data, "workspace");
     const out = await mkdtemp(join(tmpdir(), "hafen-out-"));
     await cp(join(ROOT, "packages/hafen/tests/fixtures/suites"), folder, { recursive: true });
     await mkdir(join(folder, "providers"), { recursive: true });
@@ -377,35 +402,23 @@ plain.describe("in the desktop app", () => {
     delete env.ELECTRON_RUN_AS_NODE;
     let app = await electron.launch({ args: [ROOT], cwd: ROOT, env });
     try {
-      await app.evaluate(({ dialog }, f) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [f] }); }, folder);
       let page = await app.firstWindow();
-      await page.click("#openFolder");
       await expect(page.locator('#suiteList .list-row[data-file="stored.hafen.yml"]')).toHaveCount(1);
       // Each scope, its values and its secrets, made in Settings
       for (const scope of ["stage", "prod"]) {
         await page.click("#scopeButton");
-        await page.fill("#newScopeName", scope);
-        await page.click("#newScopeForm button[type=submit]");
-        await expect(page.locator("#envScope")).toHaveValue(scope);
+        await newScope(page, scope);
         await addValue(page, "base_url", mock.url);
         await addValue(page, "who", `${scope}-team`);
         await page.click("#settings-tab-secrets");
-        await page.selectOption("#secretsEnv", scope);
-        for (const [name, value] of Object.entries(SECRETS[scope])) {
-          await page.fill("#secretName", name);
-          await page.fill("#secretValue", value);
-          await page.click("#secretAdd button[type=submit]");
-          await expect(page.locator(`#secret-${name} .hint`)).toHaveText("set");
-        }
+        await showEntry(page, scope, "secrets");
+        for (const [name, value] of Object.entries(SECRETS[scope])) await addSecret(page, name, value);
         await page.click("#settingsClose");
       }
       await page.click("#openSettings");
       await page.click("#settings-tab-secrets");
-      await page.selectOption("#secretsEnv", "");
-      await page.fill("#secretName", "ALIAS");
-      await page.fill("#secretValue", "a-every");
-      await page.click("#secretAdd button[type=submit]");
-      await expect(page.locator("#secret-ALIAS .hint")).toHaveText("set");
+      await showEntry(page, "", "secrets");
+      await addSecret(page, "ALIAS", "a-every");
       await page.click("#settingsClose");
       await chooseScope(page, "stage");
       await runTest(page);
@@ -424,21 +437,22 @@ plain.describe("in the desktop app", () => {
       await app.evaluate(({ dialog }, f) => { dialog.showSaveDialog = async () => ({ canceled: false, filePath: f }); }, target);
       await page.click("#openSettings");
       await page.click("#settings-tab-secrets");
-      await page.selectOption("#secretsEnv", "prod");
+      await showEntry(page, "prod", "secrets");
       await page.click("#secretsExport");
       await expect(page.locator("#secretsExport")).toHaveText("write them in plain text?");
       await page.click("#secretsExport");
       await expect.poll(() => readFile(target, "utf8").catch(() => "")).toContain("API_KEY=k-prod");
-      expect(parseEnvText(await readFile(target, "utf8")).values).toEqual({ ALIAS: "a-every", API_KEY: "k-prod" });
+      // (the scope's own: Globals' ALIAS goes in globals.secret.env)
+      expect(parseEnvText(await readFile(target, "utf8")).values).toEqual({ API_KEY: "k-prod" });
       if (process.platform !== "win32") expect((await stat(target)).mode & 0o777).toBe(0o600);
       // Forgetting asks first
       await page.click("#secret-API_KEY-forget");
-      await expect(page.locator("#secret-API_KEY .hint")).toHaveText("set");
+      await expect(page.locator("#secret-API_KEY")).toHaveAttribute("data-source", "own");
       await page.click("#secret-API_KEY-forget");
-      await expect(page.locator("#secret-API_KEY .hint")).toHaveText("not set");
+      await expect(page.locator("#secret-API_KEY .vars-source")).toHaveText("not set");
       await page.locator("#secret-API_KEY input").fill("k-prod-2");
-      await page.locator("#secret-API_KEY button", { hasText: "save" }).click();
-      await expect(page.locator("#secret-API_KEY .hint")).toHaveText("set");
+      await page.locator("#secret-API_KEY input").press("Enter");
+      await expect(page.locator("#secret-API_KEY")).toHaveAttribute("data-source", "own");
       await page.click("#settingsClose");
       await app.close();
 
@@ -451,17 +465,17 @@ plain.describe("in the desktop app", () => {
       expect(await lastSent(mock.url)).toEqual({ ...sentIn("prod", "hello prod-team"), auth: "Bearer k-prod-2" });
       // A scope deleted (asking first): its values and its secrets go, from the keystore too
       await page.click("#scopeButton");
-      await page.selectOption("#envScope", "stage");
+      await showEntry(page, "stage");
       await page.click("#envDelete");
       await page.click("#envDelete");
       // (the fixture suite's own environment, local, isn't a scope)
-      await expect(page.locator("#envScope option")).toHaveText(["no scope", "prod"]);
+      await expect(page.locator("#envScopes .list-open")).toHaveText(["prod"]);
       expect(await page.evaluate(() => window.hafen.invoke("secrets_scopes"))).toEqual(expect.not.arrayContaining(["stage"]));
       expect(Object.keys(JSON.parse(await readFile(join(data, "secrets.json"), "utf8"))).sort()).toEqual(["", "prod"]);
     } finally {
       await app.close();
       await mock.close();
-      for (const d of [folder, data, out]) await rm(d, { recursive: true, force: true });
+      for (const d of [data, out]) await rm(d, { recursive: true, force: true });
     }
   });
 });

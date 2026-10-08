@@ -5,8 +5,9 @@
 // Hafen's repository. (Serving the browser build with its relay is the app's: npm run serve there.)
 //
 // An environment's values and the secrets come from KEY=VALUE files anywhere on the disk, named on
-// the command line (--env <file>, --secret <file>): read here, not through the host (which reads only
-// in the project), and passed to the engine.
+// the command line (--env <file>, --secret <file>, each as often as wanted, a later file's values
+// winning: --env globals.env --env staging.env): read here, not through the host (which reads only in
+// the project), and passed to the engine.
 //
 // Exit codes: 0 everything passed · 1 tests failed (or regressed past --fail-on) · 2 a setup or
 // configuration error (or, after a run that passed, a report that couldn't be written) · 3 stopped
@@ -20,6 +21,9 @@ import {
   compareRuns, jsonSummary, junit, loadSuite, markdown, parseEnvText, parseRun, runFileName, runSuites, serializeRun, SUITE_FILE,
 } from "../engine/index.js";
 import { money } from "../engine/reports/markdown.js";
+import { casesOf, checksOf, costOf, countsText, problemsOf, unsureCounts, unsurePassed } from "../engine/reports/outcome.js";
+import { rowLabel } from "../engine/files/data.js";
+import { PLUGIN_FILE } from "../engine/plugins.js";
 import { preflight } from "../engine/runner.js";
 import { createRedactor, REDACT_PATTERNS } from "../engine/redact.js";
 import { fromRoot, nodeHost, secretsFrom, VERSION } from "./node-host.js";
@@ -48,17 +52,21 @@ const HELP = `hafen ${VERSION}: end-to-end tests for chat endpoints
                                      with their imports, hafen itself) into one file that runs them
                                      anywhere with Node 22: node <file.mjs> run --env staging.env
 
-Options for run: --test, --tag, --env <file|name>, --secret <file>, --var name=value, --repeat,
-  --unsure pass|warn|fail, --max-cost <usd>, --bail, --timeout <ms>, --report <junit|run|md|json>:<path|->,
+Options for run: --test, --tag, --env <file|name>…, --secret <file>…, --var name=value, --repeat,
+  --unsure fail|warn|pass (how a result the judge wasn't sure of counts; default fail, or the file's),
+  --max-cost <usd>, --bail, --timeout <ms>, --report <junit|run|md|json>:<path|->,
   --baseline <run-file>, --fail-on pass_rate=<points>,p95=<percent>,cost=<percent>, --load,
   --network delay=<ms>,jitter=<ms>,kbps=<n>,drop=<rate>, --redact email,card,phone, --quiet, --verbose, --no-color
-Options for validate: --env <file|name>, --secret <file>, --var name=value, --env-check (every secret
-  set), --quiet
-Environments and secrets: KEY=VALUE files, anywhere on the disk
-  --env ./staging.env              {{env.NAME}}: its values. Its name, staging, picks each suite's
-                                   environment of that name (--env staging: only that)
+Options for validate: --env <file|name>…, --secret <file>…, --var name=value, --env-check (every
+  secret set), --quiet
+Environments and secrets: KEY=VALUE files, anywhere on the disk; each option as often as wanted,
+  the files' values merged in order (a later file's win)
+  --env ./staging.env              {{env.NAME}}: its values. The last --env's name, staging, picks
+                                   each suite's environment of that name (--env staging: only that)
   --secret ./staging.secrets.env   {{secret.NAME}}: its values, else the environment variable NAME
                                    (also --secrets). Never printed, nor in a report
+  --env globals.env --env staging.env --secret globals.secret.env --secret staging.secret.env
+                                   values every environment shares, then staging's over them
 What runs at once: suites and tests by their group (group: 2 in the file); the same group one after
   another, different groups at the same time; none is one group.
 Exit codes: 0 passed · 1 failed · 2 setup error · 3 stopped early`;
@@ -67,7 +75,7 @@ Exit codes: 0 passed · 1 failed · 2 setup error · 3 stopped early`;
 const OPTIONS = {
   test: { type: "string", multiple: true },
   tag: { type: "string", multiple: true },
-  env: { type: "string" },
+  env: { type: "string", multiple: true },
   secret: { type: "string", multiple: true },
   secrets: { type: "string", multiple: true },
   var: { type: "string", multiple: true },
@@ -111,7 +119,7 @@ export async function main(argv, pack = null) {
   if (command === "serve") return err(red(SERVE_MOVED)), EXIT.setup;
   let parsed;
   try {
-    parsed = parseArgs({ args: rest, allowPositionals: true, options: OPTIONS });
+    parsed = parseArgs({ args: rest, allowPositionals: true, options: OPTIONS, tokens: true });
   } catch (e) {
     // An option that isn't one, or one missing its value: said plainly (no stack trace), exit 2
     if (rest.some((a) => /^--concurrency(=|$)/.test(a))) err(red("--concurrency is no longer used: suites and tests run by their group (group: in the file), the same group one after another, different groups at the same time"));
@@ -119,6 +127,10 @@ export async function main(argv, pack = null) {
     return EXIT.setup;
   }
   const { values, positionals } = parsed;
+  // (--secret and --secrets are one option: their files in the order given)
+  const secretFiles = parsed.tokens.filter((t) => t.kind === "option" && (t.name === "secret" || t.name === "secrets")).map((t) => t.value);
+  if (secretFiles.length) values.secret = secretFiles;
+  delete values.secrets;
   switch (command) {
     case "run": return run(positionals, values);
     case "validate": return validate(positionals, values);
@@ -152,20 +164,42 @@ async function findSuites(host, paths) {
   return [...new Set(found)].sort();
 }
 
-// A host for the command line: files are read in the current folder, and in the project of each path
-// it names outside it (the nearest folder above the path with a .git or a package.json, else the
-// path's own folder), so a suite there reaches its providers and data, and nothing beyond its project
+// The project a path outside the current folder is in: the nearest folder above it with a .git or a
+// package.json, else the path's own folder
 function projectOf(dir) {
   for (let at = dir; ; at = dirname(at)) {
     if (existsSync(join(at, ".git")) || existsSync(join(at, "package.json"))) return at;
     if (dirname(at) === at) return dir;
   }
 }
-const cliHost = (paths = [], secrets = undefined) => nodeHost({ also: paths.map((p) => resolve(p)).map((p) => projectOf(SUITE_FILE.test(p) ? dirname(p) : p)), ...(secrets ? { secrets } : {}) });
 
-// The host for run and validate: the command line's (or a pack's), its secrets from the secrets
-// file first, then the environment's variables
-const hostFor = (paths, secrets) => (packHost ? { ...packHost, secrets: secretsFrom(secrets) } : cliHost(paths, secretsFrom(secrets)));
+// A host for the command line: files are read in the current folder, and in the project of each path
+// it names outside it, so a suite there reaches its providers and data, and nothing beyond its
+// project. The folder's plugins (plugins/*.js, which any suite may use by name) are the current
+// folder's and those of each folder it names (a suite file's own folder), so a folder the app exported
+// runs as it is from anywhere: hafen run exported/
+function cliHost(paths = [], secrets = undefined, knownSecrets = undefined) {
+  const host = nodeHost({ also: paths.map((p) => resolve(p)).map((p) => projectOf(SUITE_FILE.test(p) ? dirname(p) : p)), ...(secrets ? { secrets } : {}), ...(knownSecrets ? { knownSecrets } : {}) });
+  const dirs = [...new Set(["", ...paths.map((p) => fromRoot(host.root, SUITE_FILE.test(p) ? dirname(resolve(p)) : resolve(p)))])];
+  host.pluginFiles = async () => {
+    const out = new Set();
+    for (const dir of dirs) {
+      const inside = dir ? `${dir}/plugins/` : "plugins/";
+      for (const f of await host.list(resolve(host.root, dir, "plugins"))) if (f.startsWith(inside) && PLUGIN_FILE.test(`plugins/${f.slice(inside.length)}`)) out.add(f);
+    }
+    return [...out].sort();
+  };
+  return host;
+}
+
+// The host for run and validate (given: environmentOptions'): the command line's (or a pack's), its
+// secrets from the secrets files first, then the environment's variables; every value of the files
+// hidden wherever it shows (the output, every report and run file), as the engine hides each secret
+// it fills in: so one a suite didn't ask for is hidden too (a reply that has it)
+const hostFor = (paths, given) => {
+  const knownSecrets = () => given.secretValues;
+  return packHost ? { ...packHost, secrets: secretsFrom(given.secrets), knownSecrets } : cliHost(paths, secretsFrom(given.secrets), knownSecrets);
+};
 
 // --env's value is a KEY=VALUE file when it looks like a path (a / or \ in it, or it ends in .env)
 // or a file of that name exists; else it names the suites' environment (contracts/cli.md)
@@ -183,21 +217,49 @@ export const envFileName = (path) => {
   return name.replace(/\.[^.]*$/, "") || name;
 };
 
-// --env and --secret (or --secrets): { env, environment, secrets }. env: the environment's name;
-// environment: { name, values } when --env is a file; secrets: the secrets file's { NAME: value } ({}
-// without one). A file that doesn't exist or can't be read, or that has a line that isn't NAME=value,
-// is a setup error (its problems, each at its file:line:column, as `problems`).
+// --env and --secret (or --secrets), each as often as wanted: { env, environment?, secrets,
+// secretValues, secretFiles }. Their files' values are merged in the order given, a later file's
+// winning (a secrets file's NAME= sets nothing: an earlier file's value, or the environment variable,
+// stays). env: the environment's name, the last --env's (a name, or its file's: staging.env,
+// staging); environment: { name, values } when any --env is a file; secrets: the secrets files'
+// { NAME: value } ({} without one); secretValues: every value in them, one a later file overrides
+// too (each is hidden wherever it shows). A file that doesn't exist or can't be read is a setup
+// error; so are lines that aren't NAME=value, in any of the files (each at its file:line:column, as
+// `problems`).
 export async function environmentOptions(values) {
+  const envs = [values.env ?? []].flat();
   const secretFiles = [...(values.secret ?? []), ...(values.secrets ?? [])];
-  if (secretFiles.length > 1) throw Object.assign(new Error(`--secret takes one file, not ${secretFiles.length} (${secretFiles.join(", ")})`), { setup: true });
-  const secrets = secretFiles.length ? await readValues(secretFiles[0], "the secrets file", { secret: true }) : {};
-  if (values.env === undefined || !isEnvFile(values.env)) return { env: values.env, secrets, secretFile: secretFiles[0] };
-  const name = envFileName(values.env);
-  return { env: name, environment: { name, values: await readValues(values.env, "the environment file") }, secrets, secretFile: secretFiles[0] };
+  const problems = [];
+  const read = async (path, what, opts) => {
+    try {
+      return await readValues(path, what, opts);
+    } catch (e) {
+      if (!e.problems) throw e;
+      problems.push(...e.problems);
+      return {};
+    }
+  };
+  const secrets = {};
+  const secretValues = new Set();
+  for (const path of secretFiles) {
+    for (const [name, value] of Object.entries(await read(path, "the secrets file", { secret: true }))) {
+      if (value === "") continue;
+      secrets[name] = value;
+      secretValues.add(value);
+    }
+  }
+  const files = envs.filter(isEnvFile);
+  const environment = {};
+  for (const path of files) Object.assign(environment, await read(path, "the environment file"));
+  // (every file's problems, said together)
+  if (problems.length) throw Object.assign(new Error(`${new Set(problems.map((p) => p.file)).size > 1 ? "the --env and --secret files have" : `${problems[0].file} has`} ${plural(problems.length, "problem")}`), { setup: true, problems });
+  const last = envs.at(-1);
+  const name = last === undefined ? undefined : isEnvFile(last) ? envFileName(last) : last;
+  return { env: name, ...(files.length ? { environment: { name, values: environment } } : {}), secrets, secretValues: [...secretValues], secretFiles };
 }
 
 // Where the CLI looks for a secret, as a missing one says (the engine's "for the scope" is the app's)
-const secretsWhere = (given) => (given.secretFile ? "not in the --secret file or the environment" : "not in the environment: set it, or pass --secret <file>");
+const secretsWhere = (given) => (given.secretFiles.length ? `not in the --secret file${given.secretFiles.length > 1 ? "s" : ""} or the environment` : "not in the environment: set it, or pass --secret <file>");
 
 // A KEY=VALUE file's values (engine/env-file.js), read from the disk, wherever it is. A secrets file's
 // problems never show what's in its lines: a name that isn't one, or what follows a quoted value,
@@ -226,12 +288,10 @@ function saySetup(e, then = "") {
   err(red(`\n${plural(e.problems.length, "problem")}${then}`));
 }
 
-// What a secrets file holds, hidden wherever it would show (the output, every report and run file), as
-// the engine hides each secret it fills in: so a value of it a suite didn't ask for is hidden too (a
-// reply that has it). null: nothing to hide.
-function secretsHider(secrets) {
-  const found = Object.values(secrets).filter((v) => v !== "");
-  return found.length ? createRedactor({ secrets: new Set(found) }) : null;
+// What the secrets files hold, hidden in what's said that isn't the run's (validate's problems, which
+// the engine doesn't redact; a run's are, by the host's knownSecrets). null: nothing to hide.
+function secretsHider(values) {
+  return values.length ? createRedactor({ secrets: new Set(values) }) : null;
 }
 
 function parseVars(list = []) {
@@ -290,7 +350,7 @@ async function run(paths, values) {
     saySetup(e, ": nothing was sent.");
     return EXIT.setup;
   }
-  const host = hostFor(paths, given.secrets);
+  const host = hostFor(paths, given);
   let files;
   let options;
   try {
@@ -374,10 +434,8 @@ async function run(paths, values) {
     if (!seen.has(key)) seen.set(key, { turns: [] });
     return seen.get(key);
   };
-  // (and the secrets file's values hidden in each, as in the run: the run's end is the run, hidden below)
-  const hide = secretsHider(given.secrets);
-  const onEvent = (sent) => {
-    const event = hide && sent.type !== "run:end" ? hide.redact(sent) : sent;
+  // (the secrets files' values hidden in each, as in the run: the engine's, by the host's knownSecrets)
+  const onEvent = (event) => {
     if (event.type === "test:start") of(event.test.suite, event.test.id ?? event.test.name).started = performance.now();
     if (event.type === "turn:end" && event.record?.suite !== undefined) of(event.record.suite, event.record.test).turns.push(event.record);
     if (values.quiet) return;
@@ -387,19 +445,18 @@ async function run(paths, values) {
     }
     if (values.verbose && event.type === "turn:end") {
       const r = event.record;
-      out(dim(`    turn ${r.index + 1}${r.row ? ` · row ${r.row}` : ""} · ${sec(r.metrics?.ms)} · ${(r.results ?? []).map((x) => `${mark(x.status)} ${x.name}`).join("  ")}`));
+      out(dim(`    turn ${r.index + 1}${r.row ? ` · ${rowLabel(r.row, r.row_name)}` : ""} · ${sec(r.metrics?.ms)} · ${(r.results ?? []).map((x) => `${mark(x.status)} ${x.name}`).join("  ")}`));
     }
-    // A provider's fixtures: each that failed, always (an after or afterAll one changes no result, so
-    // this is where it's seen); with --verbose, each as it ends
-    if (event.type === "fixture:end" && (values.verbose || event.fixture.status !== "ok")) out(fixtureLine(event.fixture));
+    // A provider's fixtures: each that failed or said to stop, always (an after or afterAll one changes
+    // no result, so this is where it's seen); with --verbose, each as it ends
+    if (event.type === "fixture:end" && (values.verbose || event.fixture.status !== "ok" || event.fixture.stop)) out(fixtureLine(event.fixture));
     // With --verbose, each HTTP call a plugin or fixture made
     if (values.verbose && event.type === "span" && event.action === "end" && event.span?.kind === "call") {
       const s = event.span;
       out(dim(`      ${s.name}  ${s.response?.status ?? s.error ?? ""}  ${sec(s.end - s.start)}${s.plugin ? `  (${s.plugin})` : ""}`));
     }
   };
-  const ran = await runSuites({ suites, host, options, onEvent, signal: controller.signal });
-  const run = hide ? hide.redact(ran) : ran;
+  const run = await runSuites({ suites, host, options, onEvent, signal: controller.signal });
   // Problems the run found before it sent anything (engine/runner.js, preflight): each one, as
   // validate says them; the reports are still written, so CI shows why
   if (run.status === "error" && run.error?.all) {
@@ -429,8 +486,11 @@ async function run(paths, values) {
     }
   }
   if (!values.quiet) {
+    // A suite that broke before its tests ran, or that the run never reached: a line, as a test's
+    const cases = casesOf(run);
+    for (const c of cases.filter((x) => !x.test)) out(`${c.status === "error" ? red("✗") : dim("–")} ${c.suiteName} › ${c.name}   ${dim(c.reason)}`);
     if (run.error) err(red(`${location(run.error)}  ${run.error.message}`));
-    out(summaryLine(run));
+    out(summaryLine(run, cases));
     if (run.stopped) out(yellow(`stopped: ${run.stopped}`));
     if (run.baseline?.regressed.length) out(red(`regressed: ${run.baseline.regressed.join("; ")}`));
   }
@@ -455,71 +515,51 @@ const mark = (status) => ({ pass: green("✓"), fail: red("✗"), error: red("�
 
 // A fixture's line as it ends: what ran, when, for which test, how it went
 //   ⚙ fixture acme-login · beforeAll · providers/acme.yml  ok  0.42 s  gave ACME_COOKIE, ACME_CSRF · 1 call
+//   ⚙ fixture acme-login · beforeAll · providers/acme.yml  said to stop  0.42 s  1 call
 function fixtureLine(f) {
-  const where = [f.provider, f.test ? `${f.test.name}${f.test.row ? ` row ${f.test.row}` : ""}${f.test.repeat > 1 ? ` run ${f.test.repeat}` : ""}` : null].filter(Boolean).join(" · ");
+  const where = [f.provider, f.test ? `${f.test.name}${f.test.row ? ` ${rowLabel(f.test.row, f.test.row_name)}` : ""}${f.test.repeat > 1 ? ` run ${f.test.repeat}` : ""}` : null].filter(Boolean).join(" · ");
   const head = `  ⚙ fixture ${f.name} · ${f.phase}${where ? ` · ${where}` : ""}`;
-  const tail = [f.provides?.length ? `gave ${f.provides.join(", ")}` : null, f.calls ? plural(f.calls, "call") : null].filter(Boolean).join(" · ");
-  return f.status === "ok" ? dim(`${head}  ok  ${sec(f.ms)}${tail ? `  ${tail}` : ""}`) : red(`${head}  failed: ${f.error}`);
+  const tail = [f.provides?.length ? `gave ${f.provides.join(", ")}` : null, f.sets?.length ? `set ${f.sets.join(", ")}` : null, f.calls ? plural(f.calls, "call") : null].filter(Boolean).join(" · ");
+  if (f.status !== "ok") return red(`${head}  failed: ${f.error}`);
+  return f.stop ? yellow(`${head}  said to stop  ${sec(f.ms)}${tail ? `  ${tail}` : ""}`) : dim(`${head}  ok  ${sec(f.ms)}${tail ? `  ${tail}` : ""}`);
 }
 
 const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
 // A test's line as it ends (contracts/cli.md, Output): its runs (or rows) passed, its checks passed
 // (a check turned off isn't counted), its time and cost; then what went wrong, a line each (its row,
-// its run when it repeats, its turn), at most three
+// its run when it repeats, its turn), at most three. What went wrong, the checks and the cost are the
+// reports' too (engine/reports/outcome.js), so they say the same.
 function testLine(test, suites, { turns = [], ms } = {}) {
   const suiteName = suites.find((s) => s.file === test.suite)?.name ?? test.suite;
   const icon = test.status === "passed" ? (test.unsure ? yellow("!") : green("✓")) : test.status === "skipped" || test.status === "stopped" ? dim("–") : red("✗");
   const results = test.instances.flatMap((i) => i.results ?? []);
-  const counted = results.filter((r) => r.status !== "skipped");
-  const passed = counted.filter((r) => r.status === "pass").length;
+  const checks = checksOf(test);
   const rows = test.instances.some((i) => i.row);
-  const repeats = (test.settings?.repeat ?? 1) > 1;
-  let cost;
-  for (const t of turns) {
-    for (const c of [t.metrics?.cost, ...(t.results ?? []).map((r) => r.cost)]) if (c !== undefined) cost = (cost ?? 0) + c;
-  }
+  const cost = costOf(turns);
   const parts = [`${icon} ${suiteName} › ${test.name}`];
   if (test.status === "skipped") parts.push(dim(test.reason ?? "skipped"));
   else {
-    parts.push(`${test.passed}/${test.total}${rows ? " rows" : ""}`, `${passed}/${counted.length} checks`);
+    parts.push(`${test.passed}/${test.total}${rows ? " rows" : ""}`, `${checks.passed}/${checks.ran} checks`);
     if (ms !== undefined) parts.push(sec(ms));
     if (cost !== undefined) parts.push(money(cost));
     if (test.reason) parts.push(dim(test.reason));
   }
   const lines = [parts.join("   ")];
-  const where = (row, repeat, turn) => [row ? `row ${row}` : "", repeats ? `run ${repeat}` : "", turn !== undefined ? `turn ${turn + 1}` : ""].filter(Boolean).join(" · ");
-  const bad = [];
-  const order = (a, b) => (a.repeat ?? 0) - (b.repeat ?? 0) || (a.row ?? 0) - (b.row ?? 0) || (a.index ?? 0) - (b.index ?? 0);
-  for (const t of [...turns].sort(order)) {
-    const at = where(t.row, t.repeat, t.index);
-    // A turn that broke: once, why (each of its checks says the same)
-    if (t.error) bad.push(`${at} · error: ${t.error}`);
-    else {
-      for (const r of t.results ?? []) {
-        if (r.status === "fail" || r.status === "error") bad.push(`${at} · ${r.status === "error" ? "error · " : ""}${r.name}: ${r.reason}`);
-        // (unsure counts as failed with --unsure fail, or the file's unsure: fail)
-        else if (r.status === "unsure" && test.settings?.unsure === "fail") bad.push(`${at} · unsure, counted as failed: ${r.name} (confidence ${r.confidence})`);
-      }
-    }
-  }
-  for (const i of test.instances) {
-    for (const r of i.conversation_results ?? []) if (r.status === "fail" || r.status === "error") bad.push(`${[where(i.row, i.repeat), "conversation"].filter(Boolean).join(" · ")} · ${r.name}: ${r.reason}`);
-    // A setup step that failed, or a row that never ran a turn: why
-    const at = where(i.row, i.repeat);
-    if (i.reason && (i.status === "error" || i.status === "failed") && !turns.some((t) => t.row === i.row && t.repeat === i.repeat && t.error)) bad.push(at ? `${at} · ${i.reason}` : i.reason);
-  }
+  const bad = problemsOf(test, turns).map((p) => p.text);
   for (const line of bad.slice(0, 3)) lines.push(dim(`    ${line}`));
   if (bad.length > 3) lines.push(dim(`    …${bad.length - 3} more (see the report)`));
-  if (test.unsure) for (const r of results.filter((x) => x.status === "unsure").slice(0, 2)) lines.push(yellow(`    unsure: ${r.name} (confidence ${r.confidence})`));
+  // (an unsure result that counted as passed with a warning, warn; one counted as failed is above, with
+  // what went wrong; with pass, it passes quietly)
+  if (test.unsure) for (const r of results.filter((x) => x.status === "unsure" && unsureCounts(x, test) === "warn").slice(0, 2)) lines.push(yellow(`    ${unsurePassed(r, test)}`));
   return lines.join("\n");
 }
 
-function summaryLine(run) {
+// The run's summary: its counts as every report counts them (engine/reports/outcome.js: a suite that
+// broke before its tests ran is one, an error; the skipped and stopped, when there are any)
+function summaryLine(run, cases) {
   const s = run.summary ?? {};
-  const t = s.tests ?? {};
-  const checks = (s.checks?.total ?? 0) - (s.checks?.skipped ?? 0);
-  return `\n${plural(run.suites.length, "suite")} · ${plural(t.total ?? 0, "test")} · ${t.failed ?? 0} failed${t.error ? ` · ${plural(t.error, "error")}` : ""} · ${t.unsure ?? 0} unsure · ${plural(checks, "check")}${s.fixtures ? ` · ${plural(s.fixtures.total, "fixture")}${s.fixtures.failed ? ` (${s.fixtures.failed} failed)` : ""}` : ""} · p50 ${sec(s.latency?.total?.p50)} · p95 ${sec(s.latency?.total?.p95)}${s.cost !== undefined ? ` · ${money(s.cost)}` : ""} · ${sec(run.ms)}`;
+  return `\n${plural(run.suites.length, "suite")} · ${countsText(run, cases)}${s.fixtures ? ` · ${plural(s.fixtures.total, "fixture")}${s.fixtures.failed ? ` (${s.fixtures.failed} failed)` : ""}` : ""} · p50 ${sec(s.latency?.total?.p50)} · p95 ${sec(s.latency?.total?.p95)}${s.cost !== undefined ? ` · ${money(s.cost)}` : ""} · ${sec(run.ms)}`;
 }
 
 const location = (p) => (p?.file ? `${p.file}${p.line ? `:${p.line}${p.column ? `:${p.column}` : ""}` : ""}` : "");
@@ -612,7 +652,7 @@ async function validate(paths, values) {
     saySetup(e);
     return EXIT.setup;
   }
-  const host = hostFor(paths, given.secrets);
+  const host = hostFor(paths, given);
   let files;
   try {
     files = await findSuites(host, paths);
@@ -641,7 +681,7 @@ async function validate(paths, values) {
   const checked = await preflight({ suites, host, options, ...(values["env-check"] ? {} : { secretsFor: () => () => "(not checked)" }) });
   checked.close();
   // (nothing said holds a value of the secrets file)
-  const hide = secretsHider(given.secrets);
+  const hide = secretsHider(given.secretValues);
   const said = (text) => (hide ? hide.text(text) : text);
   for (const suite of suites) {
     const errors = checked.problems.filter((p) => p.suite === suite.file);

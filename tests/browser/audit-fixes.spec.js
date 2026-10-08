@@ -7,11 +7,11 @@
 // message box hidden; a conversation's step; the Runs pane; an error turn's response.
 
 import { parse } from "yaml";
-import { addScope, expect, fileText, test } from "./fixtures.js";
+import { addScope, expect, fileText, newScope, reopen, test } from "./fixtures.js";
 
 const SUITE = "smoke.hafen.yml";
-const openFolder = async (page) => {
-  await page.click("#openFolder");
+const openApp = async (page) => {
+  await reopen(page);
   await expect(page.locator(`#suiteList .list-row[data-file="${SUITE}"]`)).toHaveCount(1);
 };
 const openTest = (page, name) => page.locator("#suiteList .list-open", { hasText: name }).first().click();
@@ -19,7 +19,7 @@ const suiteRow = (page, file) => page.locator(`#suiteList .list-row[data-file="$
 const fileSays = (page, check, file = SUITE) => expect.poll(async () => { try { return check(parse(await fileText(page, file))); } catch { return false; } }, { timeout: 5000 }).toBe(true);
 const writeFile = (page, path, text) => page.evaluate(async ([path, text]) => {
   const parts = path.split("/");
-  let dir = await navigator.storage.getDirectory();
+  let dir = await navigator.storage.getDirectory().then((root) => root.getDirectoryHandle("workspace", { create: true }));
   for (const p of parts.slice(0, -1)) dir = await dir.getDirectoryHandle(p, { create: true });
   const w = await (await dir.getFileHandle(parts.at(-1), { create: true })).createWritable();
   await w.write(text);
@@ -50,7 +50,7 @@ test.afterEach(async ({ app: { errors } }) => {
 
 test("while a message is on its way the conversation's provider can't be changed; after, it can, and nothing's stuck", async ({ app: { page } }) => {
   await slowProvider(page, 1500);
-  await openFolder(page);
+  await openApp(page);
   await page.selectOption("#convProvider", "providers/mock-slow.yml");
   await page.fill("#input", "first");
   await page.click("#send");
@@ -66,7 +66,7 @@ test("while a message is on its way the conversation's provider can't be changed
 });
 
 test("a conversation keeps its run whole after a message: its _id, and its steps' names", async ({ app: { page } }) => {
-  await openFolder(page);
+  await openApp(page);
   await page.selectOption("#convProvider", "providers/mock-json.yml");
   for (const m of ["one", "two", "three"]) {
     await page.fill("#input", m);
@@ -79,7 +79,7 @@ test("a conversation keeps its run whole after a message: its _id, and its steps
 });
 
 test("a suite's results follow it: a new suite by its old name doesn't take them, and one renamed to a deleted one's name keeps its own", async ({ app: { page } }) => {
-  await openFolder(page);
+  await openApp(page);
   // tests.hafen.yml, run, then renamed to refunds
   await page.click("#newSuite");
   await page.press("#newSuiteName", "Enter");  // (+ asks for a name: the one it offers)
@@ -118,7 +118,7 @@ test("a suite's results follow it: a new suite by its old name doesn't take them
 test("a suite can't be renamed while it runs (its run reads it by its name)", async ({ app: { page, servers } }) => {
   await slowProvider(page, 2000);
   await writeFile(page, "slow.hafen.yml", `version: 1\nprovider: providers/mock-slow.yml\nenvironments:\n  local: { base_url: "${servers.mock.url}" }\ntests:\n  - name: slow one\n    turns: [ { user: wait } ]\n`);
-  await openFolder(page);
+  await openApp(page);
   await page.locator('#suiteList .list-row[data-file="slow.hafen.yml"] .list-open').first().click();
   await page.click("#suiteRun");
   await page.fill("#suiteFile", "renamed");
@@ -129,7 +129,7 @@ test("a suite can't be renamed while it runs (its run reads it by its name)", as
 });
 
 test("\"run again\" runs what ran: a test up to its turn as it was; a deleted test says so, not the whole suite instead", async ({ app: { page } }) => {
-  await openFolder(page);
+  await openApp(page);
   await openTest(page, "refund for a broken item");
   await page.locator("#turn-0 .turn-head .label").click({ button: "right" });
   await page.click("#menu-turn-upto");
@@ -144,13 +144,13 @@ test("\"run again\" runs what ran: a test up to its turn as it was; a deleted te
   await fileSays(page, (d) => (d.tests ?? []).length === 0);
   await page.locator("#runList .list-open").first().click();
   await page.click("#runAgain");
-  await expect(toast(page, "isn't in the open folder")).toBeVisible();
+  await expect(toast(page, "isn't in your suites any more")).toBeVisible();
   await page.waitForTimeout(300);
   expect((await runs(page)).length).toBe(2);
 });
 
 test("quick clicks on a check's on box: the last one is what's in the file", async ({ app: { page } }) => {
-  await openFolder(page);
+  await openApp(page);
   await openTest(page, "refund for a broken item");
   await page.locator("#turn-0 .turn-head .label").click();
   const box = page.locator("#turnCheck-1-on");
@@ -169,18 +169,17 @@ test("quick clicks on a check's on box: the last one is what's in the file", asy
 });
 
 test("the scope chosen last is chosen again", async ({ app: { page } }) => {
-  await openFolder(page);
+  await openApp(page);
   // (prod made last, and so chosen last: not the first there is)
   await addScope(page, "stage");
   await addScope(page, "prod");
   await page.reload();
   await page.locator("html:not(.loading)").waitFor();
-  await openFolder(page);
   await expect(page.locator("#scopeButton .scope-name")).toHaveText("prod");
 });
 
 test("a step of another test in the timeline (a suite's run, in a test's view) opens that test, at its turn", async ({ app: { page } }) => {
-  await openFolder(page);
+  await openApp(page);
   const row = suiteRow(page, SUITE);
   await row.hover();
   await row.locator(".list-add[id$='-add']").click();
@@ -205,7 +204,7 @@ test("a step of another test in the timeline (a suite's run, in a test's view) o
 });
 
 test("Back to the plain address goes to the conversation", async ({ app: { page } }) => {
-  await openFolder(page);
+  await openApp(page);
   await openTest(page, "refund for a broken item");
   await expect(page).toHaveURL(/tab=suites/);
   await page.goBack();
@@ -215,7 +214,7 @@ test("Back to the plain address goes to the conversation", async ({ app: { page 
 });
 
 test("a conversation's run file isn't opened under Runs: it says so", async ({ app: { page } }) => {
-  await openFolder(page);
+  await openApp(page);
   const run = { _id: "explore000000001", kind: "hafen-run", version: 1, mode: "explore", suites: [], tests: [], turns: [], spans: [], started: Date.now(), status: "done" };
   await page.locator("#runsSection input[type=file]").setInputFiles({ name: "x.hafen-run.json", mimeType: "application/json", buffer: Buffer.from(JSON.stringify(run)) });
   await expect(toast(page, "conversation's run")).toBeVisible();
@@ -224,7 +223,7 @@ test("a conversation's run file isn't opened under Runs: it says so", async ({ a
 
 test("a suite written wrong: the app still draws, says what's wrong, and won't edit it until it's fixed as YAML", async ({ app: { page } }) => {
   await writeFile(page, "bad.hafen.yml", "version: 1\nprovider: providers/mock-json.yml\ntests:\n  - name: a\n    tags: smoke\n    turns:\n      - user: hi\n        expect:\n          path: $.x\n");
-  await openFolder(page);
+  await openApp(page);
   await expect(page.locator('#suiteList .list-row[data-file="bad.hafen.yml"]')).toHaveCount(1);
   await expect(page.locator("#threadCrash, #panelCrash")).toHaveCount(0);
   await page.locator('#suiteList .list-row[data-file="bad.hafen.yml"] .list-open').first().click();
@@ -256,7 +255,6 @@ test("small screens: the panel shows when something's selected or asked for, und
   await expect(page.locator("#panel")).toBeHidden();
   // A test picked in the drawer: the drawer closes, and the panel shows it
   await page.click("#menu");
-  await openFolder(page);
   await openTest(page, "refund for a broken item");
   await expect(page.locator("body")).not.toHaveClass(/nav-open/);
   await expect(page.locator("#panel")).toBeVisible();
@@ -276,7 +274,7 @@ test("small screens: the panel shows when something's selected or asked for, und
 test("Esc in a dialog closes the dialog: the run going on goes on", async ({ app: { page, servers } }) => {
   await slowProvider(page, 2000);
   await writeFile(page, "slow.hafen.yml", `version: 1\nprovider: providers/mock-slow.yml\nenvironments:\n  local: { base_url: "${servers.mock.url}" }\ntests:\n  - name: slow one\n    turns: [ { user: wait } ]\n`);
-  await openFolder(page);
+  await openApp(page);
   await openTest(page, "slow one");
   await page.click("#testRun");
   await expect(page.locator("#runList li[id^='run-live-']")).toHaveCount(1);
@@ -296,7 +294,7 @@ test("Esc in a dialog closes the dialog: the run going on goes on", async ({ app
 test("the timeline's now line starts each run at its start, not where the last run's ended", async ({ app: { page, servers } }) => {
   await slowProvider(page, 1500);
   await writeFile(page, "slow.hafen.yml", `version: 1\nprovider: providers/mock-slow.yml\nenvironments:\n  local: { base_url: "${servers.mock.url}" }\ntests:\n  - name: slow one\n    turns: [ { user: wait } ]\n`);
-  await openFolder(page);
+  await openApp(page);
   await openTest(page, "slow one");
   await page.click("#testRun");
   await expect(page.locator("#status")).toContainText("passed 1/1", { timeout: 6000 });
@@ -308,15 +306,15 @@ test("the timeline's now line starts each run at its start, not where the last r
   expect(line.x - chart.x).toBeLessThan(chart.width * 0.5);
 });
 
-test("a run whose tests the open folder hasn't got: the test picked shows; its turn and check, as the run recorded them; Back keeps it", async ({ app: { page } }) => {
-  await openFolder(page);
+test("a run whose tests the app hasn't got: the test picked shows; its turn and check, as the run recorded them; Back keeps it", async ({ app: { page } }) => {
+  await openApp(page);
   const row = suiteRow(page, SUITE);
   await row.hover();
   await row.locator(".list-add[id$='-add']").click();
   await page.locator(`#suiteList .list-row[data-file="${SUITE}"] .list-open`).first().click();
   await page.click("#suiteRun");
   await expect(page.locator("#status")).toContainText(/failed|passed/);
-  // The suite renamed: the run's tests aren't in the folder by their file any more
+  // The suite renamed: the run's tests aren't in the app by their file any more
   await page.fill("#suiteFile", "elsewhere");
   await page.press("#suiteFile", "Enter");
   await expect(page.locator('#suiteList .list-row[data-file="elsewhere.hafen.yml"]')).toHaveCount(1);
@@ -334,7 +332,7 @@ test("a run whose tests the open folder hasn't got: the test picked shows; its t
 });
 
 test("the top bar's status is red when the test failed", async ({ app: { page } }) => {
-  await openFolder(page);
+  await openApp(page);
   await openTest(page, "refund for a broken item");
   await page.click("#testRun");
   await expect(page.locator("#status")).toContainText("failed 0/1");
@@ -342,14 +340,13 @@ test("the top bar's status is red when the test failed", async ({ app: { page } 
 });
 
 test("a scope's value changed as a whole (its .env text) shows its new value in its row (and leaving the row doesn't put the old one back)", async ({ app: { page } }) => {
-  await openFolder(page);
+  await openApp(page);
   await page.click("#openSettings");
   await page.click("#settings-tab-environments");
-  await page.fill("#newScopeName", "stage");
-  await page.click("#newScopeForm button[type=submit]");
+  await newScope(page, "stage");
   await page.fill("#envVarName", "X");
   await page.fill("#envVarValue", "a");
-  await page.click("#envVarAdd button[type=submit]");
+  await page.press("#envVarValue", "Enter");
   const value = page.locator("#envVar-X input");
   await expect(value).toHaveValue("a");
   await value.fill("b");
@@ -367,18 +364,18 @@ test("a scope's value changed as a whole (its .env text) shows its new value in 
 });
 
 test("a suite's folding stays with it when another is added above it", async ({ app: { page } }) => {
-  await openFolder(page);
+  await openApp(page);
   await page.click(`#${await suiteRow(page, SUITE).getAttribute("id")}-toggle`);
   await expect(suiteRow(page, SUITE).locator(".tree-toggle")).toHaveAttribute("aria-expanded", "false");
   await writeFile(page, "a.hafen.yml", "version: 1\nprovider: providers/mock-json.yml\ntests:\n  - name: first\n    turns: [ { user: hi } ]\n");
-  await openFolder(page);
+  await openApp(page);
   await expect(page.locator('#suiteList .list-row[data-file="a.hafen.yml"]')).toHaveCount(1);
   await expect(suiteRow(page, SUITE).locator(".tree-toggle")).toHaveAttribute("aria-expanded", "false");
   await expect(suiteRow(page, "a.hafen.yml").locator(".tree-toggle")).toHaveAttribute("aria-expanded", "true");
 });
 
 test("the message box, hidden (a suite's view) and shown again, is empty: Send off, no old field problem", async ({ app: { page } }) => {
-  await openFolder(page);
+  await openApp(page);
   await openTest(page, "refund for a broken item");
   await page.fill("#input", "{{env.nope}}");
   await expect(page.locator("#inputProblem")).toBeVisible();
@@ -391,7 +388,7 @@ test("the message box, hidden (a suite's view) and shown again, is empty: Send o
 });
 
 test("a conversation's step (a tool call) picked: its turn stays marked", async ({ app: { page } }) => {
-  await openFolder(page);
+  await openApp(page);
   await page.selectOption("#convProvider", "providers/mock-sse.yml");
   await page.fill("#input", "hi");
   await page.click("#send");
@@ -402,7 +399,7 @@ test("a conversation's step (a tool call) picked: its turn stays marked", async 
 });
 
 test("Settings → Runs lists a run kept without its tests or suites", async ({ app: { page } }) => {
-  await openFolder(page);
+  await openApp(page);
   await page.evaluate(async () => {
     const done = (req) => new Promise((resolve, reject) => { req.onsuccess = () => resolve(req.result); req.onerror = () => reject(req.error); });
     const db = await done(indexedDB.open("hafen"));
@@ -418,7 +415,7 @@ test("Settings → Runs lists a run kept without its tests or suites", async ({ 
 
 test("an error turn says the error, with what came back under it (show the response)", async ({ app: { page } }) => {
   await writeFile(page, "providers/mock-err.yml", 'kind: http\nurl: "{{base_url}}/error/500"\nbody: { message: "{{user}}" }\nresponse: { text: $.data.reply }\n');
-  await openFolder(page);
+  await openApp(page);
   await page.selectOption("#convProvider", "providers/mock-err.yml");
   await page.fill("#input", "hi");
   await page.click("#send");

@@ -192,13 +192,16 @@ response: { text: $.reply }
     const r = await cli(dir, ["run", "s.hafen.yml", "--report", "run:out/run.json", "--report", "junit:out/junit.xml"]);
     assert.equal(r.code, 1, said(r));
     assert.match(r.stdout, /✗ Flows › rows {3}2\/3 rows {3}2\/3 checks/);
-    assert.match(r.stdout, /row 3/, "the failing row is named");
+    assert.match(r.stdout, /row 3: a refund please · turn 1/, "the failing row is named, by its first column");
     const run = await readJSON(dir, "out/run.json");
     assert.deepEqual(run.tests[0].instances.map((i) => [i.row, i.status]), [[1, "passed"], [2, "passed"], [3, "failed"]]);
     assert.deepEqual(mock.log.map((x) => x.body.message), ["a refund for 4417", "where is my parcel", "a refund please"]);
     const junit = await readFile(join(dir, "out/junit.xml"), "utf8");
-    assert.match(junit, /<testcase [^>]*name="rows \[row 1\]"/);
-    assert.match(junit, /<testcase [^>]*name="rows \[row 3\]"[^>]*>\s*<failure/);
+    // A testcase for each row, named by its first column: rows 1 and 2 passed, row 3 failed, and why
+    assert.match(junit, /<testsuite [^>]*tests="3" failures="1" errors="0" skipped="0"/);
+    assert.match(junit, /<testcase [^>]*name="rows \[row 1: a refund for 4417\]"[^>]*>\s*<system-out>[^<]*<\/system-out>\s*<\/testcase>/);
+    assert.match(junit, /<testcase [^>]*name="rows \[row 3: a refund please\]"[^>]*>\s*<failure [^>]*>row 3: a refund please · turn 1 · \$\.data\.order\.id = \{\{row\.order\}\}: 4417 ≠ 9999/);
+    assert.deepEqual(run.tests[0].instances.map((i) => i.row_name), ["a refund for 4417", "where is my parcel", "a refund please"]);
     // A data file in JSON lines, and a limit
     await writeFile(join(dir, "data/orders.jsonl"), '{"question":"a refund for 4417","order":4417}\n{"question":"hi","order":4417}\n{"question":"x","order":1}\n');
     await writeFile(join(dir, "s.hafen.yml"), suite(`  - name: rows
@@ -207,9 +210,11 @@ response: { text: $.reply }
       - user: "{{row.question}}"
         expect: [ { path: $.data.order.id, equals: "{{row.order}}" } ]
 `).replaceAll("MOCK_URL", mock.url));
-    const lines = await cli(dir, ["run", "s.hafen.yml"]);
+    const lines = await cli(dir, ["run", "s.hafen.yml", "--report", "junit:out/lines.xml"]);
     assert.equal(lines.code, 0, said(lines));
     assert.match(lines.stdout, /2\/2 rows/);
+    // (a JSON line's row named by its first key)
+    assert.deepEqual([...(await readFile(join(dir, "out/lines.xml"), "utf8")).matchAll(/<testcase [^>]*name="([^"]*)"/g)].map((m) => m[1]), ["rows [row 1: a refund for 4417]", "rows [row 2: hi]"]);
   });
 
   it("repeat and pass_rate: a flaky reply passes at its rate; --repeat overrides the file's", async () => {
@@ -451,7 +456,7 @@ providers:
     assert.equal(mock.log.length, 0);
   });
 
-  it("unsure: warn (the default) passes with a warning line; fail fails; pass passes quietly; the file's policy is overridden", async () => {
+  it("unsure: fail (the default) fails, saying why and how to let it pass; warn passes with a warning line; pass passes quietly; the file's policy is overridden", async () => {
     const dir = await project({
       "s.hafen.yml": suite(`  - name: unsure
     turns:
@@ -459,16 +464,20 @@ providers:
         expect: [ { type: systemone.noul, question: "UNSURE: is it polite?", min: 0.5 } ]
 `, judges),
     });
-    const warn = await cli(dir, ["run", "s.hafen.yml"]);
-    assert.equal(warn.code, 0, said(warn));
-    assert.match(warn.stdout, /! Flows › unsure/);
-    assert.match(warn.stdout, /unsure: .*confidence 0\.1/);
-    assert.match(warn.stdout, /1 unsure/);
-    const fail = await cli(dir, ["run", "s.hafen.yml", "--unsure", "fail"]);
+    const fail = await cli(dir, ["run", "s.hafen.yml"]);
     assert.equal(fail.code, 1, said(fail));
-    assert.match(fail.stdout, /✗ Flows › unsure .*\n {4}turn 1 · unsure, counted as failed: .*confidence 0\.1/);
+    assert.match(fail.stdout, /✗ Flows › unsure .*\n {4}turn 1 · noul 0\.55: unsure: 0\.55 within 0\.5–1, but confidence 0\.1 is below 0\.6 \(unsure counts as failed; --unsure warn to let it pass\)\n/);
+    assert.match(fail.stdout, /1 failed · 0 unsure/);
+    const warn = await cli(dir, ["run", "s.hafen.yml", "--unsure", "warn"]);
+    assert.equal(warn.code, 0, said(warn));
+    assert.match(warn.stdout, /! Flows › unsure .*\n {4}unsure: noul 0\.55: 0\.55 within 0\.5–1, but confidence 0\.1 is below 0\.6 \(counted as passed: unsure is warn\)\n/);
+    assert.match(warn.stdout, /1 unsure/);
+    const failed = await cli(dir, ["run", "s.hafen.yml", "--unsure", "fail"]);
+    assert.equal(failed.code, 1, said(failed));
     const pass = await cli(dir, ["run", "s.hafen.yml", "--unsure", "pass"]);
     assert.equal(pass.code, 0, said(pass));
+    assert.match(pass.stdout, /✓ Flows › unsure /);
+    assert.doesNotMatch(pass.stdout, /unsure:/);
     const bad = await cli(dir, ["run", "s.hafen.yml", "--unsure", "maybe"]);
     assert.equal(bad.code, 2);
     assert.match(bad.stderr, /--unsure takes pass, warn or fail/);

@@ -163,7 +163,7 @@ describe("--max-cost", () => {
     const r = await cli(dir, ["run", "s.hafen.yml", "--max-cost", "0.03", "--report", "run:out/run.json", "--report", "junit:out/junit.xml", "--report", "md:out/summary.md", "--report", "json:out/summary.json"]);
     assert.equal(r.code, 3, said(r));
     assert.match(r.stdout, /^✗ Flows › t2 {3}0\/1 {3}0\/1 checks/m);
-    assert.match(r.stdout, /^1 suite · 3 tests · 1 failed · 0 unsure · 2 checks · /m);
+    assert.match(r.stdout, /^1 suite · 3 tests · 1 failed · 1 skipped · 0 unsure · 2 checks · /m);
     assert.match(r.stdout, /stopped: the run's cost reached the limit \(\$0\.03\)/);
     const run = await readJSON(dir, "out/run.json");
     assert.equal(run.status, "stopped");

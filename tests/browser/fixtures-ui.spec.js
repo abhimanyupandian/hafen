@@ -5,11 +5,11 @@
 // shown again from either. (The scope button with none chosen: scope-ui.spec.js.)
 
 import { parse } from "yaml";
-import { expect, fileText, test } from "./fixtures.js";
+import { expect, fileText, reopen, test } from "./fixtures.js";
 
 const writeFile = (page, path, text) => page.evaluate(async ([path, text]) => {
   const parts = path.split("/");
-  let dir = await navigator.storage.getDirectory();
+  let dir = await navigator.storage.getDirectory().then((root) => root.getDirectoryHandle("workspace", { create: true }));
   for (const p of parts.slice(0, -1)) dir = await dir.getDirectoryHandle(p, { create: true });
   const w = await (await dir.getFileHandle(parts.at(-1), { create: true })).createWritable();
   await w.write(text);
@@ -40,7 +40,7 @@ response: { text: $.data.reply }
 `);
   // (a provider file whose kind is a fixture: not a provider to pick)
   await writeFile(page, "providers/not-a-provider.yml", "kind: plugin:token-login\n");
-  await page.click("#openFolder");
+  await reopen(page);
   await expect(page.locator("#convProvider option", { hasText: "behind-login" })).toHaveCount(1);
   expect(await page.locator("#convProvider option").allTextContents()).not.toContain("not-a-provider");
 
@@ -154,7 +154,7 @@ fixtures: { beforeAll: [note, note@^1], after: [note] }
 body: { message: "{{user}}" }
 response: { text: $.data.reply }
 `);
-  await page.click("#openFolder");
+  await reopen(page);
   await page.selectOption("#convProvider", "providers/twice.yml");
   // (the conversation's provider: said once, as what stops a message to it, in the duplicate line's place)
   await expect(page.locator("#convFixturesProblem")).toHaveText("twice: fixtures.beforeAll names note twice: a list runs each fixture once (another list can name it too) · edit the provider");

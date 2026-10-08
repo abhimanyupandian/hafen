@@ -44,10 +44,11 @@ npm --prefix evals run app      # the desktop app
 ## 2. Make a test with checks (US2)
 
 1. With a two-turn conversation open, in the panel: Suite "New suite…", name `smoke`, **SAVE AS
-   TEST**. **Expect:** `smoke.hafen.yml` appears in the folder and in the Suites tree.
+   TEST**. **Expect:** `smoke.hafen.yml` appears in the Suites tree (the app keeps it: no folder was
+   asked for at any point).
 2. Select turn 1; in Response, click `order.id`, choose `equals`, keep `4417`, **Add check**.
    **Expect:** the file gains `{ path: $.reply.order.id, equals: 4417 }` under that turn, and its
-   comments and other keys are untouched (`git diff` shows only that line).
+   comments and other keys are untouched (exported again, `git diff` shows only that line).
 3. From **Checks**, add **Text** `contains: "refund"` to turn 2. **RUN**. **Expect:** badges under
    each reply, one failing where the mock's reply lacks "refund"; the tree shows `failed`.
 4. Set **On failure** to `stop`, run again. **Expect:** turn 2 is skipped.
@@ -55,6 +56,11 @@ npm --prefix evals run app      # the desktop app
    `2/3` most times, with the count shown.
 
 ## 3. Run it in CI (US3)
+
+In the app, the suite's panel → **Export…** → **Export**, and pick a folder (`out/suites`). **Expect:**
+the folder holds `smoke.hafen.yml` and the provider it uses, at the same paths; `npx hafen run
+out/suites` runs it as below. **Copy CI command** then gives `npx hafen run "out/suites" …`. The
+reference suites below are such a folder:
 
 ```sh
 node evals/packages/hafen/cli/hafen.js validate evals/packages/hafen/tests/fixtures/suites
@@ -82,7 +88,8 @@ Use `evals/packages/hafen/tests/fixtures/suites/judged.hafen.yml` (its judges po
 and `/judge`).
 
 **Expect:** a noul check passing with its value and confidence; a check the mock answers with low
-confidence shown as `unsure` (amber) and reported as a warning by the CLI; an LLM judge showing
+confidence shown as `unsure` (amber), counted as failed by the CLI (a warning with `--unsure warn`);
+an LLM judge showing
 `2/3` agreement; with the mock judge stopped, those checks are `error`, not `fail`.
 
 *Optional, costs money:* set `judges.default` to `{ kind: systemone }` with the secret

@@ -98,15 +98,23 @@ them is written.
   receives it (`ipcRenderer.on(…, (e) => …e.ports[0])`) and forwards it with
   `window.postMessage(…, [port])`, the pattern Electron documents for isolated pages.
 
-## 6. The file is the test
+## 6. The app keeps the tests; Export writes the files
 
-- **Decision:** Suites are YAML or JSON files with one schema ([contracts/test-file.md](contracts/test-file.md)).
-  The desktop app opens a folder and edits the files in place; the browser build opens and
-  downloads them. There is no export step.
-- **Rationale:** Tests kept in app storage and exported would drift from the copy in the
-  repository. Files in the repository are reviewed in pull requests and run as they are in CI.
-- **Alternatives:** app storage with an export (drift); JSON only (no comments, harder to edit by
-  hand).
+- **Decision:** Suites are YAML or JSON files with one schema ([contracts/test-file.md](contracts/test-file.md)),
+  kept by the app in its own workspace (the desktop app's data folder, `workspace/`; the browser's
+  Origin Private File System, `workspace/`), laid out as the engine reads a folder, and edited there
+  in place. Import copies suites in from files or a folder; Export writes them to a folder, with
+  everything they use (the engine's `dependencies` command), as plain files the CLI runs unchanged.
+- **Rationale:** Asking for a folder before anything else was the first thing a new user met, and a
+  browser can't keep one between visits. Kept by the app, a provider, a conversation and a suite can
+  be made from the first start. Drift between the app's copy and the repository's is kept visible
+  rather than prevented: Export writes the same text, lists the files that would change and asks
+  first, remembers where each suite went (Copy CI command runs that folder), and `git diff` shows the
+  change; Import brings the repository's back, asking about the app's own it would change.
+- **Alternatives:** working on a folder the user opens (replaced: a step before anything can be
+  done, and the browser build couldn't keep it); a sync that writes the folder on every save
+  (surprising writes into a repository, and no browser equivalent); JSON only (no comments, harder to
+  edit by hand).
 
 ## 7. YAML that keeps comments
 
@@ -195,7 +203,7 @@ them is written.
 | Confidence, System One | The API's own `confidence` when it reports one; otherwise the probability of the answer it chose (choice), or of the score it gave (score); for noul, how far the value is from 0.5, doubled (0.95 and 0.05 are both 0.9) |
 | Confidence, LLM judge | The share of the N samples that agree with the majority verdict (`2/3` → 0.67) |
 | Confidence, rule check | None (shown as —) |
-| Unsure | A judged check whose confidence is below its `unsure_below` (default 0.6) |
+| Unsure | A judged check whose value passes, but whose confidence is below its `unsure_below` (default 0.6); it counts as failed unless the unsure policy says warn or pass |
 | Turn accuracy | Checks passed ÷ checks run (skipped ones aren't run; errors count as not passed) |
 | Test pass rate | Repeats that passed ÷ repeats |
 | Data accuracy | Rows that passed ÷ rows |

@@ -12,13 +12,25 @@ import { renderMarkdown } from "../lib/markdown.js";
 import { ConfirmButton } from "../design/confirm.jsx";
 import { openMenu } from "../design/context-menu.jsx";
 import { Icon } from "../design/icons.jsx";
-import { on } from "../lib/events.js";
+import { expandSidebar } from "../design/sidebar.jsx";
+import { openDrawer } from "../lib/dom.js";
+import { emit, on } from "../lib/events.js";
 import { RUN_KEY } from "../lib/keys.js";
-import { app, deleteConversationTurn, deleteTurn, liveForTest, runForTest, runTests, select, stopRun, suiteOf, testOf, threadMode } from "../state.js";
+import { app, deleteConversationTurn, deleteTurn, liveForSuite, liveForTest, runForTest, runTests, select, stopRun, suiteOf, suiteRunFor, testOf, threadMode } from "../state.js";
 import { isOn } from "./check-types.js";
-import { checksText, describeCheck, instancesOf, pairResults, pairTurns, pickedInstance, repeatOf, spanFor, statsLine, testResult, testStatusText, turnChecksText, turnStatus, turnsOf, visibilityText } from "./derive.js";
-import { OpenButton, TurnIcon } from "./sections.jsx";
+import { checksText, countedResult, describeCheck, instancesOf, pairResults, pairTurns, pickedInstance, refusedRun, repeatOf, rowLabel, runOutcome, spanFor, statsLine, stoppedTurn, testResult, testStatusText, turnChecksText, turnStatus, turnsOf, visibilityText } from "./derive.js";
+import { startConversation, TurnIcon } from "./sections.jsx";
 import { showProvider } from "./providers.jsx";
+
+// A new suite, from the thread's first steps: the Suites section's form, named first (the sidebar
+// shown, and the section opened, so it's seen)
+function startSuite() {
+  expandSidebar();
+  if (matchMedia("(max-width: 860px)").matches) openDrawer();
+  const toggle = document.getElementById("suitesToggle");
+  if (toggle?.getAttribute("aria-expanded") === "false") toggle.click();
+  emit("suites:new");
+}
 
 function Thinking({ thinking, record, onSelect }) {
   if (!thinking?.length) return null;
@@ -67,10 +79,19 @@ function pick(e, select) {
 
 // A turn that failed: the error, in the danger colour, and what came back folded under it (the
 // body). One cut short after some of its text came (a stream cut off) shows that text as a reply's,
-// ending …, with the error under it: `cut short: network error`
+// ending …, with the error under it: `cut short: network error`. One stopped on purpose isn't an
+// error: what came, ending …, then `stopped`, in the muted colour.
 function ErrorReply({ record, reply, index }) {
   const body = record.response?.body;
   const raw = body === undefined || body === null || body === "" ? "" : typeof body === "string" ? body : JSON.stringify(body, null, 2);
+  if (stoppedTurn(record)) {
+    return reply
+      ? <>
+          <div className="msg-body md cut" id={`turn-${index}-partial`} dangerouslySetInnerHTML={{ __html: renderMarkdown(reply) }} />
+          <div className="msg-body hint msg-cut" id={`turn-${index}-cut`}>stopped</div>
+        </>
+      : <div className="msg-body hint" id={`turn-${index}-cut`}>Stopped before any reply came.</div>;
+  }
   if (reply) {
     return (
       <>
@@ -88,6 +109,25 @@ function ErrorReply({ record, reply, index }) {
   );
 }
 
+// A run that broke off before it reached its tests (spec/design/components.md, Additions: Run error):
+// where their turns would be, what stopped it, in the danger colour. One refused before sending
+// anything says `couldn't run` and each problem its check found (where it is: a provider's file, say);
+// one that broke off (a provider's fixture, the suite's setup) says `error` and why.
+function RunError({ run, now }) {
+  const said = runOutcome(run);
+  const refused = refusedRun(run);
+  const problems = refused ? run.error.all : [run.error?.message ? run.error : { message: said.why ?? "the run broke off" }];
+  return (
+    <section className="run-error" id="runError" aria-label={`The run: ${said.text}`} data-status="error">
+      <div className="turn-head">
+        <span className="label">Run</span>
+        <span className="hint turn-summary" id="runErrorStatus" data-status="error">{[said.text, refused ? "nothing was sent" : sec(run.ms), run.started && ago(run.started, now)].filter(Boolean).join(" · ")}</span>
+      </div>
+      {problems.map((p, i) => <div key={i} className="msg-body error" id={`runError-${i}`}>{`${p.file && p.line ? `${p.file}:${p.line}: ` : ""}${p.message}`}</div>)}
+    </section>
+  );
+}
+
 // A turn's status and summary for its head: from the record, and the badges (its checks' results; one
 // turned off isn't counted). checked: the turn is a test's (or a run's), so it has checks to count: one
 // with none says "0 checks", in the unsure colour (a conversation's turns have none to have)
@@ -99,6 +139,8 @@ function turnSummary(record, all, checked) {
   if (record.carried) return { status: "", text: record.carried === "fixed reply" ? "carried · its fixed reply" : "carried · from the last run" };
   const ms = record.metrics?.ms !== undefined ? sec(record.metrics.ms) : "";
   if (record.skipped) return { status: "skipped", text: "skipped" };
+  // (stopped on purpose: not an error, and not coloured as one)
+  if (stoppedTurn(record)) return { status: "stopped", text: ["stopped", ms].filter(Boolean).join(" · ") };
   if (record.error) return { status: "error", text: ["error", ms].filter(Boolean).join(" · ") };
   if (none) return { status: "unchecked", text: ["0 checks", ms].filter(Boolean).join(" · ") };
   const ran = badges.filter((b) => b.status);
@@ -192,12 +234,18 @@ export function Thread() {
     run = conversation?.run;
     const turns = run?.turns ?? [];
     if (!turns.length) {
-      // (its first step a button, not only words: opening a folder, then adding a provider)
-      content = providers.length
-        ? <p className="empty" id="threadEmpty">Choose a provider, then send a message. Save the conversation as a test when it's worth keeping.</p>
-        : state.opened
-          ? <div className="empty" id="threadEmpty"><p>Add a provider (an endpoint to talk to) to start.</p><button className="btn btn-primary empty-action" id="threadAddProvider" type="button" onClick={() => showProvider("new")}>Add a provider</button></div>
-          : <div className="empty" id="threadEmpty"><p>Open a folder with your suites and providers to start.</p><OpenButton id="threadOpenFolder" className="btn btn-primary empty-action" /></div>;
+      // (the first steps as buttons, not only words: a provider, a conversation, a suite; the next one
+      // to take, adding a provider while there's none, the primary)
+      content = (
+        <div className="empty" id="threadEmpty">
+          <p>{providers.length ? "Choose a provider, then send a message. Save the conversation as a test when it's worth keeping." : "Add a provider (an endpoint to talk to) to start: then talk to it, and save what's worth keeping as a test."}</p>
+          <div className="empty-actions">
+            <button className={`btn${providers.length ? "" : " btn-primary"}`} id="threadAddProvider" type="button" onClick={() => showProvider("new")}>Add a provider</button>
+            <button className="btn" id="threadNewConversation" type="button" onClick={startConversation}>New conversation</button>
+            <button className="btn" id="threadNewSuite" type="button" onClick={startSuite}>New suite</button>
+          </div>
+        </div>
+      );
     } else {
       content = turns.map((record, i) => record && (
         <Turn key={i} index={i} label={`turn ${i + 1}`} user={record.user} record={{ ...record, globalIndex: i }} badges={[]}
@@ -217,7 +265,7 @@ export function Thread() {
       const r = runForTest(file, ti);
       const going = lives.find((l) => l.scope.file === file && (l.scope.test === undefined || l.scope.id === (t.id ?? t.name)));
       const live = !!going && (!r || r === going.run);
-      const { text, status } = testStatusText(testResult(r, file, t), { live });
+      const { text, status, why } = testStatusText(testResult(r, file, t), { live });
       const paired = pairTurns(turnsOf(r, file, t), t.turns ?? []);
       return (
         <section key={t.id ?? `${ti}-${t.name}`} className="turn-group suite-test" id={`suiteTest-${ti}`} aria-label={t.name} data-status={status}
@@ -226,7 +274,7 @@ export function Thread() {
             <button type="button" className="suite-test-name" id={`suiteTest-${ti}-open`} onClick={() => select({ kind: "test", file, test: ti })}>{t.name}</button>
             <GroupBadge group={t.group} id={`suiteTest-${ti}-group`} />
             <RepeatBadge times={repeatOf(suite, t)} id={`suiteTest-${ti}-repeat`} />
-            <span className="hint turn-summary" data-status={status}>{text === "—" ? "not run yet" : `${text}${!live && r?.started ? ` · ${ago(r.started, now)}` : ""}`}</span>
+            <span className="hint turn-summary" data-status={status} title={why ? `${text}: ${why}` : undefined}>{text === "—" ? "not run yet" : `${text}${!live && r?.started ? ` · ${ago(r.started, now)}` : ""}`}</span>
             <span className="turn-actions">
               <button type="button" className="btn btn-ghost btn-icon turn-run" id={`suiteTest-${ti}-run`} aria-label={`Run ${t.name}`} title="Run this test"
                       disabled={!!going} onClick={() => runTests(file, ti).catch(() => {})}>
@@ -256,6 +304,9 @@ export function Thread() {
         </section>
       );
     }) : <p className="empty" id="suiteEmpty">This suite has no tests yet: press + on it under Suites, or Add test in its panel.</p>;
+    // Its last run broke off before its tests: why, above them
+    const last = suiteRunFor(file);
+    if (last?.status === "error" && !liveForSuite(file)) content = <><RunError run={last} now={now} />{content}</>;
   } else {
     // (A run: the test picked in its panel's list, `runTest`, else its first)
     const picked = mode === "run" ? openRun?.tests?.[selection.runTest ?? 0] : null;
@@ -275,7 +326,7 @@ export function Thread() {
     // A test: its turns as the file has them, each with the run's record of it (if it ran as it is
     // now). A run: what it recorded, as it recorded it.
     const items = mode === "run"
-      ? recorded.map((rec) => ({ rec, user: rec.record.user, badges: (rec.record.results ?? []).map((r) => ({ ...r, name: r.name ?? describeCheck(r.check ?? {}) })) }))
+      ? recorded.map((rec) => ({ rec, user: rec.record.user, badges: (rec.record.results ?? []).map((r) => ({ ...countedResult(r), name: r.name ?? describeCheck(r.check ?? {}) })) }))
       : pairTurns(recorded, defined).map((rec, i) => {
         const checks = defined[i]?.expect ?? [];
         const paired = rec ? pairResults(rec.record.results, checks) : [];
@@ -284,16 +335,20 @@ export function Thread() {
           user: typeof defined[i]?.user === "string" ? defined[i].user : JSON.stringify(defined[i]?.user ?? ""),
           resolvedUser: rec?.record.user,
           badges: checks.map((c, j) => (!isOn(c) ? { status: "off", name: describeCheck(c), reason: "turned off" }
-            : paired[j] ? { ...paired[j], name: paired[j].name ?? describeCheck(c) } : { status: "", name: describeCheck(c) })),
+            : paired[j] ? { ...countedResult(paired[j]), name: paired[j].name ?? describeCheck(c) } : { status: "", name: describeCheck(c) })),
         };
       });
-    if (!test && !recorded.length) content = <p className="empty">This test isn't in the open folder.</p>;
-    else if (!items.length) content = <p className="empty">This test has no turns yet. Type a message below to add one.</p>;
+    // A run that broke off before the test (refused before sending anything, a provider's fixture or the
+    // suite's setup that failed): why, where its turns would be; a test's turns under it as the file has
+    // them, none run by it
+    const broke = run?.status === "error" && (mode === "run" || testResult(run, file, test)?.unreached) ? <RunError run={run} now={now} /> : null;
+    if (!test && !recorded.length) content = broke ?? <p className="empty">This test isn't in your suites.</p>;
+    else if (!items.length) content = broke && mode === "run" ? broke : <>{broke}<p className="empty">This test has no turns yet. Type a message below to add one.</p></>;
     else {
       content = items.map(({ rec, user, resolvedUser, badges }, i) => {
         const record = rec ? { ...rec.record, globalIndex: rec.globalIndex } : null;
         return (
-          <Turn key={i} index={i} label={`turn ${i + 1}${instance?.row ? ` · row ${instance.row}` : ""}${instance && instances.length > 1 && !instance.row ? ` · run ${instance.repeat} of ${Math.max(instances.length, repeatOf(suiteOf(file), test))}` : ""}`}
+          <Turn key={i} index={i} label={`turn ${i + 1}${instance?.row ? ` · ${rowLabel(instance.row, instance.row_name)}` : ""}${instance && instances.length > 1 && !instance.row ? ` · run ${instance.repeat} of ${Math.max(instances.length, repeatOf(suiteOf(file), test))}` : ""}`}
                 user={resolvedUser ?? user}
                 record={record} badges={badges} checked run={run} selection={selection}
                 selectedTurn={["turn", "check", "step"].includes(selection.kind) && selection.turn === i}
@@ -306,6 +361,7 @@ export function Thread() {
                 running={mode === "test" && lives.some((l) => l.scope.file === file && l.scope.id === (test?.id ?? test?.name) && (l.scope.onlyTurn !== undefined ? l.scope.onlyTurn === i : (l.scope.untilTurn ?? Infinity) >= i))} />
         );
       });
+      if (broke) content = <>{broke}{content}</>;
     }
   }
 
@@ -332,7 +388,7 @@ export function Thread() {
   );
 }
 
-// A run's test that the open folder doesn't have (a CI run): the one picked in the run's list (or its
+// A run's test that the app doesn't have (a CI run): the one picked in the run's list (or its
 // first), whose turns the thread shows as the run recorded them
 export function runTestDefinition(run, selection) {
   const t = run?.tests?.[selection?.runTest ?? 0] ?? run?.tests?.[0];

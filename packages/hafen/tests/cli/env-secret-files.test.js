@@ -123,14 +123,15 @@ describe("--env and --secret, read", () => {
   it("gives the engine the environment's name, and its file's values; the secrets file's values; nothing more", async () => {
     const dir = await project();
     const at = (p) => join(dir, "elsewhere", p);
-    assert.deepEqual(await environmentOptions({}), { env: undefined, secrets: {}, secretFile: undefined });
-    assert.deepEqual(await environmentOptions({ env: "staging" }), { env: "staging", secrets: {}, secretFile: undefined });
-    assert.deepEqual(await environmentOptions({ env: at("staging.env"), secret: [at("staging.secrets.env")] }), {
+    assert.deepEqual(await environmentOptions({}), { env: undefined, secrets: {}, secretValues: [], secretFiles: [] });
+    assert.deepEqual(await environmentOptions({ env: ["staging"] }), { env: "staging", secrets: {}, secretValues: [], secretFiles: [] });
+    assert.deepEqual(await environmentOptions({ env: [at("staging.env")], secret: [at("staging.secrets.env")] }), {
       env: "staging",
       environment: { name: "staging", values: { base_url: mock.url, greeting: "hello" } },
       secrets: { MOCK_TOKEN: TOKEN },
-      // (which file, for where a missing secret was looked for)
-      secretFile: at("staging.secrets.env"),
+      secretValues: [TOKEN],
+      // (which files, for where a missing secret was looked for)
+      secretFiles: [at("staging.secrets.env")],
     });
     assert.deepEqual((await environmentOptions({ secrets: [at("staging.secrets.env")] })).secrets, { MOCK_TOKEN: TOKEN });
   });
@@ -141,10 +142,10 @@ describe("--env and --secret, read", () => {
       "elsewhere/bad.secrets.env": `OK=1\n"sk-leaky-9999"\nTOKEN="abc"sk-tail-5555\n9sk-start-3333=x\nOK=2\n`,
     });
     const at = (p) => join(dir, "elsewhere", p);
-    await assert.rejects(environmentOptions({ env: at("nope.env") }), (e) => e.setup && e.message === `the environment file ${at("nope.env")} doesn't exist`);
+    await assert.rejects(environmentOptions({ env: [at("nope.env")] }), (e) => e.setup && e.message === `the environment file ${at("nope.env")} doesn't exist`);
     await assert.rejects(environmentOptions({ secret: [at("nope.env")] }), (e) => e.setup && e.message === `the secrets file ${at("nope.env")} doesn't exist`);
     await assert.rejects(environmentOptions({ secret: [join(dir, "elsewhere")] }), (e) => e.setup && e.message === `the secrets file ${join(dir, "elsewhere")} can't be read: it's a folder`);
-    await assert.rejects(environmentOptions({ env: at("bad.env") }), (e) => {
+    await assert.rejects(environmentOptions({ env: [at("bad.env")] }), (e) => {
       assert.deepEqual(e.problems.map((p) => `${p.file}:${p.line}:${p.column} ${p.message}`), [
         `${at("bad.env")}:2:1 line 2 isn't NAME=value`,
         `${at("bad.env")}:3:1 "1x" isn't a name (letters, digits, _ . -, not starting with a digit)`,
@@ -163,9 +164,12 @@ describe("--env and --secret, read", () => {
     });
   });
 
-  it("takes one secrets file: --secret twice, or with --secrets, is a setup error", async () => {
-    await assert.rejects(environmentOptions({ secret: ["a.env"], secrets: ["b.env"] }), (e) => e.setup && e.message === "--secret takes one file, not 2 (a.env, b.env)");
-    await assert.rejects(environmentOptions({ secret: ["a.env", "b.env"] }), /--secret takes one file, not 2/);
+  it("takes several secrets files (--secret twice, or with --secrets): merged in order, a later one's winning (tests/cli/env-repeat.test.js)", async () => {
+    const dir = await project({ "elsewhere/a.secret.env": "A=a1\nB=b1\n", "elsewhere/b.secret.env": "B=b2\nC=c2\n" });
+    const at = (p) => join(dir, "elsewhere", p);
+    const given = await environmentOptions({ secret: [at("a.secret.env")], secrets: [at("b.secret.env")] });
+    assert.deepEqual(given.secrets, { A: "a1", B: "b2", C: "c2" });
+    assert.deepEqual(given.secretFiles, [at("a.secret.env"), at("b.secret.env")]);
   });
 
   it("a secret is the file's, else the environment variable of its name; one the file leaves empty (NAME=) isn't set by it", () => {
@@ -311,9 +315,10 @@ tests:
     const file = join(dir, "elsewhere/bad.secrets.env");
     assert.equal(bad.stderr, `${file}:2:1  line 2 isn't NAME=value\n${file}:3:7  after a quoted value, only a # comment\n\n2 problems: nothing was sent.\n`);
     assert.ok(!bad.all.includes("sk-") && !bad.all.includes(TOKEN));
+    // (with another before it: its problems all the same)
     const twice = await cli(dir, ["run", "tests", ...ENV, ...SECRET, "--secrets", "../elsewhere/bad.secrets.env"]);
     assert.equal(twice.code, 2, said(twice));
-    assert.match(twice.stderr, /^--secret takes one file, not 2/);
+    assert.equal(twice.stderr, bad.stderr);
     assert.equal(mock.log.length, 0);
   });
 });

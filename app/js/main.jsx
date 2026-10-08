@@ -6,7 +6,9 @@
 //   lib/      helpers (storage, events, DOM, formatting, the address, the desktop bridge, IndexedDB)
 //   views/    the sidebar's sections, the thread, the message box, the panel, settings
 //   state.js  what's open and selected; the engine's commands; runs
-//   host.js   the engine: a Web Worker (browser) or the desktop app's utility process
+//   transfer.js  Import and Export: suites copied in from files or a folder, and out to a folder
+//   host.js   the engine: a Web Worker (browser) or the desktop app's utility process, on the app's
+//             workspace (its suites, providers, plugins and data files)
 //   hafen/engine/  the engine itself (no DOM; the hafen package, packages/hafen): the code the CLI runs
 
 import { flushSync } from "react-dom";
@@ -34,7 +36,9 @@ import { Panel } from "./views/panel.jsx";
 import { ChecksSection, ConversationsSection, RunsSection, SuitesSection } from "./views/sections.jsx";
 import { panes, usage } from "./views/settings.jsx";
 import { Thread } from "./views/thread.jsx";
-import { repeatOf, testResult, testStatusText } from "./views/derive.js";
+import { ExportDialog, Question } from "./views/transfer.jsx";
+import { offerLegacyFolder } from "./transfer.js";
+import { repeatOf, runName, runOutcome, testResult, testStatusText } from "./views/derive.js";
 import { ago, sec } from "./lib/format.js";
 
 // The scope chosen (stage, prod…: its values fill {{env.NAME}} and its secrets {{secret.NAME}}; a
@@ -65,13 +69,23 @@ function TopBar() {
   let badges = null;  // a test's or a suite's group, and ×3 for a test that repeats
   let title = "New conversation";
   let status = "";
-  let error = false;
+  let tip = "";  // the status's tooltip, when it says more than the line (an error's reason, in full)
+  let shown = "";  // how what's shown last went, as its data-status: passed, failed, error, stopped…
   let play = null;  // the test's or suite's run (or stop) button: { running, run, what }
+  // How a test's or a run's last try went, as one line: couldn't run (refused before sending anything)
+  // says its first problem; an error, its reason in the tooltip; anything else, its counts, and how
+  // long it took and how long ago it started
+  const line = (said, r, counts = "") => {
+    const when = `${r?.ms ? ` · ${sec(r.ms)}` : ""}${r?.started ? ` · ${ago(r.started, now)}` : ""}`;
+    if (said.text === "couldn't run") return { text: `couldn't run: ${said.why}`, tip: `couldn't run: ${(r?.error?.all ?? [{ message: said.why }]).map((p) => p.message).join(" · ")}${when}` };
+    const text = `${said.text}${counts}${when}`;
+    return { text, tip: said.why ? `${said.text}: ${said.why}${when}` : text };
+  };
   if (mode === "explore") {
     const turns = conversation?.run?.turns?.length ?? 0;
     if (turns) title = conversation.title || String(conversation.run.turns.find(Boolean)?.user ?? "Conversation").replace(/\s+/g, " ").trim().slice(0, 60);
     status = conversation?.sending ? "sending…" : conversation?.error ?? (turns ? `${turns} turn${turns === 1 ? "" : "s"}` : "");
-    error = !!conversation?.error;
+    shown = conversation?.sending ? "running" : conversation?.error ? "error" : "";
   } else if (mode === "test") {
     const test = testOf(selection.file, selection.test);
     title = test?.name ?? "Test";
@@ -80,8 +94,9 @@ function TopBar() {
     const going = liveForTest(selection.file, selection.test);
     const isLive = !!going;
     play = { running: isLive, stop: () => stopRun(going?.token), run: () => runTests(selection.file, selection.test).catch(() => {}), what: "test" };
-    status = isLive ? "running…" : result ? `${testStatusText(result).text}${r?.ms ? ` · ${sec(r.ms)}` : ""}${r?.started ? ` · ${ago(r.started, now)}` : ""}` : "not run yet";
-    error = result?.status === "failed" || result?.status === "error";
+    const said = isLive ? { text: "running…", status: "running" } : result ? testStatusText(result) : null;
+    ({ text: status, tip } = isLive ? { text: said.text } : said ? line(said, r) : { text: "not run yet" });
+    shown = said?.status ?? "";
     badges = <><GroupBadge group={test?.group} id="evalGroup" /><RepeatBadge times={repeatOf(suiteOf(selection.file), test)} id="evalRepeat" /></>;
   } else if (mode === "suite") {
     const suite = suiteOf(selection.file);
@@ -92,15 +107,17 @@ function TopBar() {
     // (A test of it running alone: the whole suite waits for it)
     play = { running: isLive, stop: () => stopRun(going?.token), run: () => runTests(selection.file).catch(() => {}), what: "suite", busy: !isLive && !!liveIn(selection.file) };
     const s = r?.summary?.tests;
-    status = isLive ? "running…" : r ? `${r.status === "done" ? r.verdict : r.status} ${s ? `${s.passed}/${s.total}` : ""}${r.ms ? ` · ${sec(r.ms)}` : ""}${r.started ? ` · ${ago(r.started, now)}` : ""}` : "not run yet";
-    error = r?.verdict === "failed" || r?.status === "error";
+    const said = isLive ? { text: "running…", status: "running" } : runOutcome(r);
+    ({ text: status, tip } = isLive ? { text: said.text } : said ? line(said, r, s?.total ? ` ${s.passed}/${s.total}` : "") : { text: "not run yet" });
+    shown = said?.status ?? "";
     badges = <GroupBadge group={suite?.data?.group} of="suite" id="evalGroup" />;
   } else if (mode === "run") {
-    const t = run?.tests?.[0];
-    title = `${run?.tests?.length === 1 ? t?.name : "Run"} · run`;
-    status = `${run?.status === "done" ? run?.verdict : run?.status} · ${sec(run?.ms)}${run?.started ? ` · ${ago(run.started, now)}` : ""}`;
-    error = run?.verdict === "failed" || run?.status === "error";
+    title = `${runName(run, state.suites)} · run`;
+    const said = runOutcome(run);
+    ({ text: status, tip } = said ? line(said, run) : { text: "" });
+    shown = said?.status ?? "";
   }
+  const error = shown === "failed" || shown === "error";
   return (
     <header className="topbar" id="topbar">
       <MenuButton className="btn btn-ghost btn-icon" />
@@ -119,7 +136,7 @@ function TopBar() {
             <Icon name={play.running ? "stop" : "run"} size={16} />
           </button>
         )}
-        <span id="status" role="status" className={error ? "error" : undefined} title={status}>{status}</span>
+        <span id="status" role="status" className={error ? "error" : undefined} data-status={shown || undefined} title={tip || status}>{status}</span>
       </div>
       {/* (small screens only, as the menu's button: the panel, over the thread) */}
       <button id="panelToggle" className="btn btn-ghost btn-icon topbar-panel" type="button" aria-label={state.panelOpen ? "Hide the details" : "Show the details"}
@@ -177,7 +194,7 @@ function withoutFixtures(spans) {
 
 function ConsolePane() {
   const { showFixtures, providers, suites } = useStore(app);
-  // (the toggle once the folder's providers have fixtures)
+  // (the toggle once the providers have fixtures)
   const any = [...providers.map((p) => p.config), ...suites.flatMap((s) => Object.values(s.providers ?? {}))].some((c) => c?.fixtures);
   return <Console hide={showFixtures ? [] : ["fixture"]} actions={any || !showFixtures ? <FixturesToggle id="consoleFixtures" /> : null} />;
 }
@@ -265,6 +282,8 @@ function EvalApp() {
       <Tooltip />
       <ContextMenu />
       <SettingsModal />
+      <ExportDialog />
+      <Question />
       <Toasts area={toastArea} />
     </>
   );
@@ -318,12 +337,16 @@ async function followRoute({ tab, _id }) {
     const file = _id.slice(0, at);
     const index = (app.get().suites.find((s) => s.file === file)?.data?.tests ?? []).findIndex((t) => t.id === undefined && t.name === _id.slice(at + 1));
     if (at > 0 && index > -1) return select({ kind: "test", file, test: index }, { route: false });
-    say(`there's no test ${_id} in the open folder`, "err");
+    say(`there's no test ${_id} in your suites`, "err");
   }
 }
 
 start()
   .then(() => followRoute(readRoute()))
   .catch((err) => say(`couldn't start: ${err.message}`, "err"))
-  .finally(pageReady);
+  .finally(() => {
+    pageReady();
+    // (the folder the desktop app opened before it kept its suites itself: offered once, to import)
+    offerLegacyFolder();
+  });
 onRouteChange(followRoute);

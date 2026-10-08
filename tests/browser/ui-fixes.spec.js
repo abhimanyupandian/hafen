@@ -3,26 +3,27 @@
 // that doesn't parse in Settings → Providers); the thread is the priority (the console starts
 // closed, the timeline's default height); toasts never cover the panel's controls; the theme follows
 // the system until one's chosen; on a phone the panel can be put away without closing what's open,
-// and the timeline's ticks don't overlap; the first step is a button; and the smaller ones (a failed
+// and the timeline's ticks don't overlap; the first steps are buttons; and the smaller ones (a failed
 // check's icon, a cut-short reply, a suite's problems before it's run and logged once, the new suite
 // form, searching by status, a plugin's editor going back where its link was, a conversation's after
 // fixtures in the console).
 
 import { parse } from "yaml";
-import { expect, fileText, test } from "./fixtures.js";
+import { expect, fileText, openYaml, reopen, test } from "./fixtures.js";
 
-// A file put in the folder the app opens (the Origin Private File System)
+// A file put in the app's workspace (the Origin Private File System's workspace/)
 const writeFile = (page, path, text) => page.evaluate(async ([path, text]) => {
   const parts = path.split("/");
-  let dir = await navigator.storage.getDirectory();
+  let dir = await navigator.storage.getDirectory().then((root) => root.getDirectoryHandle("workspace", { create: true }));
   for (const p of parts.slice(0, -1)) dir = await dir.getDirectoryHandle(p, { create: true });
   const w = await (await dir.getFileHandle(parts.at(-1), { create: true })).createWritable();
   await w.write(text);
   await w.close();
 }, [path, text]);
 
-const openFolder = async (page) => {
-  await page.click("#threadOpenFolder");
+// The app loaded again, with the files written so far
+const openApp = async (page) => {
+  await reopen(page);
   await expect(page.locator('#suiteList .list-row[data-file="smoke.hafen.yml"]')).toHaveCount(1);
 };
 const openTest = (page, name) => page.locator("#suiteList .list-open", { hasText: name }).click();
@@ -39,11 +40,11 @@ test.afterEach(async ({ app: { errors } }) => {
 
 test("a provider whose fixture isn't there: said in the panel before sending, Send off; a message refused when sent comes back, with why under the box", async ({ app: { page, servers } }) => {
   await writeFile(page, "providers/fxmissing.yml", provider(`${servers.mock.url}/json`, "fixtures: { before: [nope] }\n"));
-  await openFolder(page);
+  await openApp(page);
   // Known before sending: said in the panel, by the provider (not at the box), Send off (its title says why)
   await page.selectOption("#convProvider", "providers/fxmissing.yml");
   await page.fill("#input", "hello there");
-  await expect(page.locator("#panel #convFixturesProblem")).toContainText('fxmissing: the fixture "nope" (fixtures.before) isn\'t in the folder\'s plugins/');
+  await expect(page.locator("#panel #convFixturesProblem")).toContainText('fxmissing: the fixture "nope" (fixtures.before) isn\'t one of your plugins (Settings → Plugins)');
   await expect(page.locator("#sendProblem")).toHaveCount(0);
   await expect(page.locator("#send")).toBeDisabled();
   await expect(page.locator("#send")).toHaveAttribute("title", /Can't send: the fixture "nope"/);
@@ -63,11 +64,12 @@ test("a provider whose fixture isn't there: said in the panel before sending, Se
 /* ---------- 2. YAML that doesn't parse isn't lost ---------- */
 
 test("Settings → Providers: YAML that isn't valid stays, with its line; Try it keeps Settings open; closing asks first, then discards", async ({ app: { page } }) => {
-  await openFolder(page);
+  await openApp(page);
   const before = await fileText(page, "providers/mock-json.yml");
   await page.click("#openSettings");
   await page.click("#settings-tab-providers");
   await page.click("#provider-mock-json-open");
+  await openYaml(page);
   await expect(page.locator("#providerYaml")).toHaveValue(/kind: http/);
   const typed = "kind: http\nbody: { message: \"{{user}}\"\nresponse: x\n";
   await page.fill("#providerYaml", typed);
@@ -91,6 +93,7 @@ test("Settings → Providers: YAML that isn't valid stays, with its line; Try it
   await page.click("#openSettings");
   await page.click("#settings-tab-providers");
   await page.click("#provider-mock-json-open");
+  await expect(page.locator("#providerYaml")).toBeVisible();
   await expect(page.locator("#providerYaml")).toHaveValue(/kind: http/);
   await page.fill("#providerYaml", `${before}timeout_ms: 9000\n`);
   await page.keyboard.press("Escape");
@@ -99,11 +102,11 @@ test("Settings → Providers: YAML that isn't valid stays, with its line; Try it
 });
 
 test("Settings: its head stays at the top as the content scrolls, so the close button never floats over a field", async ({ app: { page } }) => {
-  await openFolder(page);
+  await openApp(page);
   await page.click("#openSettings");
   await page.click("#settings-tab-providers");
   await page.click("#provider-mock-json-open");
-  await expect(page.locator("#providerYaml")).toBeVisible();
+  await openYaml(page);
   await page.locator("#settingsContent").evaluate((el) => { el.scrollTop = 400; });
   const content = await box(page, "#settingsContent");
   const head = await box(page, ".settings-content-head");
@@ -121,7 +124,7 @@ for (const [width, height, least] of [[1440, 900, 0.5], [1024, 768, 0.45]]) {
     test.use({ viewport: { width, height } });
     test("the thread is the priority: the console starts closed, the timeline a fifth of the window", async ({ app: { page } }) => {
       await expect(page.locator("#consoleToggle")).toHaveAttribute("aria-expanded", "false");
-      await openFolder(page);
+      await openApp(page);
       await openTest(page, "refund for a broken item");
       await page.click("#testRun");
       await expect(page.locator("#status")).toContainText("failed 0/1");
@@ -151,7 +154,7 @@ test("an open console with nothing in it is only as tall as its note", async ({ 
 /* ---------- 4. toasts ---------- */
 
 test("a run's toast doesn't cover the panel's head or the top bar: a click on the panel's × lands on it", async ({ app: { page } }) => {
-  await openFolder(page);
+  await openApp(page);
   await openTest(page, "refund for a broken item");
   await page.click("#testRun");
   const toast = page.locator(".toast", { hasText: "Failed: refund for a broken item" });
@@ -178,8 +181,8 @@ test.describe("with the system dark", () => {
     await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
     await page.click("#openSettings");
     await page.click("#settings-tab-appearance");
-    await expect(page.locator("#themeSelect")).toHaveValue("system");
-    await page.selectOption("#themeSelect", "light");
+    await expect(page.locator("#themeSystem")).toHaveAttribute("aria-checked", "true");
+    await page.click("#themeLight");
     await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
     await page.reload();
     await page.locator("html:not(.loading)").waitFor();
@@ -193,7 +196,6 @@ test.describe("on a phone", () => {
   test.use({ viewport: { width: 390, height: 844 } });
   test("the panel can be put away, the test kept open; the timeline's ticks don't overlap", async ({ app: { page } }) => {
     await page.click("#menu");
-    await page.click("#suitesOpenFolder");
     await openTest(page, "refund for a broken item");
     await expect(page.locator("#panel")).toHaveClass(/shown/);
     await expect(page.locator("#panelHide")).toBeVisible();
@@ -215,30 +217,35 @@ test.describe("on a phone", () => {
   });
 });
 
-/* ---------- 7. the first step ---------- */
+/* ---------- 7. the first steps ---------- */
 
-test("first run: the thread's note has an Open a folder button, Suites' note a link; the panel offers to open one before a provider", async ({ app: { page } }) => {
-  await expect(page.locator("#threadOpenFolder")).toHaveText("Open a folder");
-  await expect(page.locator("#suitesOpenFolder")).toHaveText("Open a folder");
-  await expect(page.locator("#convProviders")).toHaveText("open a folder");
-  await page.click("#convProviders");
-  await expect(page.locator('#suiteList .list-row[data-file="smoke.hafen.yml"]')).toHaveCount(1);
-  await expect(page.locator("#threadOpenFolder")).toHaveCount(0);
-  await expect(page.locator("#convProviders")).toHaveText("manage");
-});
+test.describe("a first start, nothing in the app yet", () => {
+  test.use({ workspace: {} });
 
-test("Settings → Providers before a folder is open offers to open one, not a form that can't be saved", async ({ app: { page } }) => {
-  await page.click("#openSettings");
-  await page.click("#settings-tab-providers");
-  await expect(page.locator("#newProviderForm")).toHaveCount(0);
-  await page.click("#providersOpenFolder");
-  await expect(page.locator("#provider-mock-json")).toBeVisible();
+  test("the thread's note has the first steps as buttons, adding a provider the primary; Suites' note offers Import; nothing asks for a folder", async ({ app: { page } }) => {
+    await expect(page.locator("#threadAddProvider")).toHaveText("Add a provider");
+    await expect(page.locator("#threadAddProvider")).toHaveClass(/btn-primary/);
+    await expect(page.locator("#threadNewConversation")).toHaveText("New conversation");
+    await expect(page.locator("#threadNewSuite")).toHaveText("New suite");
+    await expect(page.locator("#suitesImport")).toHaveText("import some");
+    await expect(page.locator("#convProviders")).toHaveText("add one");
+    await expect(page.locator("body")).not.toContainText(/open a folder|open files/i);
+    // The panel's add one: Settings → Providers' new provider, a form that's saved at once
+    await page.click("#convProviders");
+    await expect(page.locator("#newProviderForm")).toBeVisible();
+    await page.click("#newProviderCreate");
+    await expect(page.locator("#providerYaml")).toHaveValue(/kind: ollama/);
+    await page.click("#settingsClose");
+    // A provider there: adding one isn't the primary any more
+    await expect(page.locator("#threadAddProvider")).not.toHaveClass(/btn-primary/);
+    await expect(page.locator("#convProviders")).toHaveText("manage");
+  });
 });
 
 /* ---------- 8. the smaller ones ---------- */
 
 test("a failed check's card has a cross, not a tick; a test's tags field shows no example values", async ({ app: { page } }) => {
-  await openFolder(page);
+  await openApp(page);
   await openTest(page, "refund for a broken item");
   await expect(page.locator("#testTags")).toHaveAttribute("placeholder", "No tags yet");
   await page.click("#testRun");
@@ -254,7 +261,7 @@ test("a failed check's card has a cross, not a tick; a test's tags field shows n
 test("a stream cut short shows what came, marked so; a turn that failed before any text has no time to first token", async ({ app: { page, servers } }) => {
   await writeFile(page, "providers/cut.yml", `kind: http\nurl: "${servers.mock.url}/cut"\nbody: { message: "{{user}}" }\nstream: sse\nevents:\n  - when: { $.type: text_delta }\n    text: $.delta\n`);
   await writeFile(page, "providers/err500.yml", provider(`${servers.mock.url}/error/500`));
-  await openFolder(page);
+  await openApp(page);
   await page.selectOption("#convProvider", "providers/cut.yml");
   await page.fill("#input", "tell me a story");
   await page.click("#send");
@@ -269,7 +276,7 @@ test("a stream cut short shows what came, marked so; a turn that failed before a
 });
 
 test("a provider's kind is its file's (kind: http), with how it reads its reply", async ({ app: { page } }) => {
-  await openFolder(page);
+  await openApp(page);
   await page.click("#openSettings");
   await page.click("#settings-tab-providers");
   await expect(page.locator("#provider-mock-json")).toContainText("http (json)");
@@ -280,7 +287,7 @@ test("a provider's kind is its file's (kind: http), with how it reads its reply"
 
 test("a check type that isn't one is a problem before the suite's run, as validate says; logged once, not again when the folder's read again", async ({ app: { page } }) => {
   await writeFile(page, "typos.hafen.yml", "version: 1\nprovider: providers/mock-json.yml\nenvironments:\n  local: { base_url: \"http://127.0.0.1:1\" }\ntests:\n  - name: typo\n    turns:\n      - user: hi\n        expect:\n          - { type: contians, value: refund }\n");
-  await openFolder(page);
+  await openApp(page);
   const row = page.locator('#suiteList .list-row[data-file="typos.hafen.yml"]');
   await expect(row.locator(".list-size")).toHaveText("1 problem");
   await row.locator(".list-open").click();
@@ -291,6 +298,7 @@ test("a check type that isn't one is a problem before the suite's run, as valida
   await page.click("#openSettings");
   await page.click("#settings-tab-providers");
   await page.click("#provider-mock-json-open");
+  await openYaml(page);
   await page.fill("#providerYaml", `${await fileText(page, "providers/mock-json.yml")}timeout_ms: 9000\n`);
   await page.locator("#providerYaml").blur();
   await expect.poll(async () => parse(await fileText(page, "providers/mock-json.yml")).timeout_ms).toBe(9000);
@@ -306,7 +314,7 @@ test("a check type that isn't one is a problem before the suite's run, as valida
 });
 
 test("Suites' + asks for a name and uses the provider in use; searching by status finds failed tests", async ({ app: { page } }) => {
-  await openFolder(page);
+  await openApp(page);
   await page.selectOption("#convProvider", "providers/mock-sse.yml");
   await page.click("#newSuite");
   await expect(page.locator("#newSuiteName")).toBeFocused();
@@ -339,7 +347,7 @@ test("Suites' + asks for a name and uses the provider in use; searching by statu
 });
 
 test("a suite's name keeps its room: its count is cut first", async ({ app: { page } }) => {
-  await openFolder(page);
+  await openApp(page);
   await page.locator("#navResizer").focus();
   await page.keyboard.press("Home");  // (the narrowest sidebar)
   const row = page.locator('#suiteList .list-row[data-file="smoke.hafen.yml"]');
@@ -351,7 +359,7 @@ test("a suite's name keeps its room: its count is cut first", async ({ app: { pa
 });
 
 test("the timeline's zoom buttons are never over a bar", async ({ app: { page } }) => {
-  await openFolder(page);
+  await openApp(page);
   await openTest(page, "refund for a broken item");
   await page.click("#testRun");
   await expect(page.locator("#status")).toContainText("failed 0/1");
@@ -369,7 +377,7 @@ test("the timeline's zoom buttons are never over a bar", async ({ app: { page } 
 test("a fixture's code opened from a link: closing the editor goes back where the link was, out of Settings", async ({ app: { page, servers } }) => {
   await writeFile(page, "plugins/note.js", NOTE_FIXTURE);
   await writeFile(page, "providers/noted.yml", provider(`${servers.mock.url}/json`, "fixtures: { before: [note] }\n"));
-  await openFolder(page);
+  await openApp(page);
   await page.selectOption("#convProvider", "providers/noted.yml");
   await page.click("#convFixtures-before-0");
   await expect(page.locator("#editor")).toBeVisible();
@@ -382,13 +390,14 @@ test("a fixture's code opened from a link: closing the editor goes back where th
   await page.keyboard.press("Escape");
   await expect(page.locator("#settingsModal")).toBeVisible();
   await expect(page.locator("#settingsTitle")).toHaveText("Providers");
-  await expect(page.locator("#providerYaml")).toBeVisible();
+  // (on the provider's fixtures, their section open)
+  await expect(page.locator("#providerFixtures-before-0")).toBeVisible();
 });
 
 test("a conversation's after and afterAll fixtures have their lines in the console when it's let go", async ({ app: { page, servers } }) => {
   await writeFile(page, "plugins/note.js", NOTE_FIXTURE);
   await writeFile(page, "providers/noted.yml", provider(`${servers.mock.url}/json`, "fixtures: { before: [note], after: [note], afterAll: [note] }\n"));
-  await openFolder(page);
+  await openApp(page);
   await page.selectOption("#convProvider", "providers/noted.yml");
   await page.fill("#input", "hello");
   await page.click("#send");

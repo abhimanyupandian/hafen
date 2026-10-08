@@ -3,7 +3,7 @@
 // views show the file as it now is. No errors on the page.
 
 import { parse } from "yaml";
-import { addScope, expect, fileText, test } from "./fixtures.js";
+import { addScope, expect, fileText, openYaml, showEntry, test } from "./fixtures.js";
 
 const SUITE = "smoke.hafen.yml";
 const suiteData = async (page) => parse(await fileText(page, SUITE));
@@ -33,7 +33,6 @@ async function addTestToSmoke(page) {
 }
 
 test.beforeEach(async ({ app: { page } }) => {
-  await page.click("#openFolder");
   await expect(page.locator(`#suiteList .list-row[data-file="${SUITE}"]`)).toHaveCount(1);
 });
 test.afterEach(async ({ app: { errors } }) => {
@@ -78,8 +77,10 @@ test("a test's fields: each change is in the file, the sidebar, the thread and t
   // The selects
   await page.selectOption("#testHistory", "pinned");
   await page.selectOption("#testOnFail", "stop");
-  await page.selectOption("#testUnsure", "fail");
-  await fileSays(page, (d) => d.tests[0].history === "pinned" && d.tests[0].on_fail === "stop" && d.tests[0].unsure === "fail");
+  // (unsure: fail is the default, shown when the file says none; warn is a change)
+  await expect(page.locator("#testUnsure")).toHaveValue("fail");
+  await page.selectOption("#testUnsure", "warn");
+  await fileSays(page, (d) => d.tests[0].history === "pinned" && d.tests[0].on_fail === "stop" && d.tests[0].unsure === "warn");
   // Data file
   await page.fill("#testData", "data/rows.csv");
   await page.press("#testData", "Enter");
@@ -304,6 +305,7 @@ test("providers: changed as YAML, refused when it isn't, renamed, deleted", asyn
   await page.click("#openSettings");
   await page.click("#settings-tab-providers");
   await page.click("#provider-mock-json-open");
+  await openYaml(page);
   await expect(page.locator("#providerYaml")).toHaveValue(/kind: http/);
   const text = await page.locator("#providerYaml").inputValue();
   await page.fill("#providerYaml", text.replace("kind: http", "kind: http\ntimeout_ms: 9000"));
@@ -324,29 +326,30 @@ test("providers: changed as YAML, refused when it isn't, renamed, deleted", asyn
   await expect.poll(() => fileText(page, "providers/shop.yml").then(() => "there", () => "gone")).toBe("gone");
 });
 
-test("secrets: one environment's and every environment's, changed and forgotten", async ({ app: { page } }) => {
+test("secrets: one scope's and Globals', changed and forgotten", async ({ app: { page } }) => {
   const stored = () => page.evaluate(() => JSON.parse(localStorage.getItem("eval.secrets") ?? "{}"));
   await addScope(page, "local");
   await page.click("#openSettings");
   await page.click("#settings-tab-secrets");
   // (it opens on the scope chosen: local, made in Environments)
-  await expect(page.locator("#secretsEnv")).toHaveValue("local");
-  await page.selectOption("#secretsEnv", "");
+  await expect(page.locator("#secretsScope-local")).toHaveClass(/active/);
+  await showEntry(page, "", "secrets");
   await page.fill("#secretName", "SHOP_TOKEN");
   await page.fill("#secretValue", "every");
-  await page.click("#secretAdd button[type=submit]");
-  await expect(page.locator("#secret-SHOP_TOKEN")).toContainText("set");
-  await page.selectOption("#secretsEnv", "local");
-  await expect(page.locator("#secret-SHOP_TOKEN")).toContainText("set for every scope");
-  await page.locator("#secret-SHOP_TOKEN input").fill("local only");
-  await page.locator("#secret-SHOP_TOKEN button", { hasText: "save" }).click();
-  await expect(page.locator("#secret-SHOP_TOKEN .hint")).toHaveText(/^set( ·|$)/);
+  await page.press("#secretValue", "Enter");
+  await expect(page.locator("#secret-SHOP_TOKEN .vars-source")).toHaveText("Globals");
+  await showEntry(page, "local", "secrets");
+  await expect(page.locator("#secret-SHOP_TOKEN .vars-source")).toHaveText("from Globals");
+  await page.click("#secret-SHOP_TOKEN-override");
+  await page.fill("#secretValue", "local only");
+  await page.press("#secretValue", "Enter");
+  await expect(page.locator("#secret-SHOP_TOKEN .vars-source")).toHaveText("overrides Globals");
   expect(await stored()).toEqual({ "": { SHOP_TOKEN: "every" }, local: { SHOP_TOKEN: "local only" } });
   // (forgetting asks first)
   await page.click("#secret-SHOP_TOKEN-forget");
   await expect(page.locator("#secret-SHOP_TOKEN-forget")).toHaveText("forget it?");
   await page.click("#secret-SHOP_TOKEN-forget");
-  await expect(page.locator("#secret-SHOP_TOKEN")).toContainText("set for every scope");
+  await expect(page.locator("#secret-SHOP_TOKEN .vars-source")).toHaveText("from Globals");
   expect(await stored()).toEqual({ "": { SHOP_TOKEN: "every" } });
 });
 
@@ -478,7 +481,7 @@ test("a file changed underneath: an edit meant for one test isn't made to anothe
   const text = await fileText(page, SUITE);
   const data = parse(text);
   await page.evaluate(async (next) => {
-    const f = await (await navigator.storage.getDirectory()).getFileHandle("smoke.hafen.yml");
+    const f = await (await navigator.storage.getDirectory().then((root) => root.getDirectoryHandle("workspace", { create: true }))).getFileHandle("smoke.hafen.yml");
     const w = await f.createWritable(); await w.write(next); await w.close();
   }, text.replace(/\ntests:\n[\s\S]*$/, "\ntests: []\n"));
   // Deleting "second" (index 1, as the app still shows it) is refused: the file has no test 1

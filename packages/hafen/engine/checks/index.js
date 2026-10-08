@@ -84,6 +84,9 @@ export function runRule(check, ctx) {
   try {
     const rule = RULES[type];
     if (!rule) throw new CheckError(type ? `"${type}" isn't a check type` : "the check has no type and no operator");
+    // (one without what its type needs would pass having looked at nothing: an error, saying what)
+    const lacks = lacking(check);
+    if (lacks) throw new CheckError(lacks);
     const out = rule(check, ctx);
     return { status: out.pass ? "pass" : "fail", reason: out.why, ...(out.actual !== undefined ? { actual: out.actual } : {}), ...(out.expected !== undefined ? { expected: out.expected } : {}) };
   } catch (err) {
@@ -207,6 +210,84 @@ const RULES = {
 
 // Every check type Hafen has (a type that isn't one is a check plugin's, or a mistake)
 export const CHECK_TYPES = [...Object.keys(RULES), ...JUDGED];
+
+// What each type needs to say anything (contracts/checks.md): its fields, each { keys (any one of them
+// will do), what it is, keys written instead of it, list (it's a list of one or more) }. Without one, a
+// check would pass having looked at nothing: { type: tool.not_called } with no tool, "undefined
+// wasn't called"; { type: length } with no limit. (status, json and thinking.present need nothing:
+// a status check with no operator is equals: 200)
+const QUESTION = { keys: ["question"], what: "what to ask of the reply", instead: ["name", "rubric"] };
+const NEEDS = {
+  path: [{ keys: ["path"], what: "a JSONPath, as $.order.id" }, { keys: OPERATORS, label: "an operator", what: "equals, contains, exists, lt, …" }],
+  text: [{ keys: OPERATORS, label: "an operator", what: "equals, contains, matches, …" }],
+  contains: [{ keys: ["value", "contains"], what: "the text to find" }],
+  not_contains: [{ keys: ["value", "not_contains"], what: "the text that mustn't be there" }],
+  matches: [{ keys: ["value", "matches"], what: "a regular expression" }],
+  latency: [{ keys: ["max_ms", "first_token_ms"], what: "a limit in milliseconds", instead: ["max", "lte", "lt"] }],
+  length: [{ keys: ["min_length", "max_length"], what: "a limit in characters", instead: ["min", "max", "gte", "gt", "lte", "lt"] }],
+  tokens: [{ keys: ["max_tokens"], what: "the most tokens", instead: ["max", "lte", "lt"] }],
+  cost: [{ keys: ["max_cost"], what: "the most it can cost, in USD", instead: ["max", "lte", "lt"] }],
+  "tool.called": [{ keys: ["tool"], what: "the tool's name", instead: ["name", "value", "equals"] }],
+  "tool.not_called": [{ keys: ["tool"], what: "the tool's name", instead: ["name", "value", "equals"] }],
+  "tool.order": [{ keys: ["order"], list: true, what: "the tools' names, in order", instead: ["value", "equals"] }],
+  sequence: [{ keys: ["value"], list: true, what: "a list of event kinds, in order", instead: ["order", "equals"] }],
+  "systemone.noul": [QUESTION],
+  "systemone.choice": [{ ...QUESTION, instead: ["name"] }, { keys: ["options"], what: "2 or more to choose from" }, { keys: ["equals"], what: "the option that passes, or a list of them", instead: ["value"] }],
+  "systemone.score": [{ ...QUESTION, instead: ["name"] }],
+  judge: [{ keys: ["rubric"], what: "one criterion or a list", instead: ["question", "name"] }],
+  reference: [{ keys: ["reference"], what: "the expected answer", instead: ["value", "equals"] }],
+};
+// What a key written in place of one a type needs is (for "did you mean")
+const IS = {
+  name: "the check's own label",
+  value: "for contains, not_contains, matches and sequence checks",
+  order: "for tool.order checks",
+  question: "for System One checks",
+  rubric: "for judge checks",
+  min: "for judged checks",
+  max: "for judged checks",
+};
+const OPERATOR_IS = "an operator, for path and text checks";
+
+// A field written: not left out, null or empty ("", []); with list, a list of one or more. (An
+// operator is written unless it's left out: `equals: null` tests for null)
+const given = (v, list) => (list ? Array.isArray(v) && v.length > 0 : v !== undefined && v !== null && v !== "" && !(Array.isArray(v) && !v.length));
+
+// What a check lacks of what its type needs, as a problem says it, or "": "a tool.not_called check
+// needs tool (the tool's name): "name" is the check's own label (did you mean "tool"?)". A loaded
+// suite's (files/suite-file.js), and a run's: a check that lacks one is an error, never a pass.
+// judges: the suite's, for a judge check whose judge is a plugin's (it's asked the check's question
+// when it has no rubric). meant: the keys an unknown key on the check most likely meant (said by that
+// key's own problem: not again here)
+export function lacking(check, judges, meant = []) {
+  if (!check || typeof check !== "object") return "";
+  const type = typeOf(check);
+  let needs = Object.prototype.hasOwnProperty.call(NEEDS, type) ? NEEDS[type] : [];
+  if (type === "judge" && judges?.[check.judge ?? "default"]?.kind === "plugin") needs = [{ keys: ["rubric", "question"], what: "one criterion or a list, or the question its plugin is asked", instead: ["name"] }];
+  const lacks = needs.filter((need) => !need.keys.some((k) => (need.label ? check[k] !== undefined : given(check[k], need.list))) && !need.keys.some((k) => meant.includes(k)));
+  if (!lacks.length) return "";
+  const parts = lacks.map((need) => `${need.label ?? need.keys.join(" or ")} (${need.what})`);
+  const hints = lacks.flatMap((need) => {
+    const key = (need.instead ?? []).find((k) => check[k] !== undefined);
+    if (!key) return [];
+    // (max, lte for a max_… field, min, gte for a min_… one)
+    const head = /^(max|lte?)$/.test(key) ? "max" : /^(min|gte?)$/.test(key) ? "min" : key;
+    return [`"${key}" is ${IS[key] ?? OPERATOR_IS} (did you mean "${need.keys.find((k) => k.startsWith(head)) ?? need.keys[0]}"?)`];
+  });
+  return `a ${type} check needs ${parts.length > 1 ? `${parts.slice(0, -1).join(", ")} and ${parts.at(-1)}` : parts[0]}${hints.length ? `: ${hints.join("; ")}` : ""}`;
+}
+
+// What's wrong with a check's confidence (contracts/checks.md, Confidence), or "": it's a judged
+// check's (a rule check has none, so it would do nothing), and a check that has it passes or fails
+// by it, so its own unsure_below or unsure would do nothing too. (A check plugin's checks take what
+// fields they want.) Said where the file writes the key.
+export function confidenceProblem(check) {
+  if (!check || typeof check !== "object" || check.confidence === undefined || !isBuiltIn(check)) return { message: "" };
+  if (!isJudged(check)) return { key: "confidence", message: `confidence is for judged checks (${JUDGED.join(", ")}): a ${typeOf(check) ?? "check with no type"} check has none` };
+  if (check.unsure_below !== undefined) return { key: "unsure_below", message: "a check with confidence passes or fails by it (it's never unsure), so its unsure_below does nothing: take one of them out" };
+  if (check.unsure !== undefined) return { key: "unsure", message: "a check with confidence passes or fails by it (it's never unsure), so its unsure does nothing: take one of them out" };
+  return { message: "" };
+}
 
 // A cost in a reason: every digit it has (a cost is to the millionth of a dollar), at least to the
 // cent: $0.000017 > $0.000001, never $0.0000

@@ -127,7 +127,8 @@ describe("the output", () => {
     const lines = r.stdout.split("\n");
     const at = lines.findIndex((l) => l.startsWith("✗ Cover › rows"));
     assert.match(lines[at], /0\/5 rows {3}0\/5 checks/);
-    assert.deepEqual(lines.slice(at + 1, at + 5).map((l) => l.trim().replace(/: .*/, "")), ["row 1 · turn 1 · contains nowhere", "row 2 · turn 1 · contains nowhere", "row 3 · turn 1 · contains nowhere", "…2 more (see the report)"]);
+    // (each row named by its first column: q)
+    assert.deepEqual(lines.slice(at + 1, at + 5).map((l) => l.trim().replace(/(nowhere): .*/, "$1")), ["row 1: row 1 · turn 1 · contains nowhere", "row 2: row 2 · turn 1 · contains nowhere", "row 3: row 3 · turn 1 · contains nowhere", "…2 more (see the report)"]);
   });
 
   it("a fixture that failed gets a line of its own (without --verbose), and the summary counts the fixtures that ran", async () => {

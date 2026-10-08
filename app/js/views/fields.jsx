@@ -6,39 +6,54 @@ import { MaxButton } from "../design/editor.jsx";
 import { oldWay } from "hafen/engine/vars.js";
 import { useStore } from "../design/hooks.js";
 import { app } from "../state.js";
-import { hasValue, referencesIn } from "./references.js";
+import { effectiveValues } from "../lib/scopes.js";
+import { hasValue, referencesIn, suiteValues } from "./references.js";
+
+// What a text may take from the scope chosen now: its values (Globals', its own over them, then the
+// open suites' environment of its name, and the names fixtures set with env.set as they run) and its
+// secrets' names (its own, Globals', and what fixtures give). Worked out again only when one of those
+// is another object (each field asks as it's typed).
+let contextFor = {};
+function scopeContext({ env, scopes = [], globals = {}, scopeSecrets = {}, plugins = [], suites = [] }) {
+  const c = contextFor;
+  if (c.env === env && c.scopes === scopes && c.globals === globals && c.scopeSecrets === scopeSecrets && c.plugins === plugins && c.suites === suites) return c;
+  const values = { ...suiteValues(env, suites), ...effectiveValues(env, { globals, scopes }) };
+  const secrets = new Set([...(scopeSecrets[env ?? ""] ?? []), ...(scopeSecrets[""] ?? []), ...plugins.filter((p) => p.kind === "fixture").flatMap((p) => p.provides ?? [])]);
+  const sets = new Set(plugins.filter((p) => p.kind === "fixture").flatMap((p) => p.sets ?? []));
+  contextFor = { env, scopes, globals, scopeSecrets, plugins, suites, values, secrets, sets };
+  return contextFor;
+}
 
 // What's wrong with what a text takes from the scope chosen now (references.js): an old way to write
 // one (${env:NAME}, {{scope.NAME}}: what to write instead, as the engine says it, which fills in
-// neither), an {{env.NAME}} its values haven't got, a {{secret.NAME}} neither it nor every scope has a
-// secret for (or a fixture gives), or a scope needed and none chosen. "" when nothing is. As the engine
-// looks: the scope's values, then a suite's environment of its name (any open suite's: a field doesn't
-// always know which suite it's for).
-export function scopeProblem(text, { env, scopes = [], scopeSecrets = {}, plugins = [], suites = [] } = {}) {
+// neither), an {{env.NAME}} neither it nor Globals has (nor an open suite's environment of its name,
+// nor a fixture sets), a {{secret.NAME}} neither it nor Globals has a secret for (nor a fixture gives).
+// "" when nothing is. As the engine looks (a field doesn't always know which suite it's for: any open
+// suite's counts).
+export function scopeProblem(text, state = {}) {
   const refs = referencesIn(text);
   if (!refs.length) return "";
   const old = refs.find((r) => r.kind === "old");
   if (old) return oldWay(old.way, old.name);
-  const own = scopes.find((s) => s.name === env)?.values ?? {};
-  const fromSuites = env ? suites.map((s) => s.data?.environments?.[env]).filter((e) => e && typeof e === "object") : [];
-  const values = Object.assign({}, ...fromSuites, own);
-  const secrets = new Set([...(scopeSecrets[env ?? ""] ?? []), ...(scopeSecrets[""] ?? []), ...plugins.filter((p) => p.kind === "fixture").flatMap((p) => p.provides ?? [])]);
+  const { env } = state;
+  const { values, secrets, sets } = scopeContext(state);
   const missing = { env: [], secret: [] };
   for (const r of refs) {
-    const ok = r.kind === "env" ? !!env && hasValue(values, r.name) : secrets.has(r.name);
+    const ok = r.kind === "env" ? hasValue(values, r.name) || sets.has(r.name) : secrets.has(r.name);
     if (!ok && !missing[r.kind].includes(r.name)) missing[r.kind].push(r.name);
   }
   const list = (kind, names) => names.map((n) => `{{${kind}.${n}}}`).join(", ");
   const are = (names) => (names.length === 1 ? "isn't" : "aren't");
   const them = (names) => (names.length === 1 ? "it" : "them");
   if (missing.env.length) {
-    if (!env) return `${list("env", missing.env)} ${missing.env.length === 1 ? "needs" : "need"} a scope: choose one in Settings → Environments`;
-    return `${list("env", missing.env)} ${are(missing.env)} in the scope "${env}": add ${them(missing.env)} in Settings → Environments`;
+    return env
+      ? `${list("env", missing.env)} ${are(missing.env)} in the scope "${env}" or in Globals: add ${them(missing.env)} in Settings → Environments`
+      : `${list("env", missing.env)} ${are(missing.env)} in Globals, and no scope is chosen: add ${them(missing.env)} in Settings → Environments`;
   }
   if (missing.secret.length) {
     return env
-      ? `${list("secret", missing.secret)} ${are(missing.secret)} a secret of the scope "${env}" (or of every scope): add ${them(missing.secret)} in Settings → Secrets`
-      : `${list("secret", missing.secret)} ${are(missing.secret)} set for every scope, and no scope is chosen: add ${them(missing.secret)} in Settings → Secrets`;
+      ? `${list("secret", missing.secret)} ${are(missing.secret)} a secret of the scope "${env}" or of Globals: add ${them(missing.secret)} in Settings → Secrets`
+      : `${list("secret", missing.secret)} ${are(missing.secret)} in Globals, and no scope is chosen: add ${them(missing.secret)} in Settings → Secrets`;
   }
   return "";
 }

@@ -7,11 +7,11 @@
 // and what the app kept before it was Hafen, carried over.
 
 import { parse } from "yaml";
-import { expect, fileText, test } from "./fixtures.js";
+import { expect, fileText, fixtureFiles, newScope, openYaml, pickFolder, reopen, test, writeFiles } from "./fixtures.js";
 
 const SUITE = "smoke.hafen.yml";
-const openFolder = async (page) => {
-  await page.click("#openFolder");
+const openApp = async (page) => {
+  await reopen(page);
   await expect(page.locator(`#suiteList .list-row[data-file="${SUITE}"]`)).toHaveCount(1);
 };
 const openTest = (page, name) => page.locator("#suiteList .list-open", { hasText: name }).first().click();
@@ -19,7 +19,7 @@ const turnButton = (page, n, text = "") => page.locator(`#suiteList .list-open[a
 const fileSays = (page, check, file = SUITE) => expect.poll(async () => { try { return check(parse(await fileText(page, file))); } catch { return false; } }, { timeout: 5000 }).toBe(true);
 const writeFile = (page, path, text) => page.evaluate(async ([path, text]) => {
   const parts = path.split("/");
-  let dir = await navigator.storage.getDirectory();
+  let dir = await navigator.storage.getDirectory().then((root) => root.getDirectoryHandle("workspace", { create: true }));
   for (const p of parts.slice(0, -1)) dir = await dir.getDirectoryHandle(p, { create: true });
   const w = await (await dir.getFileHandle(parts.at(-1), { create: true })).createWritable();
   await w.write(text);
@@ -46,7 +46,7 @@ test.afterEach(async ({ app: { errors } }) => {
 });
 
 test("the response's JSON ends with its closing bracket, as every open object and array does", async ({ app: { page } }) => {
-  await openFolder(page);
+  await openApp(page);
   await runSmoke(page);
   await page.locator("#turn-0 .turn-head .label").click();
   const tree = page.locator("#turnResponse");
@@ -71,7 +71,7 @@ test("turns are listed with a box-with-a-tick icon (not 'turn 1'), green when pa
   // A suite whose one turn takes a while
   await writeFile(page, "providers/mock-slow.yml", 'kind: http\nurl: "{{base_url}}/slow?ms=1500"\nbody: { message: "{{user}}" }\nresponse: { text: $.data.reply }\n');
   await writeFile(page, "slow.hafen.yml", `version: 1\nname: Slow\nprovider: providers/mock-slow.yml\nenvironments:\n  local: { base_url: "${servers.mock.url}" }\ntests:\n  - name: slow one\n    turns:\n      - user: wait for it\n        expect:\n          - { type: status, equals: 200 }\n`);
-  await openFolder(page);
+  await openApp(page);
   // Before a run: the icon, grey; the message, not "turn 1"
   const first = turnButton(page, 1, "Hi, I'm");
   await expect(first.locator(".turn-icon svg")).toHaveCount(1);
@@ -99,7 +99,7 @@ test("turns are listed with a box-with-a-tick icon (not 'turn 1'), green when pa
 });
 
 test("sending a message (or adding a turn) goes to the bottom of the thread, wherever it was", async ({ app: { page } }) => {
-  await openFolder(page);
+  await openApp(page);
   await page.selectOption("#convProvider", "providers/mock-json.yml");
   const long = Array.from({ length: 40 }, (_, i) => `line ${i + 1}`).join("\n");
   for (const n of [1, 2]) {
@@ -133,7 +133,7 @@ test("sending a message (or adding a turn) goes to the bottom of the thread, whe
 });
 
 test("a reply has no provider label: its stats and its copy button go under it", async ({ app: { page } }) => {
-  await openFolder(page);
+  await openApp(page);
   await page.selectOption("#convProvider", "providers/mock-json.yml");
   await page.fill("#input", "hello");
   await page.click("#send");
@@ -149,7 +149,7 @@ test("a reply has no provider label: its stats and its copy button go under it",
 });
 
 test("a turn's checks are cards, coloured by how they went; a check's last result is one too", async ({ app: { page } }) => {
-  await openFolder(page);
+  await openApp(page);
   await runSmoke(page);
   await page.locator("#turn-0 .turn-head .label").click();
   const cards = page.locator("#turnChecks > .check-card");
@@ -185,7 +185,7 @@ test("a turn's checks are cards, coloured by how they went; a check's last resul
 });
 
 test("a check is turned off and on from its card and from its panel: skipped when off, and the file as it was when on again", async ({ app: { page } }) => {
-  await openFolder(page);
+  await openApp(page);
   const original = await fileText(page, SUITE);
   await openTest(page, "refund for a broken item");
   await page.locator("#turn-0 .turn-head .label").click();
@@ -229,7 +229,7 @@ test("a check is turned off and on from its card and from its panel: skipped whe
 });
 
 test("the request and the raw stream: named Request and Raw stream, each on a row of its own, apart", async ({ app: { page } }) => {
-  await openFolder(page);
+  await openApp(page);
   await page.selectOption("#convProvider", "providers/mock-sse.yml");
   await page.fill("#input", "hi");
   await page.click("#send");
@@ -247,11 +247,10 @@ test("the request and the raw stream: named Request and Raw stream, each on a ro
 });
 
 test("an editor opened from Settings goes back to Settings: Cancel, Esc and Save each close only the editor", async ({ app: { page } }) => {
-  await openFolder(page);
+  await openApp(page);
   await page.click("#openSettings");
   await page.click("#settings-tab-environments");
-  await page.fill("#newScopeName", "stage");
-  await page.click("#newScopeForm button[type=submit]");
+  await newScope(page, "stage");
   await expect(page.locator("#envText")).toBeEnabled();
   // Cancel
   await page.click("#envText");
@@ -277,6 +276,7 @@ test("an editor opened from Settings goes back to Settings: Cancel, Esc and Save
   // A field's large editor in Settings (a provider's YAML): the same
   await page.click("#settings-tab-providers");
   await page.click("#provider-mock-json-open");
+  await openYaml(page);
   await page.click("#providerYamlMax");
   await expect(page.locator("#editorText")).toBeVisible();
   await page.click("#editorCancel");
@@ -288,7 +288,7 @@ test("an editor opened from Settings goes back to Settings: Cancel, Esc and Save
 });
 
 test("Settings: its groups' headings are bold capitals; its foot says the storage used", async ({ app: { page } }) => {
-  await openFolder(page);
+  await openApp(page);
   await runSmoke(page);
   await page.click("#openSettings");
   const headings = page.locator(".settings-group");
@@ -305,10 +305,14 @@ test("the app is Hafen: its title, its name, the commands it shows; no 'hafen ev
   await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
   await expect(page).toHaveTitle("Hafen");
   await expect(page.locator("#brand")).toHaveAttribute("title", "Hafen");
-  await openFolder(page);
   await runSmoke(page);
+  // (Copy CI command runs the folder it was exported to: exported first)
+  await pickFolder(page, "ci");
   await page.click("#testCopyCi");
-  expect(await page.evaluate(() => navigator.clipboard.readText())).toMatch(/^npx hafen run "smoke\.hafen\.yml" .*--report run:results\/run\.hafen-run\.json$/);
+  await page.click("#exportGo");
+  await expect(page.locator("#exportDialog")).toHaveCount(0);
+  await page.click("#testCopyCi");
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toMatch(/^npx hafen run "ci" .*--report run:results\/run\.hafen-run\.json$/);
   await page.click("#openSettings");
   for (const tab of ["relay", "plugins", "environments"]) {
     await page.click(`#settings-tab-${tab}`);
@@ -319,7 +323,7 @@ test("the app is Hafen: its title, its name, the commands it shows; no 'hafen ev
 });
 
 test("a run file from before the app was Hafen opens, and goes out again as a Hafen run", async ({ app: { page } }) => {
-  await openFolder(page);
+  await openApp(page);
   await runSmoke(page);
   const run = await page.evaluate(async () => {
     const done = (req) => new Promise((resolve, reject) => { req.onsuccess = () => resolve(req.result); req.onerror = () => reject(req.error); });
@@ -341,7 +345,7 @@ test("a run file from before the app was Hafen opens, and goes out again as a Ha
 });
 
 test("the runs and conversations the app kept before it was Hafen (its old database) are carried over, once", async ({ app: { page } }) => {
-  await openFolder(page);
+  await openApp(page);
   await runSmoke(page);
   await page.click("#newConversation");
   await page.selectOption("#convProvider", "providers/mock-json.yml");
@@ -377,7 +381,7 @@ test("the runs and conversations the app kept before it was Hafen (its old datab
 });
 
 test("the panels' spacing: a label 6px over its field; 14px to facts and buttons; the head's label beside its back button", async ({ app: { page } }) => {
-  await openFolder(page);
+  await openApp(page);
   await page.locator(`#suiteList .list-row[data-file="${SUITE}"] .list-open`).first().click();
   const gap = async (upper, lower) => { const [a, b] = [await box(upper), await box(lower)]; return Math.round(b.y - (a.y + a.height)); };
   expect(await gap(page.locator("#panel .field-head", { hasText: "Name (in reports)" }), page.locator("#suiteName"))).toBe(6);
@@ -405,7 +409,7 @@ test("the panels' spacing: a label 6px over its field; 14px to facts and buttons
 });
 
 test("an empty timeline is as tall as its note (and isn't resized); with steps, as tall as it's set (a fifth of the window by default)", async ({ app: { page } }) => {
-  await openFolder(page);
+  await openApp(page);
   const body = page.locator("#timelineBody");
   await expect(page.locator("#timelineEmpty")).toBeVisible();
   expect((await box(body)).height).toBeLessThan(60);
@@ -418,7 +422,7 @@ test("an empty timeline is as tall as its note (and isn't resized); with steps, 
 });
 
 test("the sidebar's checks are grouped: response, metrics, thinking and tools, System One, LLM judges", async ({ app: { page } }) => {
-  await openFolder(page);
+  await openApp(page);
   await page.click("#checksToggle");
   expect(await page.locator(".palette-heading").allTextContents()).toEqual(["Response", "Metrics", "Thinking and tools", "System One", "LLM judges"]);
   const ids = async (group) => page.locator(`#palette-group-${group} .palette-item`).evaluateAll((els) => els.map((e) => e.id.replace("palette-", "")));
@@ -439,26 +443,31 @@ test("the sidebar's checks are grouped: response, metrics, thinking and tools, S
   await fileSays(page, (d) => d.tests[0].turns[1].expect[2]?.type === "tool.not_called");
 });
 
-test("placeholders sit in the middle of what holds them: the sidebar's sections, the thread, a panel, Settings", async ({ app: { page } }) => {
-  const centred = async (sel, holder) => page.evaluate(([sel, holder]) => {
-    const el = document.querySelector(sel);
-    const h = el.closest(holder);
-    const [a, b] = [el.getBoundingClientRect(), h.getBoundingClientRect()];
-    const cs = getComputedStyle(h);
-    const top = a.top - b.top - parseFloat(cs.paddingTop);
-    const bottom = b.bottom - parseFloat(cs.paddingBottom) - a.bottom;
-    return { align: getComputedStyle(el).textAlign, off: Math.abs(top - bottom) };
-  }, [sel, holder]);
-  for (const [sel, holder] of [["#conversationsEmpty", "#conversationsBody"], ["#runsEmpty", "#runsBody"], ["#suitesEmpty", "#suitesBody"], ["#threadEmpty", "#scroller"]]) {
-    const { align, off } = await centred(sel, holder);
-    expect(align, sel).toBe("center");
-    expect(off, sel).toBeLessThan(4);
-  }
-  await openFolder(page);
-  await openTest(page, "refund for a broken item");
-  await page.locator("#turn-0 .turn-head .label").click();
-  expect(await page.locator("#turnNotRun").evaluate((el) => getComputedStyle(el).textAlign)).toBe("center");
-  await page.click("#openSettings");
-  await page.click("#settings-tab-runs");
-  expect(await page.locator("#settingsEmpty").evaluate((el) => getComputedStyle(el).textAlign)).toBe("center");
+test.describe("with nothing in the app yet", () => {
+  test.use({ workspace: {} });
+
+  test("placeholders sit in the middle of what holds them: the sidebar's sections, the thread, a panel, Settings", async ({ app: { page, servers } }) => {
+    const centred = async (sel, holder) => page.evaluate(([sel, holder]) => {
+      const el = document.querySelector(sel);
+      const h = el.closest(holder);
+      const [a, b] = [el.getBoundingClientRect(), h.getBoundingClientRect()];
+      const cs = getComputedStyle(h);
+      const top = a.top - b.top - parseFloat(cs.paddingTop);
+      const bottom = b.bottom - parseFloat(cs.paddingBottom) - a.bottom;
+      return { align: getComputedStyle(el).textAlign, off: Math.abs(top - bottom) };
+    }, [sel, holder]);
+    for (const [sel, holder] of [["#conversationsEmpty", "#conversationsBody"], ["#runsEmpty", "#runsBody"], ["#suitesEmpty", "#suitesBody"], ["#threadEmpty", "#scroller"]]) {
+      const { align, off } = await centred(sel, holder);
+      expect(align, sel).toBe("center");
+      expect(off, sel).toBeLessThan(4);
+    }
+    await writeFiles(page, await fixtureFiles(servers.mock.url));
+    await openApp(page);
+    await openTest(page, "refund for a broken item");
+    await page.locator("#turn-0 .turn-head .label").click();
+    expect(await page.locator("#turnNotRun").evaluate((el) => getComputedStyle(el).textAlign)).toBe("center");
+    await page.click("#openSettings");
+    await page.click("#settings-tab-runs");
+    expect(await page.locator("#settingsEmpty").evaluate((el) => getComputedStyle(el).textAlign)).toBe("center");
+  });
 });

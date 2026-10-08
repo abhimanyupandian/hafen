@@ -1,9 +1,11 @@
 // The engine, from the page: in the desktop app, a port to its utility process (desktop/engine-host.js,
 // which runs the engine in Node, as CI does); in a browser, a Web Worker (worker.js). Either way the
-// same commands and events (hafen/engine/serve-port.js).
+// same commands and events (hafen/engine/serve-port.js), on the app's workspace (its suites, providers,
+// plugins and data files), which it opens by itself: the desktop app's data folder, or this browser's
+// private file system.
 //
 //   const engine = await connectEngine();
-//   await engine.call("open", { root }) → { suites, providers }
+//   await engine.call("open", {})       → { suites, providers, plugins }
 //   engine.on(token, (event) => …)      → stop listening
 
 import { isApp } from "./lib/app.js";
@@ -11,7 +13,7 @@ import { isApp } from "./lib/app.js";
 let client = null;
 
 // onRestart: called when the desktop app's engine was started again (after it stopped unexpectedly):
-// calls waiting on the old one fail, and the page opens its folder again. onCall(cmd, args, {ok,
+// calls waiting on the old one fail, and the page opens its workspace again. onCall(cmd, args, {ok,
 // error, value, ms}): each command, once it's answered; onLog(entry): a log the engine sent (its
 // HTTP calls).
 export async function connectEngine({ onRestart, onCall, onLog } = {}) {

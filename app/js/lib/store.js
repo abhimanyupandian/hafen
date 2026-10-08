@@ -21,9 +21,11 @@ export const KEYS = {
   env: "eval.env",                         // the scope chosen last ("": none, chosen so; unset: never chosen)
   scopes: "eval.scopes",                   // the app's scopes, by name, in the order they were made
   scope: (name) => `eval.scope.${name}`,   // a scope's environment values: {NAME: text} (one key a scope)
-  root: "eval.root",                       // the folder opened last (desktop app)
+  globals: "eval.globals",                 // Globals' environment values, for every scope: {NAME: text} (in no scope)
+  root: "eval.root",                       // the folder the desktop app opened last, before it kept its own workspace: offered once to import from, then forgotten
+  exports: "eval.exports",                 // where each suite was last exported to: {suite file: { path, name, ci, env, secret, at }}
   relay: "eval.relay",                     // the relay's address (browser build)
-  secrets: "eval.secrets",                 // secret values by scope, "" for every scope (browser build only; the desktop app keeps them encrypted)
+  secrets: "eval.secrets",                 // secret values by scope, "" for Globals' (browser build only; the desktop app keeps them encrypted)
   provider: "eval.provider",               // the provider chosen for exploring
   notifications: "eval.notifications",     // Settings → Notifications: { sound, when, passed, failed, system }
   collapsed: "eval.collapsed",             // tree rows folded: {row id: true}

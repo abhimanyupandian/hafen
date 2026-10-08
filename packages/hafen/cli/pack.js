@@ -1,8 +1,8 @@
 // hafen pack (contracts/cli.md, pack): suites, and everything they need to run, in one file that runs
 // them with Node 22 alone (cli/pack-runtime.js). In it: hafen's command line, bundled with its
-// packages; the suites; the files they name (providers, data files, prices); and their plugins (the
-// ones they name, and the folder's they use by name, fixtures too), each bundled with what it imports,
-// files anywhere and packages.
+// packages; the suites; the files they name (providers, data files, prices, JSON Schemas); and their
+// plugins (the ones they name, and the folder's they use by name, fixtures too), each bundled with
+// what it imports, files anywhere and packages.
 //
 // Never an environment's values or a secret: they're given where it runs (--env <file>, --secret
 // <file>, or the secrets as environment variables). Their names go next to it: the environment's
@@ -18,8 +18,9 @@ import { isBuiltin } from "node:module";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { fileRefs, isPluginPath as isPath } from "../engine/files/dependencies.js";
 import { loadSuite, runningData, secretsNeeded } from "../engine/files/suite-file.js";
-import { loadPlugins, PLUGIN_FILE, pluginNames, suiteFixtureNames } from "../engine/plugins.js";
+import { folderPluginFiles, loadPlugins, pluginNames, suiteFixtureGives } from "../engine/plugins.js";
 import { joinPath } from "../engine/util.js";
 import { oldWay } from "../engine/vars.js";
 import { VERSION } from "./node-host.js";
@@ -32,7 +33,6 @@ const NOT_PACKED = {
   resolveId: (id) => (/(^|[\\/])pack\.js$/.test(id) ? STAND_IN : null),
   load: (id) => (id === STAND_IN ? 'const no = () => { throw new Error("a pack runs its suites: pack needs hafen itself"); };\nexport const pack = no;\n' : null),
 };
-const isPath = (entry) => /^(\.{1,2}\/|\/)/.test(entry) || /\.m?js$/i.test(entry);
 const REGION = /^[ \t]*\/\/#(end)?region\b.*\n?/gm;
 const size = (n) => (n < 1024 * 1024 ? `${(n / 1024).toFixed(0)} kB` : `${(n / 1024 / 1024).toFixed(1)} MB`);
 const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
@@ -79,17 +79,13 @@ export async function pack(paths, values, { cliHost, findSuites, out, err, red, 
     return 2;
   }
 
-  // The files the suites need, as they are
+  // The files the suites need, as they are (the ones a suite names: files/dependencies.js; its plugins
+  // are bundled below)
   const packed = new Map();  // path → text
   const add = async (p) => { if (!packed.has(p)) packed.set(p, await host.files.read(p)); };
   for (const s of suites) {
     await add(s.file);
-    for (const f of Object.values(s.providerFiles ?? {})) await add(f);
-    for (const t of s.data?.tests ?? []) {
-      const ref = typeof t?.data === "string" ? t.data : t?.data?.file;
-      if (ref) await add(joinPath(s.file, ref));
-    }
-    if (typeof s.data?.prices === "string") await add(joinPath(s.file, s.data.prices));
+    for (const { ref, what } of fileRefs(s.data)) if (what !== "the plugin") await add(joinPath(s.file, ref));
   }
 
   // Their plugins, each bundled with what it imports (and loaded first: one that doesn't load isn't
@@ -120,7 +116,7 @@ export async function pack(paths, values, { cliHost, findSuites, out, err, red, 
     packed.set(at, code);
     plugins[at] = { kind: plugin.meta.kind, name: plugin.meta.name, version: plugin.meta.version, files: count };
   };
-  const folder = await loadPlugins(host, (await host.list()).filter((f) => PLUGIN_FILE.test(f)), null);
+  const folder = await loadPlugins(host, await folderPluginFiles(host), null);
   try {
     for (const s of suites) {
       for (const entry of s.data?.plugins ?? []) {
@@ -173,9 +169,13 @@ export async function pack(paths, values, { cliHost, findSuites, out, err, red, 
     if (!list.includes(what)) list.push(what);
     usedBy.set(name, list);
   };
+  // (an {{env.NAME}} a fixture sets with env.set isn't one to pass: the run has it once it's run)
+  const setByFixtures = new Set();
   for (const s of suites) {
-    const fixtures = await suiteFixtureNames(host, s);
+    const gives = await suiteFixtureGives(host, s);
+    const fixtures = gives.secrets;
     for (const name of fixtures) given.add(name);
+    for (const name of gives.env) setByFixtures.add(name);
     const inSuite = uses(runningData(s.data ?? {}));
     const providers = Object.entries(s.providers ?? {}).map(([key, config]) => [key, config, uses(config)]);
     for (const name of [...inSuite.env, ...providers.flatMap(([, , u]) => [...u.env])]) envNames.add(name);
@@ -215,7 +215,7 @@ export async function pack(paths, values, { cliHost, findSuites, out, err, red, 
     files: Object.fromEntries([...packed].sort(([a], [b]) => a.localeCompare(b))),
     packages,
     plugins,
-    environment: [...envNames].sort(),
+    environment: [...envNames].filter((name) => !setByFixtures.has(name)).sort(),
     secrets: [...secrets].sort(),
     pluginSecrets,
   };

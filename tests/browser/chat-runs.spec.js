@@ -12,7 +12,7 @@ const openTest = (page, name) => page.locator("#suiteList .list-open", { hasText
 const row = (page, text) => (/\.hafen\.(ya?ml|json)$/.test(text) ? page.locator(`#suiteList .list-row[data-file="${text}"]`) : page.locator("#suiteList .list-row", { hasText: text })).first();
 const writeFile = (page, path, text) => page.evaluate(async ([path, text]) => {
   const parts = path.split("/");
-  let dir = await navigator.storage.getDirectory();
+  let dir = await navigator.storage.getDirectory().then((root) => root.getDirectoryHandle("workspace", { create: true }));
   for (const p of parts.slice(0, -1)) dir = await dir.getDirectoryHandle(p);
   const w = await (await dir.getFileHandle(parts.at(-1))).createWritable();
   await w.write(text);
@@ -23,7 +23,6 @@ const mockLog = async (servers) => (await fetch(`${servers.mock.url}/_log`)).jso
 const clearMockLog = (servers) => fetch(`${servers.mock.url}/_log`, { method: "DELETE" });
 
 test.beforeEach(async ({ app: { page } }) => {
-  await page.click("#openFolder");
   await expect(page.locator(`#suiteList .list-row[data-file="${SUITE}"]`)).toHaveCount(1);
 });
 test.afterEach(async ({ app: { errors } }) => {
@@ -108,7 +107,7 @@ test("the console is an audit log: engine calls, HTTP calls, settings and events
   await page.click("#settings-tab-secrets");
   await page.fill("#secretName", "SHOP_TOKEN");
   await page.fill("#secretValue", "VALUE-NOT-LOGGED");
-  await page.click("#secretAdd button[type=submit]");
+  await page.press("#secretValue", "Enter");
   await expect(page.locator("#secret-SHOP_TOKEN")).toBeVisible();
   await page.click("#settingsClose");
   const text = await consoleText(page);

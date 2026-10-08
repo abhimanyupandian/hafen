@@ -2,10 +2,10 @@
 // was packed with and everything they need, run with Node alone (no hafen, no npm install, no project
 // folder). Its files are the pack's: suites, providers, data files, prices, and plugins (each
 // bundled with what it imports). An environment's values and the secrets aren't in it:
-// they're given where it runs, as the command line's are (--env <file>, --secret <file>, or the
-// secrets as environment variables), the files read from the disk there (their names are in the
-// .env.example and .secret.example pack writes next to it). Reports and run files are written where
-// it runs.
+// they're given where it runs, as the command line's are (--env <file>, --secret <file>, each as
+// often as wanted, a later file's values winning; or the secrets as environment variables), the
+// files read from the disk there (their names are in the .env.example and .secret.example pack
+// writes next to it). Reports and run files are written where it runs.
 //
 //   node refunds.hafen-pack.mjs run [suites…] [options]   (the suites: all of them, or some by path)
 //   node refunds.hafen-pack.mjs run --env ./staging.env --secret ./staging.secrets.env
@@ -19,7 +19,7 @@ import { isMainThread, parentPort, Worker, workerData } from "node:worker_thread
 import { servePlugin } from "../engine/plugin-worker-core.js";
 import { fetchTransport } from "../engine/transport.js";
 import { err, main } from "./commands.js";
-import { VERSION } from "./node-host.js";
+import { fromProcess, VERSION } from "./node-host.js";
 
 // pack: { name, created, hafen, from, suites: [paths], files: { path: text }, packages: { name: path },
 //         plugins: { path: { kind, name, version, files } }, environment: [names], secrets: [names] }
@@ -64,8 +64,8 @@ function packHost(pack) {
     root: pack.name,
     packed: true,
     transport: fetchTransport(),
-    // (with --secret, the command line's: its file's, then the environment's)
-    secrets: (name) => process.env[name],
+    // (with --secret, the command line's: its files', then the environment's)
+    secrets: fromProcess,
     now: () => performance.now(),
     clock: () => Date.now(),
     where: { app: "cli", version: VERSION, os: process.platform, node: process.versions.node, pack: pack.name },
@@ -125,7 +125,8 @@ function help(pack) {
   node ${pack.name} info                      what's in it, and the values and secrets it needs
 
 The options are the command line's (hafen --help): --env, --secret, --var, --test, --tag, --report,
---baseline, --max-cost, --bail, --verbose…
+--baseline, --max-cost, --bail, --verbose… (--env and --secret as often as wanted, a later file's
+values winning: --env globals.env --env staging.env)
 Environment values ({{env.NAME}}), from --env <file> (KEY=VALUE): ${environment.length ? `${environment.join(", ")}.` : "it uses none."}
 Secrets, from --secret <file> (KEY=VALUE, never committed), else the environment's variables: ${pack.secrets.length ? `${pack.secrets.join(", ")}.` : "it needs none."}${environment.length || pack.secrets.length ? `
   node ${pack.name} run${environment.length ? " --env ./staging.env" : ""}${pack.secrets.length ? " --secret ./staging.secrets.env" : ""}` : ""}`;

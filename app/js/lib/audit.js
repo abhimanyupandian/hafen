@@ -6,6 +6,7 @@
 //   14:02:04.551  http.request  method=POST url=http://127.0.0.1:8791/json  200 · 0.42 s · 1.2 kB
 //   14:02:05.010  config.secret  name=OPENAI_API_KEY env=every action=set
 
+import { rowLabel } from "hafen/engine/files/data.js";
 import { say } from "./log.js";
 
 const time = (d = new Date()) => `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}:${String(d.getSeconds()).padStart(2, "0")}.${String(d.getMilliseconds()).padStart(3, "0")}`;
@@ -36,8 +37,13 @@ export function auditCall(cmd, args = {}, { ok, error, value: out, ms: took }) {
   const a = {};
   switch (cmd) {
     case "open":
-      a.folder = args.root ?? args.handle?.name ?? (args.files ? `${Object.keys(args.files).length} files` : undefined);
       if (ok) a.found = `${out?.suites?.length ?? 0} suites, ${out?.providers?.length ?? 0} providers`;
+      break;
+    // (Import and Export: how many files, and whether a folder picked is read or written)
+    case "dependencies": case "copyPlan": case "copy":
+      a.files = (args.files ?? []).length;
+      a.from = args.from ? "picked" : undefined;
+      a.to = args.to ? "picked" : undefined;
       break;
     case "load":
       if (ok) a.found = `${out?.suites?.length ?? 0} suites, ${out?.providers?.length ?? 0} providers`;
@@ -99,7 +105,7 @@ export function auditEngineLog(entry) {
 export function auditEvent(where, event) {
   if (event?.type === "fixture:end") {
     const f = event.fixture ?? {};
-    const test = f.test ? `${f.test.name}${f.test.row ? ` row ${f.test.row}` : ""}${f.test.repeat > 1 ? ` run ${f.test.repeat}` : ""}` : undefined;
+    const test = f.test ? `${f.test.name}${f.test.row ? ` ${rowLabel(f.test.row, f.test.row_name)}` : ""}${f.test.repeat > 1 ? ` run ${f.test.repeat}` : ""}` : undefined;
     audit(`${where}.fixture`, { name: f.name, phase: f.phase, provider: f.provider, test, calls: f.calls || undefined }, {
       status: f.status === "ok" ? `ok${f.provides?.length ? ` · gave ${f.provides.join(", ")}` : ""}` : `error: ${f.error}`,
       ms: f.ms, error: f.status !== "ok", tag: "fixture",

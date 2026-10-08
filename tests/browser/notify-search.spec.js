@@ -1,16 +1,16 @@
 // When a run ends (contracts/ui.md, Notifications): a sound when what ran isn't what's open (or always,
 // or never, as Settings → Notifications says; for the outcomes chosen), the toast and the system's
 // notification opening what ran; Settings → Notifications; searching Suites and Conversations by name
-// and date; a conversation's date with its year; the import button only while Suites is open; the
-// expand/collapse menu without hints; the timeline's folding kept across reruns (not across reloads);
-// no "new conversation" in the panel.
+// and date; a conversation's date with its year; import and export all only while Suites is open; the
+// expand/collapse menu without hints; the timeline's folding kept across reruns (not across
+// reloads); no "new conversation" in the panel.
 
-import { expect, test } from "./fixtures.js";
+import { expect, reopen, test } from "./fixtures.js";
 
 const SUITE = "smoke.hafen.yml";
 const writeFile = (page, path, text) => page.evaluate(async ([path, text]) => {
   const parts = path.split("/");
-  let dir = await navigator.storage.getDirectory();
+  let dir = await navigator.storage.getDirectory().then((root) => root.getDirectoryHandle("workspace", { create: true }));
   for (const p of parts.slice(0, -1)) dir = await dir.getDirectoryHandle(p, { create: true });
   const w = await (await dir.getFileHandle(parts.at(-1), { create: true })).createWritable();
   await w.write(text);
@@ -34,11 +34,11 @@ const files = async (page, url, ms = 900) => {
   await writeFile(page, "providers/slow.yml", `kind: http\nurl: "{{base_url}}/slow?ms=${ms}"\nbody: { message: "{{user}}" }\nresponse: { text: $.data.reply }\n`);
   await writeFile(page, "green.hafen.yml", GREEN(url, ms));
 };
-const openFolder = async (page) => {
-  await page.click("#openFolder");
+const openApp = async (page) => {
+  await reopen(page);
   await expect(page.locator(`#suiteList .list-row[data-file="${SUITE}"]`)).toHaveCount(1);
 };
-// The smoke suite's provider slowed (after the folder's opened: opening it writes the fixtures' files)
+// The smoke suite's provider slowed
 const slowSmoke = (page, url, ms = 900) => writeFile(page, "providers/mock-json.yml", `kind: http\nurl: "{{base_url}}/slow?ms=${ms}"\nbody: { message: "{{user}}" }\nresponse:\n  text: $.data.reply\n`);
 // No run going on any more
 const runsEnded = (page) => expect(page.locator("#runList li[id^='run-live-']")).toHaveCount(0, { timeout: 15000 });
@@ -80,7 +80,7 @@ test.afterEach(async ({ app: { errors } }) => {
 
 test("a run that ends while you look at something else: a sound, and its toast opens what ran (a test; a suite)", async ({ app: { page, servers } }) => {
   await files(page, servers.mock.url);
-  await openFolder(page);
+  await openApp(page);
   await slowSmoke(page, servers.mock.url);
   // A test's run; meanwhile a new conversation is open
   await testRow(page, "says hello").locator(".list-open").click();
@@ -117,7 +117,7 @@ test("a run that ends while you look at something else: a sound, and its toast o
 
 test("looking at what ran (the test, or its suite's view): no sound; Always: a sound anyway; a stopped run: none", async ({ app: { page, servers } }) => {
   await files(page, servers.mock.url, 300);
-  await openFolder(page);
+  await openApp(page);
   await testRow(page, "says hello").locator(".list-open").click();
   await page.click("#testRun");
   await expect(page.locator(".toast", { hasText: "Passed: says hello" })).toBeVisible({ timeout: 10000 });
@@ -148,7 +148,7 @@ test("looking at what ran (the test, or its suite's view): no sound; Always: a s
 
 test("Settings → Notifications: sound off; only failed runs; saved; Try it", async ({ app: { page, servers } }) => {
   await files(page, servers.mock.url, 300);
-  await openFolder(page);
+  await openApp(page);
   await slowSmoke(page, servers.mock.url, 300);
   await page.click("#openSettings");
   await page.click("#settings-tab-notifications");
@@ -201,7 +201,7 @@ test("Settings → Notifications: sound off; only failed runs; saved; Try it", a
 
 test("system notifications: turned on (the browser asked), shown while the window is in the background; clicked, it opens what ran", async ({ app: { page, servers } }) => {
   await files(page, servers.mock.url, 300);
-  await openFolder(page);
+  await openApp(page);
   await page.click("#openSettings");
   await page.click("#settings-tab-notifications");
   await expect(page.locator("#notifySystem")).not.toBeChecked();   // (a browser's: off until turned on)
@@ -230,7 +230,7 @@ test("system notifications: turned on (the browser asked), shown while the windo
 
 test("searching Suites by name, tag and when it last ran; searching Conversations by name and date; a conversation's date has its year", async ({ app: { page, servers } }) => {
   await files(page, servers.mock.url, 50);
-  await openFolder(page);
+  await openApp(page);
   const search = page.locator("#suitesSearch");
   await expect(search).toHaveAttribute("placeholder", "Search by name, status or last run");
   // By a suite's name: it, whole
@@ -303,13 +303,15 @@ test("searching Suites by name, tag and when it last ran; searching Conversation
   await expect(page.locator("#conversationsNoMatch")).toBeVisible();
 });
 
-test("the import button shows only while Suites is open; the expand/collapse menu has no hints; no new conversation in the panel", async ({ app: { page } }) => {
-  await expect(page.locator("#openFolder")).toBeVisible();
+test("import and export all show only while Suites is open; the expand/collapse menu has no hints; no new conversation in the panel", async ({ app: { page } }) => {
+  await expect(page.locator("#importSuites")).toBeVisible();
+  await expect(page.locator("#exportSuites")).toBeVisible();
   await page.click("#suitesToggle");
-  await expect(page.locator("#openFolder")).toHaveCount(0);
+  await expect(page.locator("#importSuites")).toBeHidden();
+  await expect(page.locator("#exportSuites")).toBeHidden();
   await expect(page.locator("#newSuite")).toBeVisible();
   await page.click("#suitesToggle");
-  await openFolder(page);
+  await expect(suiteRow(page, SUITE)).toHaveCount(1);
   await suiteRow(page, SUITE).click({ button: "right" });
   await expect(page.locator("#menu-expand-all")).toHaveText("Expand all");
   await expect(page.locator("#menu-collapse-all")).toHaveText("Collapse all");
@@ -324,7 +326,7 @@ test("the import button shows only while Suites is open; the expand/collapse men
 
 test("the timeline keeps what was folded and opened when a test is run again, and a suite; not after a reload", async ({ app: { page, servers } }) => {
   await files(page, servers.mock.url, 50);
-  await openFolder(page);
+  await openApp(page);
   await testRow(page, "says hello").locator(".list-open").click();
   await page.click("#testRun");
   await expect(page.locator("#status")).toContainText("passed 1/1", { timeout: 10000 });
@@ -353,9 +355,7 @@ test("the timeline keeps what was folded and opened when a test is run again, an
   // (its turn, folded in the test's own view, is folded here too: the same step)
   await expect(page.locator(".timeline-label[data-kind='turn']").first().locator(".tree-toggle")).toHaveAttribute("aria-expanded", "false");
   // Not kept after a reload
-  await page.reload();
-  await page.locator("html:not(.loading)").waitFor();
-  await openFolder(page);
+  await reopen(page);
   await suiteRow(page, "green.hafen.yml").locator(".list-open").click();
   await expect(page.locator(".timeline-label[data-kind='test']", { hasText: "says hello" }).locator(".tree-toggle")).toHaveAttribute("aria-expanded", "false");
 });

@@ -16,8 +16,6 @@ const PATHS = {
   timeline: '<path d="M2.5 4.5h7M5.5 9h8M8.5 13.5h7"/>',
   // A run: play
   run: '<path d="M5.5 3.5l9 5.5-9 5.5z"/>',
-  // Open a folder: a folder with an arrow into it
-  import: '<path d="M2.5 5V14.5h13v-8.5H9L7.5 4.5h-5z"/><path d="M9 8.2v4.6M7 10.9l2 2 2-2"/>',
   // Back: to what holds this
   back: '<path d="M11 4.5L6.5 9l4.5 4.5"/>',
   // A conversation
@@ -39,6 +37,8 @@ const PATHS = {
   close: '<path d="M4.5 4.5l9 9M13.5 4.5l-9 9"/>',
   // Search: a magnifier
   search: '<circle cx="7.75" cy="7.75" r="4.75"/><path d="M11.25 11.25l4.25 4.25"/>',
+  // More actions (a row's menu): three dots
+  more: '<circle cx="4" cy="9" r=".9"/><circle cx="9" cy="9" r=".9"/><circle cx="14" cy="9" r=".9"/>',
   // Notifications: a bell
   bell: '<path d="M4.5 13V8.5a4.5 4.5 0 0 1 9 0V13l1.5 1.5H3z" stroke-linejoin="round"/><path d="M7.5 16h3"/>',
 };

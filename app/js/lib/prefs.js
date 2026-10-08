@@ -8,7 +8,12 @@ import { invoke, isApp } from "./app.js";
 import { emit } from "./events.js";
 import { KEYS, store } from "./store.js";
 
-export const THEMES = [["light", "Light"], ["dark", "Dark"], ["system", "As the system's"]];
+// Each, as Settings → Appearance shows it: its value, its name, and what it does
+export const THEMES = [
+  ["light", "Light", "Always light"],
+  ["system", "System", "As the system's: light or dark as it is, and following it as it changes"],
+  ["dark", "Dark", "Always dark"],
+];
 // (Not chosen yet: the system's, so a first visit with the system dark is dark)
 export const theme = () => store.get(KEYS.theme) ?? "system";
 

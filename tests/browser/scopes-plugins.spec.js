@@ -4,7 +4,7 @@
 // field), and Settings → Plugins.
 
 import { parse } from "yaml";
-import { chooseScope, expect, fileText, test } from "./fixtures.js";
+import { chooseScope, expect, fileText, newScope, reopen, showEntry, test } from "./fixtures.js";
 
 const SUITE = "smoke.hafen.yml";
 const openTest = (page, name) => page.locator("#suiteList .list-open", { hasText: name }).first().click();
@@ -12,7 +12,7 @@ const openTest = (page, name) => page.locator("#suiteList .list-open", { hasText
 const row = (page, text) => (/\.hafen\.(ya?ml|json)$/.test(text) ? page.locator(`#suiteList .list-row[data-file="${text}"]`) : page.locator("#suiteList .list-row", { hasText: text })).first();
 const writeFile = (page, path, text) => page.evaluate(async ([path, text]) => {
   const parts = path.split("/");
-  let dir = await navigator.storage.getDirectory();
+  let dir = await navigator.storage.getDirectory().then((root) => root.getDirectoryHandle("workspace", { create: true }));
   for (const p of parts.slice(0, -1)) dir = await dir.getDirectoryHandle(p, { create: true });
   const w = await (await dir.getFileHandle(parts.at(-1), { create: true })).createWritable();
   await w.write(text);
@@ -21,17 +21,17 @@ const writeFile = (page, path, text) => page.evaluate(async ([path, text]) => {
 const mockLog = async (servers) => (await fetch(`${servers.mock.url}/_log`)).json();
 
 test.beforeEach(async ({ app: { page } }) => {
-  await page.click("#openFolder");
   await expect(page.locator(`#suiteList .list-row[data-file="${SUITE}"]`)).toHaveCount(1);
 });
 test.afterEach(async ({ app: { errors } }) => {
   expect(errors).toEqual([]);
 });
 
-test("the sidebar: 'open folder' is an import icon; a closed section shows its icon, an open one its arrow", async ({ app: { page } }) => {
-  await expect(page.locator("#openFolder")).toHaveAttribute("aria-label", "Open a folder");
-  await expect(page.locator("#openFolder svg")).toHaveCount(1);
-  expect((await page.locator("#openFolder").textContent()).trim()).toBe("");
+test("the sidebar: import and export all are words in Suites' head; a closed section shows its icon, an open one its arrow", async ({ app: { page } }) => {
+  await expect(page.locator("#importSuites")).toHaveText("import");
+  await expect(page.locator("#exportSuites")).toHaveText("export all");
+  await expect(page.locator("#importSuites svg, #exportSuites svg")).toHaveCount(0);
+  await expect(page.locator("#suitesMenu")).toHaveCount(0);
   // Checks starts closed: its icon; open: the arrow
   await expect(page.locator("#checksToggle .section-icon svg")).toHaveCount(1);
   await expect(page.locator("#checksToggle .chev")).toHaveCount(0);
@@ -157,16 +157,15 @@ test("scopes: a scope's environment values (kept by the app) and secrets fill {{
   // Settings → Environments: a scope, its values
   await page.click("#openSettings");
   await page.click("#settings-tab-environments");
-  await page.fill("#newScopeName", "stage");
-  await page.click("#newScopeForm button[type=submit]");
-  await expect(page.locator("#envScope")).toHaveValue("stage");
+  await newScope(page, "stage");
+  await expect(page.locator("#envScope-stage")).toHaveClass(/active/);
   for (const [name, value] of [["base_url", servers.mock.url], ["who", "stage-team"]]) {
     await page.fill("#envVarName", name);
     await page.fill("#envVarValue", value);
-    await page.click("#envVarAdd button[type=submit]");
+    await page.press("#envVarValue", "Enter");
     await expect(page.locator(`#envVar-${name}`)).toBeVisible();
   }
-  // (kept by the app, not in the folder)
+  // (kept by the app, not in its files)
   const stored = () => page.evaluate(() => JSON.parse(localStorage.getItem("eval.scope.stage")));
   expect(await stored()).toEqual({ base_url: servers.mock.url, who: "stage-team" });
   await expect.poll(() => fileText(page, "environments/stage.yml").then(() => "there", () => "none")).toBe("none");
@@ -176,10 +175,10 @@ test("scopes: a scope's environment values (kept by the app) and secrets fill {{
   await expect.poll(async () => (await stored()).who).toBe("stage-crew");
   // Its secret
   await page.click("#settings-tab-secrets");
-  await page.selectOption("#secretsEnv", "stage");
+  await showEntry(page, "stage", "secrets");
   await page.fill("#secretName", "API_KEY");
   await page.fill("#secretValue", "sk-stage-777");
-  await page.click("#secretAdd button[type=submit]");
+  await page.press("#secretValue", "Enter");
   await expect(page.locator("#secret-API_KEY")).toBeVisible();
   await page.click("#settingsClose");
   // Chosen with the scope button at the top of the sidebar (it opens Settings → Environments)
@@ -208,8 +207,7 @@ test("scopes: a scope's environment values (kept by the app) and secrets fill {{
   // With another scope, the same name may not be there
   await page.click("#openSettings");
   await page.click("#settings-tab-environments");
-  await page.fill("#newScopeName", "prod");
-  await page.click("#newScopeForm button[type=submit]");
+  await newScope(page, "prod");
   await page.click("#envChoose");
   await page.click("#settingsClose");
   await expect(page.locator("#scopeButton .scope-name")).toHaveText("prod");
@@ -225,15 +223,15 @@ test("Settings → Plugins: a new check plugin from its starting file, used by a
   await page.fill("#newPluginName", "says-sorry");
   await page.click("#newPluginForm button[type=submit]");
   await expect(page.locator("#plugin-says-sorry")).toContainText("says-sorry · check · 1.0.0");
-  await expect(page.locator("#plugin-says-sorry")).toContainText("Any suite in the folder can use it: { type: says-sorry }");
+  await expect(page.locator("#plugin-says-sorry")).toContainText("Any suite can use it: { type: says-sorry }");
   await expect(page.locator("#plugin-says-sorry-used")).toHaveText("Used by no suite yet");
-  // No "use it in a suite" any more: a suite uses the folder's plugins by name
+  // No "use it in a suite" any more: a suite uses the plugins by name
   await expect(page.locator("#plugin-says-sorry select, #plugin-says-sorry-use, #plugin-says-sorry .plugin-suite")).toHaveCount(0);
   expect(await fileText(page, "plugins/says-sorry.js")).toContain('kind: "check"');
   // (a check plugin isn't a provider: no provider file)
   await expect.poll(() => page.evaluate(async () => {
     try {
-      await (await (await navigator.storage.getDirectory()).getDirectoryHandle("providers")).getFileHandle("says-sorry.yml");
+      await (await (await navigator.storage.getDirectory().then((root) => root.getDirectoryHandle("workspace", { create: true }))).getDirectoryHandle("providers")).getFileHandle("says-sorry.yml");
       return true;
     } catch {
       return false;
@@ -271,7 +269,7 @@ test("Settings → Plugins: a fixture (a login) from its starting file; a provid
   await page.click("#newPluginForm button[type=submit]");
   await expect(page.locator("#plugin-my-login")).toContainText("my-login · fixture · 1.0.0");
   await expect(page.locator("#plugin-my-login-provides")).toHaveText("Gives EXAMPLE_COOKIE, EXAMPLE_CSRF, for the run");
-  await expect(page.locator("#plugin-my-login")).toContainText("Any provider in the folder can use it: fixtures: { beforeAll: [my-login] }");
+  await expect(page.locator("#plugin-my-login")).toContainText("Any provider can use it: fixtures: { beforeAll: [my-login] }");
   expect(await fileText(page, "plugins/my-login.js")).toContain('kind: "fixture"');
   await page.click("#settingsClose");
   // One that logs in to the mock (a token: a browser can't send or read cookies), and a provider naming it
@@ -295,7 +293,7 @@ headers: { x-token: "{{secret.ACME_TOKEN}}" }
 body: { message: "{{user}}" }
 response: { text: $.data.reply }
 `);
-  await page.click("#openFolder");
+  await reopen(page);
   await fetch(`${servers.mock.url}/_log`, { method: "DELETE" });
   await page.selectOption("#convProvider", "providers/behind-login.yml");
   for (const [i, message] of ["hello", "again"].entries()) {
@@ -320,7 +318,7 @@ test("Settings → Plugins: in the browser build a plugin that imports another f
   await writeFile(page, "plugins/imports.js", `import { word } from "../lib/helper.js";
 export default { kind: "check", name: "imports", version: "1.0.0", async check({ value }) { return { status: String(value).includes(word) ? "pass" : "fail", reason: word }; } };
 `);
-  await page.click("#openFolder");
+  await reopen(page);
   await page.click("#openSettings");
   await page.click("#settings-tab-plugins");
   await expect(page.locator("#plugin-plugins-imports-js")).toContainText("it imports ../lib/helper.js, and the browser build loads a plugin as one module: use the desktop app or the CLI, or bundle it");

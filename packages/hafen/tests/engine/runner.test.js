@@ -470,7 +470,7 @@ tests:
     assert.ok(!JSON.stringify(run).includes("jev-secret-key-1"));
   });
 
-  it("low confidence is unsure, which warns by default and fails when asked", async () => {
+  it("low confidence on a passing value is unsure, which fails by default and warns or passes when asked", async () => {
     const yaml = `version: 1
 provider: providers/json.yml
 ${judges}
@@ -481,12 +481,88 @@ tests:
         expect:
           - { type: systemone.noul, question: "UNSURE: is it polite?", min: 0.5 }
 `;
-    const warned = await runYaml(yaml);
-    assert.equal(warned.turns[0].results[0].status, "unsure");
-    assert.equal(warned.tests[0].status, "passed");
-    assert.equal(warned.verdict, "unsure");
-    const failed = await runYaml(yaml, { options: { unsure: "fail" } });
+    const failed = await runYaml(yaml);
+    assert.equal(failed.turns[0].results[0].status, "unsure");
+    assert.equal(failed.turns[0].results[0].unsure, "fail");
+    assert.equal(failed.tests[0].status, "failed");
     assert.equal(failed.verdict, "failed");
+    const warned = await runYaml(yaml, { options: { unsure: "warn" } });
+    assert.deepEqual([warned.turns[0].results[0].unsure, warned.tests[0].status, warned.tests[0].unsure, warned.verdict], ["warn", "passed", true, "unsure"]);
+    const passed = await runYaml(yaml, { options: { unsure: "pass" } });
+    assert.deepEqual([passed.turns[0].results[0].unsure, passed.tests[0].status, passed.tests[0].unsure, passed.verdict], ["pass", "passed", false, "passed"]);
+  });
+
+  it("a value that misses its criterion fails, however low the confidence, under every policy: never unsure", async () => {
+    // (the mock's UNSURE answers: noul 0.55 with confidence 0.1, a choice of refund at 0.4, a score of 2 at 0.3)
+    const yaml = `version: 1
+provider: providers/json.yml
+${judges}
+tests:
+  - name: t
+    turns:
+      - user: a refund
+        expect:
+          - { type: systemone.noul, question: "UNSURE: is it polite?", min: 0.8 }
+          - { type: systemone.choice, question: "UNSURE: what does it offer?", options: [refund, replacement], equals: replacement }
+          - { type: systemone.score, question: "UNSURE: how helpful?", rubric: [poor, ok, great], max: 1 }
+`;
+    for (const unsure of [undefined, "fail", "warn", "pass"]) {
+      const run = await runYaml(yaml, { options: { unsure } });
+      assert.deepEqual(run.turns[0].results.map((r) => [r.status, r.confidence, r.unsure]), [["fail", 0.1, undefined], ["fail", 0.4, undefined], ["fail", 0.3, undefined]], unsure);
+      assert.deepEqual(run.turns[0].results.map((r) => r.reason), ["0.55 outside 0.8–1", 'chose "refund", not "replacement"', "scored 2 (great), outside 0–1"]);
+      assert.deepEqual([run.tests[0].status, run.verdict], ["failed", "failed"], unsure);
+    }
+  });
+
+  it("how an unsure result counts: the check's unsure over the test's, the test's over the suite's defaults, --unsure over all", async () => {
+    const yaml = (defaults, test, check) => `version: 1
+provider: providers/json.yml
+${judges}${defaults ? `defaults: { unsure: ${defaults} }\n` : ""}tests:
+  - name: t
+${test ? `    unsure: ${test}\n` : ""}    turns:
+      - user: a refund
+        expect:
+          - { type: systemone.noul, question: "UNSURE: is it polite?"${check ? `, unsure: ${check}` : ""} }
+          - { type: systemone.noul, question: "UNSURE: is it kind?" }
+`;
+    const counted = async (args, options = {}) => (await runYaml(yaml(...args), { options })).turns[0].results.map((r) => r.unsure);
+    assert.deepEqual(await counted([]), ["fail", "fail"]);
+    assert.deepEqual(await counted(["warn"]), ["warn", "warn"]);
+    assert.deepEqual(await counted(["warn", "pass"]), ["pass", "pass"]);
+    assert.deepEqual(await counted(["warn", "pass", "fail"]), ["fail", "pass"]);
+    assert.deepEqual(await counted([null, null, "warn"]), ["warn", "fail"]);
+    assert.deepEqual(await counted(["pass", "pass", "warn"], { unsure: "fail" }), ["fail", "fail"]);
+    // The test: failed when one counts as failed; else unsure when one warns; else passed
+    const run = await runYaml(yaml(null, "pass", "warn"));
+    assert.deepEqual([run.tests[0].status, run.tests[0].unsure, run.verdict], ["passed", true, "unsure"]);
+    assert.equal(run.turns[0].metrics.accuracy, 1);
+    const failed = await runYaml(yaml(null, null, "pass"));
+    assert.deepEqual([failed.tests[0].status, failed.verdict, failed.turns[0].metrics.accuracy], ["failed", "failed", 0.5]);
+  });
+
+  it("an unsure check that counts as failed fails the test however it's written: on the whole conversation too", async () => {
+    const run = await runYaml(`version: 1
+provider: providers/json.yml
+${judges}
+tests:
+  - name: t
+    turns: [ { user: a refund } ]
+    expect_conversation:
+      - { type: systemone.noul, on: reply, question: "UNSURE: is it polite?" }
+`);
+    const [r] = run.tests[0].instances[0].conversation_results;
+    assert.deepEqual([r.status, r.unsure, run.tests[0].status], ["unsure", "fail", "failed"]);
+    const warned = await runYaml(`version: 1
+provider: providers/json.yml
+${judges}
+tests:
+  - name: t
+    unsure: warn
+    turns: [ { user: a refund } ]
+    expect_conversation:
+      - { type: systemone.noul, on: reply, question: "UNSURE: is it polite?" }
+`);
+    assert.deepEqual([warned.tests[0].status, warned.tests[0].unsure, warned.verdict], ["passed", true, "unsure"]);
   });
 
   it("an unreachable judge is an error, not a failure", async () => {

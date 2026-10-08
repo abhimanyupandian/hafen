@@ -14,7 +14,7 @@ response:
 `;
 const writeFile = (page, path, text) => page.evaluate(async ([path, text]) => {
   const parts = path.split("/");
-  let dir = await navigator.storage.getDirectory();
+  let dir = await navigator.storage.getDirectory().then((root) => root.getDirectoryHandle("workspace", { create: true }));
   for (const p of parts.slice(0, -1)) dir = await dir.getDirectoryHandle(p);
   const w = await (await dir.getFileHandle(parts.at(-1))).createWritable();
   await w.write(text);
@@ -38,7 +38,6 @@ async function send(page, text) {
 }
 
 test.beforeEach(async ({ app: { page } }) => {
-  await page.click("#openFolder");
   await expect(page.locator('#suiteList .list-row[data-file="smoke.hafen.yml"]')).toHaveCount(1);
   await writeFile(page, "providers/mock-json.yml", ECHO);
   await page.selectOption("#convProvider", "providers/mock-json.yml");

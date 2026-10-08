@@ -209,7 +209,7 @@ describe("check and judge plugins", () => {
     assert.match(results[3].reason, /the check broke/);
   });
 
-  it("a judge plugin's value against the check's min and max, and its confidence against unsure_below", async () => {
+  it("a judge plugin's value against the check's min and max, and its confidence against unsure_below (a value that misses fails, whatever its confidence)", async () => {
     const judge = `export default {
   kind: "judge",
   name: "house",
@@ -228,9 +228,11 @@ describe("check and judge plugins", () => {
           - { type: judge, judge: mine, rubric: "0.9 0.9", min: 0.5 }
           - { type: judge, judge: mine, rubric: "0.2 0.9", min: 0.5 }
           - { type: judge, judge: mine, rubric: "0.9 0.3", min: 0.5 }
-          - { type: judge, judge: mine, rubric: "0.9 0.9", min: 0.1, max: 0.5 }`, { provider: "providers/json.yml", extra: "judges:\n  mine: { kind: plugin, plugin: house }" }),
+          - { type: judge, judge: mine, rubric: "0.9 0.9", min: 0.1, max: 0.5 }
+          - { type: judge, judge: mine, rubric: "0.2 0.3", min: 0.5 }`, { provider: "providers/json.yml", extra: "judges:\n  mine: { kind: plugin, plugin: house }" }),
     });
-    assert.deepEqual(r.turns[0].results.map((x) => x.status), ["pass", "fail", "unsure", "fail"], JSON.stringify(r.turns[0].results));
+    assert.deepEqual(r.turns[0].results.map((x) => x.status), ["pass", "fail", "unsure", "fail", "fail"], JSON.stringify(r.turns[0].results));
+    assert.equal(r.turns[0].results[2].reason, "said 0.9 0.3, but confidence 0.3 is below 0.6");
   });
 });
 

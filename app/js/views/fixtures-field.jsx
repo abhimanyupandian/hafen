@@ -1,10 +1,12 @@
 // A provider's fixtures (contracts/ui.md: Panel, Conversation, Suite, Test; Settings → Providers): its
 // `fixtures`, by when they run, each list in its order.
 //
-//   FixturesEditor (Settings → Providers, a provider): a list for each of the four, in plain words
-//     (once before the run, before each test, after each test, once after the run), each fixture
-//     numbered in its place, moved up or down or taken out, more added from the folder's fixtures
-//     (with what each gives); every change saved in the provider's file at once (comments kept)
+//   FixturesEditor (Settings → Providers, a provider: its Fixtures section): a list for each of the
+//     four, in plain words (once before the run, before each test, after each test, once after the
+//     run), each fixture numbered in its place, moved up or down or taken out, more added from the
+//     fixture plugins (with what each gives; one that doesn't run in a list, its phases, offered there
+//     but not to pick, with why); every change saved in the provider's file at once (comments kept)
+//   fixturesInBrief (its section's head, closed): what it runs, in order
 //   FixturesSummary (beside each provider picker): what it runs, in order, each fixture's name
 //     opening its code (Settings → Plugins), and `edit`, which opens the editor; by the conversation's
 //     provider, what stops a message to it before it's sent (sendProblem), with `edit the provider`
@@ -40,26 +42,46 @@ function listsOf(value) {
 }
 const nameOf = (entry) => entry.split("@")[0].trim();
 const gives = (f) => (f?.provides?.length ? `gives ${f.provides.join(", ")}` : "gives nothing");
+// The lists a fixture plugin can be in (its phases, as the engine reports them; all four when it
+// doesn't say), and whether it can be in this one
+const phasesOf = (f) => (Array.isArray(f?.phases) ? f.phases : FIXTURE_PHASES);
+const runsIn = (f, phase) => phasesOf(f).includes(phase);
+const onlyIn = (f) => `runs only in ${phasesOf(f).join(", ")}`;
+
+// What a provider's fixtures are, in a line, for its section's head while it's closed: each fixture in
+// the order they run (acme-login → reset-cart), or none yet; with `problem` when one of them has one
+// (named twice, not a fixture plugin, in a list it doesn't run in) or they can't be read. any: it has
+// some, or a problem with them.
+export function fixturesInBrief(config, plugins = []) {
+  const lists = listsOf(config?.fixtures);
+  if (lists.problem) return { text: "can't be shown: fix them in the YAML", problem: true, any: true };
+  const entries = FIXTURE_PHASES.flatMap((phase) => lists[phase].map((entry) => [phase, entry]));
+  if (!entries.length) return { text: "none yet", problem: false, any: false };
+  const fixture = (name) => plugins.find((p) => p.kind === "fixture" && p.name === name);
+  const problem = !!lists.duplicate || entries.some(([phase, entry]) => !fixture(nameOf(entry)) || !runsIn(fixture(nameOf(entry)), phase));
+  return { text: `${entries.map(([, entry]) => entry).join(" → ")}${problem ? " · has problems" : ""}`, problem, any: true };
+}
 
 // What stops any message to a provider before it's sent, as the engine says it when it refuses one
-// (engine/serve-port.js, send): its fixtures can't be read or name one twice, or a fixture (or its
-// provider plugin) isn't one of the folder's plugins; "" when nothing does. plugins: the folder's
-// (app.plugins). ownPlugins: the suite giving the context names plugins of its own, so a name the
-// folder hasn't got may be one of those (it isn't said).
+// (engine/serve-port.js, send): its fixtures can't be read or name one twice, a fixture (or its
+// provider plugin) isn't one of the plugins kept, or one is in a list it doesn't run in (its phases);
+// "" when nothing does. plugins: the ones kept (app.plugins). ownPlugins: the suite giving the context
+// names plugins of its own, so a name the app hasn't got may be one of those (it isn't said).
 export function providerProblem(config, plugins = [], { ownPlugins = false } = {}) {
   if (!config) return "";
   const named = (name) => plugins.find((p) => p.name === name);
   // (a plugin file that didn't load: why, rather than "isn't there")
   const broken = (name) => plugins.find((p) => !p.name && p.error && p.file.split("/").pop().replace(/\.m?js$/i, "") === name);
   const wanted = typeof config.kind === "string" && config.kind.startsWith("plugin:") ? config.kind.slice("plugin:".length).split("@")[0] : null;
-  if (wanted && !named(wanted) && !ownPlugins) return broken(wanted) ? `${broken(wanted).file}: ${broken(wanted).error}` : `the provider plugin "${wanted}" isn't in the folder's plugins, or the suite's`;
+  if (wanted && !named(wanted) && !ownPlugins) return broken(wanted) ? `${broken(wanted).file}: ${broken(wanted).error}` : `the provider plugin "${wanted}" isn't one of your plugins (Settings → Plugins)`;
   const lists = fixturesOf(config);
   if (lists.problems.length) return lists.problems[0];
   for (const phase of FIXTURE_PHASES) {
     for (const ref of lists[phase]) {
       const plugin = named(ref.name);
       if (plugin && plugin.kind !== "fixture") return `the plugin "${ref.name}" (fixtures.${phase}) is a ${plugin.kind}, not a fixture`;
-      if (!plugin && !ownPlugins) return broken(ref.name) ? `${broken(ref.name).file}: ${broken(ref.name).error}` : `the fixture "${ref.name}" (fixtures.${phase}) isn't in the folder's plugins/ or the suite's plugins`;
+      if (!plugin && !ownPlugins) return broken(ref.name) ? `${broken(ref.name).file}: ${broken(ref.name).error}` : `the fixture "${ref.name}" (fixtures.${phase}) isn't one of your plugins (Settings → Plugins)`;
+      if (plugin && !runsIn(plugin, phase)) return `the fixture "${ref.name}" (fixtures.${phase}) ${onlyIn(plugin)}`;
     }
   }
   return "";
@@ -104,7 +126,6 @@ export function FixturesEditor({ id, providerFile }) {
   };
   return (
     <>
-      <FieldHead label="Fixtures" />
       <p className="hint fixtures-hint" id={`${id}Hint`}>{`Plugins that run around this provider's requests, each list in its order. Kept in ${provider.file}: every suite using it runs them.`}</p>
       {lists.problem ? (
         <p className="hint error fixtures-hint" id={`${id}Problem`} role="alert">{`Its fixtures can't be shown here (${lists.problem}): fix them in the YAML below.`}</p>
@@ -121,15 +142,17 @@ export function FixturesEditor({ id, providerFile }) {
                 const known = byName.get(name);
                 // (named earlier in this list: the one to take out)
                 const again = lists[phase].slice(0, i).some((e) => nameOf(e) === name);
+                // (one this list can't have: what its phases are; the engine won't run it here)
+                const why = again ? "in this list already: take it out" : !known ? "isn't one of your fixture plugins" : !runsIn(known, phase) ? `${onlyIn(known)}: it can't be in this list` : "";
                 return (
                   <li className="settings-row fixture-row" key={`${i}-${entry}`} id={`${id}-${phase}-${i}`}>
                     <span className="fixture-order" aria-hidden="true">{i + 1}</span>
                     <div className="settings-row-text">
                       <span className="settings-row-name">{entry}</span>
-                      <span className={`hint${known && !again ? "" : " error"}`}>{again ? "in this list already: take it out" : known ? gives(known) : "isn't a fixture in the folder's plugins/"}</span>
+                      <span className={`hint${why ? " error" : ""}`}>{why || gives(known)}</span>
                     </div>
                     {known && <button className="btn btn-ghost" type="button" id={`${id}-${phase}-${i}-code`} aria-label={`Open ${name}'s code`} title="Its code (Settings → Plugins)"
-                                      onClick={() => showPlugin(name, { back: () => showProvider(providerFile) })}>code</button>}
+                                      onClick={() => showPlugin(name, { back: () => showProvider(providerFile, { fixtures: true }) })}>code</button>}
                     <button className="btn btn-ghost" type="button" id={`${id}-${phase}-${i}-up`} aria-label={`Move ${name} earlier`} title="Earlier"
                             disabled={busy || i === 0} onClick={() => save(phase, moved(lists[phase], i, -1))}>↑</button>
                     <button className="btn btn-ghost" type="button" id={`${id}-${phase}-${i}-down`} aria-label={`Move ${name} later`} title="Later"
@@ -143,9 +166,10 @@ export function FixturesEditor({ id, providerFile }) {
           )}
           <label className="select fixture-add">
             <Select id={`${id}-${phase}-add`} value="" disabled={busy || !fixtures.length} aria-label={`Add a fixture: ${label.toLowerCase()}`}
-                    options={[["", fixtures.length ? "+ add a fixture" : "No fixtures in the folder yet", true], ...fixtures.map((f) => {
+                    options={[["", fixtures.length ? "+ add a fixture" : "No fixture plugins yet", true], ...fixtures.map((f) => {
+                      // (each fixture plugin; only one that runs in this list (its phases), and isn't in it yet, to pick)
                       const listed = lists[phase].some((e) => nameOf(e) === f.name);
-                      return [f.name, `${f.name} (${listed ? "in this list already" : gives(f)})`, listed];
+                      return [f.name, `${f.name} (${!runsIn(f, phase) ? onlyIn(f) : listed ? "in this list already" : gives(f)})`, listed || !runsIn(f, phase)];
                     })]}
                     onChange={(e) => { if (e.target.value) save(phase, [...lists[phase], e.target.value]); }} />
           </label>
@@ -187,16 +211,16 @@ export function FixturesSummary({ id, providerFile, problem = null }) {
     <p className="hint error fixtures-hint" id={`${id}Problem`} role="alert">
       {`${problem.provider.name}: ${problem.problem}`}
       {" · "}
-      <button className="btn btn-ghost inline-link" id={`${id}Fix`} type="button" title="Settings → Providers" onClick={() => showProvider(problem.provider.file)}>edit the provider</button>
+      <button className="btn btn-ghost inline-link" id={`${id}Fix`} type="button" title="Settings → Providers" onClick={() => showProvider(problem.provider.file, { fixtures: true })}>edit the provider</button>
     </p>
   );
   return (
     <>
       <FieldHead label="Fixtures" actions={provider ? (
-        <button className="btn btn-ghost" id={`${id}Edit`} type="button" title="Settings → Providers" onClick={() => showProvider(provider.file)}>edit</button>
+        <button className="btn btn-ghost" id={`${id}Edit`} type="button" title="Settings → Providers" onClick={() => showProvider(provider.file, { fixtures: true })}>edit</button>
       ) : null} />
       {!provider
-        ? <><p className="hint fixtures-hint" id={`${id}None`}>Choose a provider file to give it fixtures.</p>{said}</>
+        ? <><p className="hint fixtures-hint" id={`${id}None`}>Choose a provider to give it fixtures.</p>{said}</>
         : lists.problem
           ? said || <p className="hint error fixtures-hint" id={`${id}None`}>{`Its fixtures can't be read: ${lists.problem}`}</p>
           : facts.length

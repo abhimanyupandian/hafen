@@ -467,8 +467,9 @@ describe("a conversation, the environment passed with each message", () => {
     assert.equal(transport.requests.length, sent);
     // A typed {{env.…}} the environment hasn't: the send is refused, saying which
     await assert.rejects(send(STAGE, "{{env.nope}}"), /\{\{env\.nope\}\} isn't set: the environment "stage" has no nope/);
-    // A name with no environment passed: none is chosen (the folder's environments/stage.yml isn't read)
-    await assert.rejects(call("send", { token: "c", providerFile: "providers/p.yml", suiteFile: "s.hafen.yml", env: "stage", message: "{{env.region}}" }), new RegExp(`\\{\\{env\\.region\\}\\} ${NO_ENV.replace(/[()]/g, "\\$&")}`));
+    // A name with no environment passed: chosen as a run chooses, the suite's environment of that name,
+    // with no values (the folder's environments/stage.yml isn't read)
+    await assert.rejects(call("send", { token: "c", providerFile: "providers/p.yml", suiteFile: "s.hafen.yml", env: "stage", message: "{{env.region}}" }), /\{\{env\.region\}\} isn't set: the environment "stage" has no region/);
     assert.equal(transport.requests.length, sent);
   });
 

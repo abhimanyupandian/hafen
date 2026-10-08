@@ -8,11 +8,15 @@
 //   greeting="Hello, \"you\"\n"    (double quotes: \n, \t, \", \\ ; single quotes: as written)
 //   export REGION=eu               (an `export ` before the name is allowed, and ignored)
 //
-// A value unquoted runs to the end of its line, less a ` # comment` after it. Every value is text.
-// Nothing here reads files: the host does.
+// A value unquoted runs to the end of its line, less a ` # comment` after it (KEY= # not set yet: an
+// empty value). Every value is text. Nothing here reads files: the host does.
 
-const KEY = /^[A-Za-z_][A-Za-z0-9_.-]*$/;
-const LINE = /^\s*(?:export\s+)?([^=\s]+)\s*=\s*(.*)$/;
+// What a name is, for an environment's value and a secret alike: here, in {{env.NAME}} and
+// {{secret.NAME}} (vars.js), a fixture's values, and the app's (letters, digits, _ . -, not starting
+// with a digit)
+export const NAME = /^[A-Za-z_][A-Za-z0-9_.-]*$/;
+export const NAME_RULE = "letters, digits, _ . -, not starting with a digit";
+const LINE = /^\s*(?:export\s+)?([^=\s]+)\s*=(\s*)(.*)$/;
 
 // A file's text: { values: { NAME: "value" }, errors: [{ file, line, column, message }],
 // lines: [{ key, line }] } (where each name is, for problems that point at it)
@@ -29,13 +33,14 @@ export function parseEnvText(text, file = "") {
       errors.push({ file, line, column: 1, message: `line ${line} isn't NAME=value` });
       continue;
     }
-    const [, key, raw] = m;
+    const [, key, space, raw] = m;
     const column = row.indexOf(key) + 1;
-    if (!KEY.test(key)) {
-      errors.push({ file, line, column, message: `"${key}" isn't a name (letters, digits, _ . -, not starting with a digit)` });
+    if (!NAME.test(key)) {
+      errors.push({ file, line, column, message: `"${key}" isn't a name (${NAME_RULE})` });
       continue;
     }
-    const value = valueOf(raw);
+    // (a # after the = and a space is a comment: KEY= # note is KEY, empty)
+    const value = space && raw.startsWith("#") ? { text: "" } : valueOf(raw);
     if (value.error) {
       errors.push({ file, line, column: row.indexOf(raw) + 1, message: value.error });
       continue;
@@ -89,7 +94,7 @@ export function envValueText(value) {
 // A file's text with one name set (on its own line, in its place; a new one at the end) or taken
 // out (value null): every other line, comments and blank ones too, as it was
 export function editEnvText(text, key, value) {
-  if (!KEY.test(key)) throw new Error(`"${key}" isn't a name (letters, digits, _ . -, not starting with a digit)`);
+  if (!NAME.test(key)) throw new Error(`"${key}" isn't a name (${NAME_RULE})`);
   const eol = /\r\n/.test(text ?? "") ? "\r\n" : "\n";
   const rows = String(text ?? "").split(/\r?\n/);
   const at = rows.findIndex((row) => row.match(LINE)?.[1] === key);

@@ -14,13 +14,15 @@ const SKIP = new Set(["node_modules", ".git", ".hafen", "dist", "release"]);
 export const VERSION = "0.1.0";
 
 // root: the folder suite paths are relative to. secrets(NAME, {env}): where secrets ({{secret.NAME}})
-// come from (the command line's: secretsFrom). also: more folders files may be read from (the ones a
-// command line names, outside the current one).
+// come from (the command line's: secretsFrom; by default, the process's environment variables).
+// knownSecrets(env) → [values]: every secret it keeps, hidden wherever it shows (the command line's:
+// its --secret files'). also: more folders files may be read from (the ones a command line names,
+// outside the current one).
 //
 // Files are read only under the root (and `also`): a suite can't name a file elsewhere (a key, a
 // credentials file) to have it read and sent on. Links are followed before that's checked. They're
 // written and removed only under the root.
-export function nodeHost({ root = process.cwd(), secrets = (name) => process.env[name], transport = fetchTransport(), app = "cli", saveRun, also = [] } = {}) {
+export function nodeHost({ root = process.cwd(), secrets = fromProcess, knownSecrets, transport = fetchTransport(), app = "cli", saveRun, also = [] } = {}) {
   const abs = (p) => (isAbsolute(p) ? p : join(root, p));
   const under = (dir, full) => {
     const rel = relative(dir, full);
@@ -48,6 +50,7 @@ export function nodeHost({ root = process.cwd(), secrets = (name) => process.env
     root,
     transport,
     secrets,
+    ...(knownSecrets ? { knownSecrets } : {}),
     now: () => performance.now(),
     clock: () => Date.now(),
     where: { app, version: VERSION, os: process.platform, node: process.versions.node },
@@ -122,7 +125,16 @@ export function nodePluginWorker() {
 // A path given on the command line, relative to the root, with / separators
 export const fromRoot = (root, p) => relative(root, resolve(p)).split(sep).join("/");
 
-// Where the command line's secrets come from: a secrets file's values (--secret, KEY=VALUE), each
-// it sets, then the process's environment variables (CI's secrets). A name the file leaves empty
-// (NAME=) isn't set by it.
-export const secretsFrom = (values = {}) => (name) => (Object.hasOwn(values, name) && values[name] !== "" ? values[name] : process.env[name]);
+// A value that's a map's own text, or undefined: never one its prototype has ({{secret.constructor}}
+// isn't Object's constructor)
+const ownText = (values, name) => (values && Object.hasOwn(values, name) && typeof values[name] === "string" ? values[name] : undefined);
+// The process's environment variable of that name
+export const fromProcess = (name) => ownText(process.env, name);
+
+// Where the command line's secrets come from: the secrets files' values (--secret, KEY=VALUE, merged
+// in order: commands.js), each they set, then the process's environment variables (CI's secrets). A
+// name a file leaves empty (NAME=) isn't set by it.
+export const secretsFrom = (values = {}) => (name) => {
+  const value = ownText(values, name);
+  return value !== undefined && value !== "" ? value : fromProcess(name);
+};

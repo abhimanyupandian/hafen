@@ -15,13 +15,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parse } from "yaml";
-import { addScope, expect, fileText, test } from "./fixtures.js";
+import { addScope, expect, fileText, reopen, test } from "./fixtures.js";
 
 const CLI = fileURLToPath(new URL("../../packages/hafen/cli/hafen.js", import.meta.url));
 // A file written into the folder the app opened (the browser's private file system)
 const writeOpfs = (page, path, text) => page.evaluate(async ([path, text]) => {
   const parts = path.split("/");
-  let dir = await navigator.storage.getDirectory();
+  let dir = await navigator.storage.getDirectory().then((root) => root.getDirectoryHandle("workspace", { create: true }));
   for (const p of parts.slice(0, -1)) dir = await dir.getDirectoryHandle(p, { create: true });
   const w = await (await dir.getFileHandle(parts.at(-1), { create: true })).createWritable();
   await w.write(text);
@@ -40,7 +40,6 @@ const run = async (page, status) => {
 };
 
 test.beforeEach(async ({ app: { page } }) => {
-  await page.click("#openFolder");
   await expect(page.locator(`#suiteList .list-row[data-file="${SUITE}"]`)).toHaveCount(1);
 });
 test.afterEach(async ({ app: { errors } }) => {
@@ -201,37 +200,41 @@ test("the suite's YAML editor saved with YAML that doesn't parse: what was typed
 test("Settings → Secrets and System One say plainly that the browser build keeps them unencrypted", async ({ app: { page } }) => {
   await page.click("#openSettings");
   await page.click("#settings-tab-secrets");
-  await expect(page.locator("#settingsModal")).toContainText("In the browser build they're kept in this browser's storage, unencrypted: use the desktop app for keys that matter.");
+  await expect(page.locator("#secretsNote")).toHaveText("Kept in this browser's storage, unencrypted: use the desktop app for keys that matter.");
   await page.click("#settings-tab-systemone");
   await expect(page.locator("#settingsModal")).toContainText("In the browser build its key is kept in this browser's storage, unencrypted");
 });
 
-test("a new scope's name: letters, digits, '.', '-' and '_', and not one there is: else refused, said, and nothing made", async ({ app: { page } }) => {
-  await page.click("#scopeButton");
-  await page.locator("#newScopeName").waitFor();
-  for (const bad of ["my scope", "stage!", "-stage", ".hidden"]) {
-    await page.fill("#newScopeName", bad);
+test.describe("with no scope made yet", () => {
+  test.use({ scope: null });
+  test("a new scope's name: letters, digits, '.', '-' and '_', and not one there is (nor Globals'): else refused, said under the form, and nothing made", async ({ app: { page } }) => {
+    await page.click("#scopeButton");
+    await page.locator("#newScopeName").waitFor();
+    for (const bad of ["my scope", "stage!", "-stage", ".hidden"]) {
+      await page.fill("#newScopeName", bad);
+      await page.click("#newScopeForm button[type=submit]");
+      await expect(page.locator("#newScopeProblem")).toHaveText("A scope's name is letters, digits, '.', '-' and '_'.");
+    }
+    await expect(page.locator("#environmentsEmpty")).toBeVisible();
+    await page.fill("#newScopeName", "stage-2.eu_1");
     await page.click("#newScopeForm button[type=submit]");
-    await expect(page.locator("#environmentsError")).toHaveText("A scope's name is letters, digits, '.', '-' and '_'.");
-  }
-  await expect(page.locator("#environmentsEmpty")).toBeVisible();
-  await page.fill("#newScopeName", "stage-2.eu_1");
-  await page.click("#newScopeForm button[type=submit]");
-  await expect(page.locator("#envScope")).toHaveValue("stage-2.eu_1");
-  await page.fill("#newScopeName", "stage-2.eu_1");
-  await page.click("#newScopeForm button[type=submit]");
-  await expect(page.locator("#environmentsError")).toHaveText('There\'s a scope "stage-2.eu_1" already.');
-  expect(await page.evaluate(() => localStorage.getItem("eval.scopes"))).toBe('["stage-2.eu_1"]');
+    await expect(page.locator('[id="envScope-stage-2.eu_1"]')).toHaveClass(/active/);
+    await page.click("#newScope");
+    await page.fill("#newScopeName", "stage-2.eu_1");
+    await page.click("#newScopeForm button[type=submit]");
+    await expect(page.locator("#newScopeProblem")).toHaveText('There\'s a scope "stage-2.eu_1" already.');
+    expect(await page.evaluate(() => localStorage.getItem("eval.scopes"))).toBe('["stage-2.eu_1"]');
+  });
 });
 
 test("the message box: Shift+Enter adds a line, Enter sends it as typed (its lines kept)", async ({ app: { page, servers } }) => {
   await page.evaluate(async (url) => {
-    const dir = await (await navigator.storage.getDirectory()).getDirectoryHandle("providers", { create: true });
+    const dir = await (await navigator.storage.getDirectory().then((root) => root.getDirectoryHandle("workspace", { create: true }))).getDirectoryHandle("providers", { create: true });
     const w = await (await dir.getFileHandle("plain.yml", { create: true })).createWritable();
     await w.write(`kind: http\nurl: "${url}/json"\nbody: { message: "{{user}}" }\nresponse: { text: $.data.reply }\n`);
     await w.close();
   }, servers.mock.url);
-  await page.click("#openFolder");
+  await reopen(page);
   await page.selectOption("#convProvider", "providers/plain.yml");
   await fetch(`${servers.mock.url}/_log`, { method: "DELETE" });
   await page.locator("#input").pressSequentially("first line");
@@ -248,7 +251,7 @@ test("the message box: Shift+Enter adds a line, Enter sends it as typed (its lin
 test("a suite's panel lists an old way to write a value or a secret among its problems, saying the new way", async ({ app: { page } }) => {
   await writeOpfs(page, "providers/old.yml", "kind: http\nurl: \"http://127.0.0.1:1/json\"\nheaders: { X-Key: \"${env:OLD_KEY}\" }\nbody: { message: \"{{user}}\" }\nresponse: { text: $.data.reply }\n");
   await writeOpfs(page, "old.hafen.yml", "version: 1\nname: Old\nprovider: providers/old.yml\ntests:\n  - name: old hello\n    turns:\n      - user: \"hi {{scope.who}}\"\n        expect: [ { contains: hi } ]\n");
-  await page.click("#openFolder");
+  await reopen(page);
   await page.locator('#suiteList .list-row[data-file="old.hafen.yml"] .list-open').first().click();
   const problems = page.locator("#panel .problems");
   await expect(problems).toContainText("{{scope.who}} is the old way: write {{env.who}} (a value of the environment) or {{secret.who}} (a secret)");
@@ -263,7 +266,7 @@ test("Getting started's command line: the scope's Export .env, given to hafen wi
     "gs.hafen.yml": "version: 1\nname: smoke\nprovider: providers/gs.yml\ntests:\n  - name: refund\n    turns:\n      - user: I want a refund for order 4417\n        expect: [ { type: status, equals: 200 } ]\n      - user: It arrived broken\n        expect: [ { contains: refund } ]\n",
   };
   for (const [path, text] of Object.entries(files)) await writeOpfs(page, path, text);
-  await page.click("#openFolder");
+  await reopen(page);
   await addScope(page, "local", { base_url: servers.mock.url });
   // In the app: the run fails as Getting started says (the second reply doesn't say "refund")
   await page.locator("#suiteList .list-open", { hasText: "refund" }).first().click();

@@ -10,10 +10,10 @@ import { problem as pathProblem } from "../jsonpath.js";
 import { PRESETS } from "../providers/index.js";
 import { validateProviderSchema, validateSuiteSchema } from "../schema.js";
 import { basename, closest, isObject, joinPath, missingFile } from "../util.js";
-import { missingMessage, OLD_SECRET, oldWay, references, secretsWhere, valueAt } from "../vars.js";
-import { parseData } from "./data.js";
+import { badName, missingMessage, OLD_SECRET, oldWay, references, refOf, secretsWhere, valueAt } from "../vars.js";
+import { readData } from "./data.js";
 import { regex } from "../checks/operators.js";
-import { isBuiltIn } from "../checks/index.js";
+import { confidenceProblem, isBuiltIn, lacking } from "../checks/index.js";
 import suiteSchema from "./schema/suite.js";
 import providerSchema from "./schema/provider.js";
 
@@ -191,6 +191,7 @@ async function loadProvider(host, ref, fromFile, label, { at = {}, names } = {})
     environment: Object.fromEntries(usePlaces(USES.environment, parsed, text, parsed.data)),
     oldSecret: Object.fromEntries(usePlaces(USES.oldSecret, parsed, text, parsed.data)),
     oldScope: Object.fromEntries(usePlaces(USES.oldScope, parsed, text, parsed.data)),
+    badName: Object.fromEntries(usePlaces(USES.badName, parsed, text, parsed.data)),
     vars: Object.fromEntries(usePlaces(USES.vars, parsed, text, parsed.data)),
     at: placesOf(parsed, parsed.data),
   };
@@ -210,10 +211,11 @@ export function providerOf(suite, index) {
 }
 
 // Load a suite: { file, name, data, parsed, providers, provider, providerNames, providerFiles,
-// providerPlaces, prices, dataFiles, schemas, errors, warnings }. Problems don't throw: they're
-// returned, each with its file, line and column.
+// providerPlaces, prices, dataFiles, dataColumns, schemas, errors, warnings }. Problems don't throw:
+// they're returned, each with its file, line and column. (dataFiles: each test's data rows, by its
+// index; dataColumns: its data file's { columns, header }, as data.js reads them)
 export async function loadSuite(host, file, { text } = {}) {
-  const suite = { file, name: basename(file).replace(SUITE_FILE, ""), errors: [], warnings: [], providers: {}, providerNames: {}, providerFiles: {}, providerPlaces: {}, dataFiles: {} };
+  const suite = { file, name: basename(file).replace(SUITE_FILE, ""), errors: [], warnings: [], providers: {}, providerNames: {}, providerFiles: {}, providerPlaces: {}, dataFiles: {}, dataColumns: {} };
   let source = text;
   if (source === undefined) {
     try {
@@ -311,7 +313,9 @@ export async function loadSuite(host, file, { text } = {}) {
       continue;
     }
     try {
-      suite.dataFiles[i] = parseData(await host.files.read(dataFile), dataFile);
+      const read = readData(await host.files.read(dataFile), dataFile);
+      suite.dataFiles[i] = read.rows;
+      suite.dataColumns[i] = { columns: read.columns, header: read.header };
     } catch (err) {
       suite.errors.push({ file: dataFile, message: err.message });
     }
@@ -338,26 +342,28 @@ export async function loadSuite(host, file, { text } = {}) {
   }
 
   if (suite.errors.every((e) => keyErrors.includes(e))) {
-    const { errors, missing } = deepChecks(suite);
+    const { errors, missing } = deepChecks(suite, keys);
     suite.errors.push(...errors);
     // Variables nothing in the files sets: a setup error unless the run gives them (--var)
     suite.missing = missing;
   }
   const tests = testProblems(data, parsed, file);
-  suite.errors.push(...tests.errors, ...reservedNames(data, parsed, file));
+  suite.errors.push(...tests.errors, ...reservedNames(data, parsed, file), ...rowNameProblems(suite));
   if (Array.isArray(data.tests) && !data.tests.length) suite.warnings.push({ file, ...position(parsed, ["tests"]), message: "no tests yet" });
   // What the format has, but this version can't run yet: a run says so (the test or the turn is an
   // error), rather than send it without, or not at all, and pass
   suite.warnings.push(...notBuilt(data).map(({ path, message }) => ({ file, ...position(parsed, path), message })));
   suite.warnings.push(...tests.warnings);
-  // The old ways to write the environment's values and secrets: problems, each saying the new way
+  // The old ways to write the environment's values and secrets: problems, each saying the new way;
+  // and a {{secret.NAME}} or {{env.NAME}} whose NAME isn't a name
   suite.errors.push(...oldSpellings(suite));
   return suite;
 }
 
-// What the schema can't say: every path parses, every pattern compiles, every judge exists, and
-// every {{variable}} can be found where it's used.
-function deepChecks(suite) {
+// What the schema can't say: every path parses, every pattern compiles, every judge exists, every
+// check has what its type needs, and every {{variable}} can be found where it's used. (keys: the
+// unknown keys' problems, so a check's field that one most likely meant isn't said again)
+function deepChecks(suite, keys = []) {
   const { data, parsed, file } = suite;
   const errors = [];
   const missing = [];
@@ -380,6 +386,15 @@ function deepChecks(suite) {
       unset(path, name, `{{${name}}} isn't set anywhere before it's used (variables, environments, an extract or a setup step)`);
     }
   };
+  // A field its type needs (a tool.called's tool, a length's limit): without it, a check would pass
+  // having looked at nothing. Said at the check
+  const lacks = (check, path) => {
+    const why = lacking(check, data.judges, keys.filter((k) => k.at === path.join(".") && k.suggest).map((k) => k.suggest));
+    if (why) at(path, why);
+    // (a confidence on a check that has none, or with an unsure_below it makes do nothing: at that key)
+    const confidence = confidenceProblem(check);
+    if (confidence.message) at([...path, confidence.key], confidence.message);
+  };
   const checkCheck = (check, path) => {
     if (check.path) {
       const p = pathProblem(check.path);
@@ -393,6 +408,11 @@ function deepChecks(suite) {
       const problem = pathProblem(p);
       if (problem) at([...path, "args"], problem);
     }
+    lacks(check, path);
+  };
+  // (a setup or teardown step's checks, on its response: what their types need)
+  const stepChecks = (steps, path) => {
+    for (const [s, step] of listOf(steps).entries()) for (const [c, check] of listOf(step?.expect).entries()) if (check?.enabled !== false) lacks(check, [...path, s, "expect", c]);
   };
   for (const [name, judge] of Object.entries(data.judges ?? {})) {
     if (judge?.kind === "llm" && !(data.providers ?? {})[judge.provider]) at(["judges", name, "provider"], `the judge "${name}" names the provider "${judge.provider}", which isn't under providers`);
@@ -401,9 +421,16 @@ function deepChecks(suite) {
     checkVars(step.request, ["setup", s, "request"], new Set([...suiteVars, ...fromSetup]));
     for (const [v, p] of Object.entries(step.extract ?? {})) { const problem = pathProblem(p); if (problem) at(["setup", s, "extract", v], problem); }
   }
+  stepChecks(data.setup, ["setup"]);
+  stepChecks(data.teardown, ["teardown"]);
   for (const [t, test] of (data.tests ?? []).entries()) {
     const known = new Set([...suiteVars, ...fromSetup]);
     if (test.data) known.add("row");
+    // (a row's name is filled in before the test's setup steps: what they extract isn't there yet; one
+    // with no data file is said by rowNameProblems)
+    if (test.data && test.row_name !== undefined) checkVars(test.row_name, ["tests", t, "row_name"], known);
+    stepChecks(test.setup, ["tests", t, "setup"]);
+    stepChecks(test.teardown, ["tests", t, "teardown"]);
     for (const [s, step] of (test.setup ?? []).entries()) {
       checkVars(step.request, ["tests", t, "setup", s, "request"], known);
       Object.keys(step.extract ?? {}).forEach((k) => known.add(k));
@@ -444,17 +471,26 @@ function deepChecks(suite) {
 // Every secret a suite will need: in its files ({{secret.NAME}}), and the presets' and System One's
 // default keys
 const DEFAULT_KEYS = { "openai-chat": "OPENAI_API_KEY", "openai-responses": "OPENAI_API_KEY", "anthropic-messages": "ANTHROPIC_API_KEY", gemini: "GEMINI_API_KEY" };
-export const secretsNeeded = (suite) => secretUses(suite).map((use) => use.name);
+export const secretsNeeded = (suite, environment) => secretUses(suite, environment).map((use) => use.name);
+
+// A suite's data as a run with this environment reads it: of its environments, only the chosen one's
+// (environment: { name } the chosen one, null none; undefined, all of them: every name any could need)
+function chosenData(suite, environment) {
+  const data = suite.data ?? {};
+  if (environment === undefined || !isObject(data.environments)) return data;
+  const name = environment?.name;
+  return { ...data, environments: name && Object.prototype.hasOwnProperty.call(data.environments, name) ? { [name]: data.environments[name] } : {} };
+}
 
 // The same, each where it's first used: [{ name, file, line?, column? }]. A {{secret.NAME}} where it's
 // written (the suite, or the provider file it's in); a preset's default key at its provider's kind (or
 // where the suite names the preset); System One's at its judge (with none declared, at the first check
-// that asks it)
-export function secretUses(suite) {
+// that asks it). environment: the chosen one (its block of environments only), as chosenData
+export function secretUses(suite, environment = undefined) {
   const uses = new Map();
   const use = (name, file, at) => { if (!uses.has(name)) uses.set(name, { name, file, ...at }); };
   // (a check turned off doesn't need its key: it's left out, as runningData leaves it out)
-  for (const [name, at] of usePlaces(USES.secret, suite.parsed, suite.text, suite.data ?? {})) use(name, suite.file, at);
+  for (const [name, at] of usePlaces(USES.secret, suite.parsed, suite.text, chosenData(suite, environment))) use(name, suite.file, at);
   for (const [key, config] of Object.entries(suite.providers ?? {})) {
     const own = suite.providerFiles?.[key];
     const places = own ? suite.providerPlaces?.[own] : null;
@@ -475,12 +511,13 @@ export function secretUses(suite) {
 }
 
 // The {{env.NAMES}} a suite uses, each where it's first used: [{ name, file, line?, column? }]
-export const envUses = (suite) => usesOf(suite, USES.environment, "environment", (config) => references(config).environment);
+// (environment: the chosen one, as secretUses)
+export const envUses = (suite, environment = undefined) => usesOf(suite, USES.environment, "environment", (config) => references(config).environment, environment);
 
-function usesOf(suite, uses, key, names) {
+function usesOf(suite, uses, key, names, environment) {
   const out = new Map();
   const use = (name, file, at) => { if (!out.has(name)) out.set(name, { name, file, ...at }); };
-  for (const [name, at] of usePlaces(uses, suite.parsed, suite.text, suite.data ?? {})) use(name, suite.file, at);
+  for (const [name, at] of usePlaces(uses, suite.parsed, suite.text, chosenData(suite, environment))) use(name, suite.file, at);
   for (const [k, config] of Object.entries(suite.providers ?? {})) {
     const own = suite.providerFiles?.[k];
     const places = own ? suite.providerPlaces?.[own] : null;
@@ -501,10 +538,12 @@ function oldSpellings(suite) {
   };
   for (const [name, at] of usePlaces(USES.oldSecret, suite.parsed, suite.text, suite.data ?? {})) say(suite.file, at, oldWay("env", name));
   for (const [name, at] of usePlaces(USES.oldScope, suite.parsed, suite.text, suite.data ?? {})) say(suite.file, at, oldWay("scope", name));
+  for (const [name, at] of usePlaces(USES.badName, suite.parsed, suite.text, suite.data ?? {})) say(suite.file, at, badName(refOf(name)));
   for (const own of new Set(Object.values(suite.providerFiles ?? {}))) {
     const places = suite.providerPlaces?.[own] ?? {};
     for (const [name, at] of Object.entries(places.oldSecret ?? {})) say(own, at, oldWay("env", name));
     for (const [name, at] of Object.entries(places.oldScope ?? {})) say(own, at, oldWay("scope", name));
+    for (const [name, at] of Object.entries(places.badName ?? {})) say(own, at, badName(refOf(name)));
   }
   return out;
 }
@@ -518,6 +557,8 @@ const USES = {
   // the old ways: ${env:NAME} (a secret) and {{scope.NAME}}
   oldSecret: { names: (text) => new Set([...text.matchAll(OLD_SECRET)].map((m) => m[1])), written: (name) => new RegExp(`\\$\\{env:${name}\\}`, "g") },
   oldScope: { names: (text) => new Set([...references(text).vars].filter((n) => n.startsWith("scope.")).map((n) => n.slice(6))), written: (name) => new RegExp(`\\{\\{\\s*scope\\.${quote(name)}\\s*\\}\\}`, "g") },
+  // a {{secret.NAME}} or {{env.NAME}} whose NAME isn't a name ({{secret.1KEY}}), by the whole of it
+  badName: { names: (text) => new Set([...references(text).vars].filter((n) => badName(refOf(n)))), written: (name) => new RegExp(`\\{\\{\\s*${quote(name)}\\s*\\}\\}`, "g") },
   vars: { names: (text) => references(text).vars, written: (name) => new RegExp(`\\{\\{\\s*${quote(name)}\\s*\\}\\}`, "g") },
 };
 
@@ -613,21 +654,61 @@ export const envHas = (environment, name) => [environment?.values, environment?.
   return value !== undefined && value !== null;
 });
 
+// The {{name}}s a suite uses that only its environments' values give (none of its variables, no
+// extraction or setup step's, not one the run gives: vars), the chosen one's lacking it (environment:
+// { name, suite? }, or null), each where it's first used: [{ name, file, line?, column? }]
+function envOnlyUses(suite, environment, vars = {}) {
+  const data = suite.data ?? {};
+  const blocks = isObject(data.environments) ? Object.values(data.environments).filter(isObject) : [];
+  const given = new Set(blocks.flatMap((b) => Object.keys(b)));
+  if (!given.size) return [];
+  const extracted = (steps) => listOf(steps).flatMap((s) => Object.keys(s?.extract ?? {}));
+  const set = new Set([...Object.keys(isObject(data.variables) ? data.variables : {}), ...Object.keys(vars), ...extracted(data.setup), ...listOf(data.tests).flatMap((t) => [...extracted(t?.setup), ...extracted(t?.turns)])]);
+  const chosen = isObject(environment?.suite) ? environment.suite : {};
+  const only = (name) => {
+    const head = name.split(".")[0];
+    return !REF_HEADS.has(head) && !BUILTINS.has(name) && !BUILTIN_HEADS.has(head) && given.has(head) && !set.has(head) && !Object.prototype.hasOwnProperty.call(chosen, head);
+  };
+  const out = new Map();
+  const use = (name, file, at) => { if (!out.has(name.split(".")[0])) out.set(name.split(".")[0], { name: name.split(".")[0], file, ...at }); };
+  const { environments: _all, ...rest } = runningData(data);
+  for (const [name, at] of usePlaces(USES.vars, suite.parsed, suite.text, rest)) if (only(name)) use(name, suite.file, at);
+  for (const [key, config] of Object.entries(suite.providers ?? {})) {
+    const own = suite.providerFiles?.[key];
+    const places = own ? suite.providerPlaces?.[own]?.vars ?? {} : Object.fromEntries(usePlaces(USES.vars, suite.parsed, suite.text, config, refPath(key)));
+    for (const name of references(config).vars) if (only(name)) use(name, own ?? suite.file, places[name] ?? {});
+  }
+  return [...out.values()];
+}
+const envOnlyMessage = (suite, name, environment) => {
+  const which = Object.entries(suite.data.environments).filter(([, b]) => isObject(b) && Object.prototype.hasOwnProperty.call(b, name)).map(([n]) => `"${n}"`);
+  const give = `of the suite's environments, ${which.join(", ")} ${which.length === 1 ? "gives" : "give"} it`;
+  return `{{${name}}} isn't set: ${give}, ${environment?.name ? `not "${environment.name}"` : "and none of them is chosen"}`;
+};
+
 // The problems a run would have: the suite's errors, and the variables nothing sets, unless the run
 // gives them (vars: names given at run time, as --var does); with secrets, the secrets it needs; with
 // environment (the chosen one, { name, values, suite? }, or null: none), the {{env.NAMES}} it
-// hasn't. (Each said where it's first used: the suite, or a provider file)
-export function problemsFor(suite, vars = {}, secrets = null, environment = undefined, secretsFrom = undefined) {
+// hasn't, less those its providers' fixtures set with env.set (envGiven: a Set). (Each said where
+// it's first used: the suite, or a provider file)
+export function problemsFor(suite, vars = {}, secrets = null, environment = undefined, secretsFrom = undefined, envGiven = new Set()) {
   const problems = [...(suite.errors ?? []), ...(suite.missing ?? []).filter((m) => !(m.variable in vars))];
   const set = (value) => value !== undefined && value !== null && value !== "";
+  // (of the suite's environments, only the chosen one's values are read: a name only another's
+  // uses isn't this run's)
   if (environment !== undefined && !problems.length) {
-    for (const { name, ...where } of envUses(suite)) {
-      if (!environment || !envHas(environment, name)) problems.push({ ...where, variable: `env.${name}`, message: missingMessage(name, "environment", environment ? environment.name ?? "" : null) });
+    for (const { name, ...where } of envUses(suite, environment)) {
+      if (!envGiven.has(name) && (!environment || !envHas(environment, name))) problems.push({ ...where, variable: `env.${name}`, message: missingMessage(name, "environment", environment ? environment.name ?? "" : null) });
     }
+  }
+  // A {{name}} only the suite's environments give: the chosen one's must have it (with no scope, or
+  // another, none of theirs is read: it would stop the turn that uses it, so it's said here)
+  if (environment !== undefined && !problems.length) {
+    for (const { name, ...where } of envOnlyUses(suite, environment, vars)) problems.push({ ...where, variable: name, message: envOnlyMessage(suite, name, environment) });
   }
   if (secrets && !problems.length) {
     // (each said where it's first used: the suite, or a provider file)
-    for (const { name, ...where } of secretUses(suite)) {
+    for (const { name, ...where } of secretUses(suite, environment)) {
       if (!set(secrets(name))) problems.push({ ...where, variable: name, message: missingMessage(name, "secret", secretsWhere(environment, secretsFrom)) });
     }
   }
@@ -636,7 +717,7 @@ export function problemsFor(suite, vars = {}, secrets = null, environment = unde
 
 const KNOWN = {
   top: ["version", "name", "group", "provider", "providers", "environments", "variables", "judges", "defaults", "setup", "teardown", "plugins", "prices", "redact", "tests"],
-  test: ["name", "id", "tags", "group", "provider", "data", "setup", "teardown", "turns", "simulate", "expect_conversation", "repeat", "pass_rate", "history", "on_fail", "unsure", "unsure_below", "timeout_ms", "retries", "network", "load"],
+  test: ["name", "id", "tags", "group", "provider", "data", "row_name", "setup", "teardown", "turns", "simulate", "expect_conversation", "repeat", "pass_rate", "history", "on_fail", "unsure", "unsure_below", "timeout_ms", "retries", "network", "load"],
   turn: ["user", "attachments", "reply", "extract", "tools", "expect"],
   step: Object.keys(suiteSchema.$defs.step.properties),
   check: Object.keys(suiteSchema.$defs.check.properties),
@@ -764,6 +845,34 @@ function reservedNames(data, parsed, file) {
     steps(test?.setup, ["tests", t, "setup"]);
     steps(test?.teardown, ["tests", t, "teardown"]);
     for (const [i, turn] of listOf(test?.turns).entries()) each(turn?.extract, ["tests", t, "turns", i, "extract"], "an extraction");
+  }
+  return out;
+}
+
+// A test's row_name (contracts/test-file.md, Data rows): its rows' names, shown in every report, so it
+// names a data file's row (a test without one has none), never holds a secret, and fills in only
+// columns the data file has (each {{row.<column>}}, when its columns are known)
+function rowNameProblems(suite) {
+  const { data, parsed, file } = suite;
+  const out = [];
+  for (const [t, test] of listOf(data?.tests).entries()) {
+    if (!isObject(test) || typeof test.row_name !== "string") continue;
+    const path = ["tests", t, "row_name"];
+    const say = (at, message) => out.push({ file, ...at, message: `tests.${t}.row_name: ${message}` });
+    if (!test.data) {
+      say(keyPosition(parsed, ["tests", t], "row_name"), "row_name names a data row: this test has no data file (data)");
+      continue;
+    }
+    for (const [name, at] of usePlaces(USES.secret, parsed, suite.text, test.row_name, path)) say(at, `a row's name can't hold a secret ({{secret.${name}}}): it's shown in every report`);
+    const columns = suite.dataColumns?.[t]?.columns ?? [];
+    if (!columns.length) continue;
+    const ref = typeof test.data === "string" ? test.data : test.data.file;
+    for (const [name, at] of usePlaces(USES.vars, parsed, suite.text, test.row_name, path)) {
+      const [head, column] = name.split(".");
+      if (head !== "row" || column === undefined || columns.includes(column)) continue;
+      const meant = closest(column, columns);
+      say(at, `{{row.${column}}} isn't a column of ${ref} (${meant ? `did you mean {{row.${meant}}}?` : `its columns: ${columns.join(", ")}`})`);
+    }
   }
   return out;
 }

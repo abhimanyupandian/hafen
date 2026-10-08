@@ -13,11 +13,20 @@ One set of words and colours for anything that runs.
 | `running` | `--run` | Same, with `--run-…`; badges blink |
 | `done`, `passed` | `--ok` | Same, with `--ok-…` |
 | `error`, `failed`, `interrupted` | `--danger` | Same, with `--bad-soft`, `--bad-line` |
+| `couldn't run` (eval) | `--danger` | As `error` (its `data-status`), with why after it where there's room: `couldn't run: <the first problem>` |
 | `skipped` | (none) | Faded to opacity .55 |
 | `stopped` | `--muted` | Text only |
 
 Lists colour their `.list-size` by the row's `data-status` (as hafen does: app.css:66–69,
 build.css:24–26). A page whose rows have statuses adds the same rules for its list.
+
+**One set of words** (eval): a run, a test and a turn say how they went in the engine's words
+(`passed`, `failed`, `error`, `stopped`, `skipped`; `unsure`, a pass the judges weren't sure of), and
+`couldn't run` for a run refused before it sent anything; the same word wherever it shows (the top
+bar, the Suites tree, a suite's count, Runs, a toast). A run of one test says the test's word. A run
+that broke off before its test (an error, or couldn't run) is that test's last try, shown in place of
+the run before it; an error says why in its `title` where the line has no room. Stopped is never
+coloured as a failure.
 
 While anything runs on a page, `<html>` has `data-running`.
 
@@ -32,9 +41,13 @@ While anything runs on a page, `<html>` has `data-running`.
   <thing>?`, `--danger` on hover.
 - **Forgetting a kept value** (a secret, a key) is a delete: a ghost `forget` ConfirmButton,
   asking `forget it?`.
+- (eval) **In the [scope panes](components.md#scope-panes)** (Settings → Environments, Secrets) every
+  one of these is an outlined `.btn` (a row's `×` a `.btn.btn-icon`), as all their actions are, never
+  a ghost one; each still asks first, with its text.
 - **Writing secrets out in plain text** (a secrets file's export) asks first, as a delete does: a
   ConfirmButton whose question says so (`write them in plain text?`), with a `.hint` beside it saying
-  where the file goes and to keep it out of version control.
+  where the file goes and to keep it out of version control (in the scope panes, which have no notes,
+  the button's `title` says where it goes).
 - Deleting something that's in use says why it can't, in the console (`stop the run before
   deleting it`), and doesn't delete it.
 - **Edits that can't be saved** (YAML that doesn't parse) are never thrown away on one action: what
@@ -100,10 +113,11 @@ A remembered size that equals the default is removed rather than stored. Storage
 
 - **Empty:** a `.note` where the content would be, saying what goes there and how to add it. A
   `clear all` hides when there's nothing to clear.
-- **The first step is a control, not only words** (eval): where the note's way to start is an
-  action (open a folder), the thread's note has it as a primary button under it, and a section's
-  note has it as a link in its text (`.inline-link`). Something that needs a step first (a provider
-  needs an open folder) offers that step rather than a form that can't be saved.
+- **The first steps are controls, not only words** (eval): where the note's way to start is an
+  action (add a provider, start a conversation, a suite), the thread's note has them as buttons under
+  it, the next one to take the primary, and a section's note has its own as a link in its text
+  (`.inline-link`: import some). Nothing asks for a step that isn't needed: the app keeps its work
+  itself, so there's nothing to open before anything can be added.
 - **Placeholders say what's missing**, never something that looks like a value (`No tags yet`, not
   `smoke, refunds`).
 - **Nothing chosen** (eval): a control that shows a choice the page needs (the scope), with none made,
@@ -141,12 +155,20 @@ A remembered size that equals the default is removed rather than stored. Storage
 A thing that can be saved to a file has `export JSON` (a ghost button in its head, or a button in
 its panel), which downloads `<_id>.<app>-<kind>.json`.
 
+(eval) Suites go out to a folder the user picks, with everything they use, as plain files
+(`Export…`, the [Export dialog](components.md#export-dialog)); files in it already are listed and
+asked about first, and secrets go only when asked for in plain text, as a delete asks. They come in
+the same way (Import: files or a folder picked, the Suites head's
+[`import`](components.md#suites-import-and-export)), a file here already with another text asked
+about once.
+
 ## Keyboard and pointer
 
 | Input | Does |
 |---|---|
 | Esc | Stops what's running; closes the drawer, a modal, the tooltip |
 | Enter / Shift+Enter | In the message box: send / new line |
+| Enter | (eval) In a scope pane's last row (a name and its value): adds it; there's no add button |
 | ⌘/Ctrl+Enter | In the large editor: save |
 | Space + drag | Pan a scrolling chart or canvas |
 | Ctrl/⌘ + wheel or pinch | Zoom around the pointer |

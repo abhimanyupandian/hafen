@@ -93,7 +93,7 @@ describe("a conversation's checks (expect_conversation) in every report", () => 
     });
     const r = await cli(dir, ["run", "s.hafen.yml", "--report", "json:out/s.json", "--report", "md:out/s.md", "--report", "junit:out/j.xml"]);
     assert.equal(r.code, 1, said(r));
-    assert.match(r.stdout, /row 1 · conversation · \$\[\*\]\.reply contains parcel: didn't find parcel/);
+    assert.match(r.stdout, /row 1: hello there · conversation · \$\[\*\]\.reply contains parcel: didn't find parcel/);
 
     const json = await readJSON(dir, "out/s.json");
     assert.deepEqual(json.results.map((x) => [x.from, x.turn, x.row, x.check, x.status]), [
@@ -102,16 +102,19 @@ describe("a conversation's checks (expect_conversation) in every report", () => 
       ["conversation", null, 1, "$[*].reply contains parcel", "fail"],
       ["conversation", null, 2, "$[*].reply contains parcel", "pass"],
     ]);
+    // (each row by its name too, its first column's value)
+    assert.deepEqual(json.results.map((x) => x.row_name), ["hello there", "where is my parcel", "hello there", "where is my parcel"]);
+    assert.deepEqual(json.tests[0].problems.map((p) => [p.row, p.row_name]), [[1, "hello there"]]);
     assert.equal(json.results.find((x) => x.status === "fail").reason, "didn't find parcel");
     assert.equal(json.results.find((x) => x.from === "conversation").test, "whole");
     const count = (status) => json.results.filter((x) => x.status === status).length;
     assert.deepEqual([count("pass"), count("fail"), json.results.length], [json.summary.checks.passed, json.summary.checks.failed, json.summary.checks.total]);
 
     const md = await readFile(join(dir, "out/s.md"), "utf8");
-    assert.match(md, /### Failures\n\n- \*\*whole\*\* · conversation · row 1 · failed · `\$\[\*\]\.reply contains parcel`: didn't find parcel\n/);
-    assert.match(md, /\| ✗ \| whole \| 1\/2 \| 3\/4 \|/);
+    assert.match(md, /### Failures\n\n- \*\*Reports › whole\*\* · row 1: hello there · conversation · failed · `\$\[\*\]\.reply contains parcel`: didn't find parcel\n/);
+    assert.match(md, /\| ✗ \| whole \| Reports \| 1\/2 \| 3\/4 \|/);
     const xml = await readFile(join(dir, "out/j.xml"), "utf8");
-    assert.match(xml, /<failure message="conversation · \$\[\*\]\.reply contains parcel: didn&apos;t find parcel"\/>/);
+    assert.match(xml, /<failure message="conversation · \$\[\*\]\.reply contains parcel: didn&apos;t find parcel" type="check">row 1: hello there · conversation · /);
   });
 });
 

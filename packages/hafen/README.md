@@ -7,8 +7,11 @@ browser: Node 22 or newer, and three small dependencies.
 
 ## Install
 
+**TODO: not published to npm yet.** Until it is, make the package from a clone of Hafen's
+repository (`npm pack -w hafen` there gives `hafen-0.1.0.tgz`) and install that file:
+
 ```sh
-npm install --save-dev hafen     # in your project; or npm install hafen
+npm install --save-dev ./hafen-0.1.0.tgz     # once published: npm install --save-dev hafen
 npx hafen --help
 ```
 
@@ -43,12 +46,21 @@ secret. Both come from `KEY=VALUE` files you name, anywhere on the disk:
 - `--secret staging.secret.env`: the secrets (never commit it). A name it hasn't comes from the
   environment variable of that name, so CI's secrets work as environment variables too.
 
+Both can be given as often as you like: the files' values are merged in order, a later file's
+winning, and the last `--env` names the environment. Values every environment shares go first:
+
+```sh
+npx hafen run tests/ --env globals.env --env staging.env \
+  --secret globals.secret.env --secret staging.secret.env
+```
+
 `--env staging` (a name, no file) picks each suite's environment of that name, with no values: a
 folder's `environments/staging.yml` isn't read. The old spellings, `${env:NAME}`, `{{scope.NAME}}`
 and a plugin's `{ secret: "NAME" }`, are problems (exit `2`, nothing sent), each saying what to write
 instead: `{{secret.NAME}}`, or `{{env.NAME}}` for a value of the environment.
 
-Secrets are redacted from the output, every report and every run file. In the app, a suite's
+Secrets are redacted from the output, every report and every run file: every value in the
+`--secret` files, used or not. In the app, a suite's
 **Copy CI command** gives the `npx hafen run …` line, and Settings → Environments and Secrets export
 the two files.
 

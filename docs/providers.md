@@ -58,8 +58,10 @@ price: { input: 0.5, output: 1.5 }   # USD per million tokens
 
 A secret is redacted in the forms it takes on the way, too: escaped in the JSON `body`, form-encoded
 in the `query` (`q k&v` as `q+k%26v`), percent-encoded in an address, in base64 (`Basic …`). So is a
-reply or a raw stream that echoes it in one of them, even split across the stream's chunks. (A value
-shorter than 4 characters isn't redacted: it would be cut out of ordinary words and numbers.)
+reply or a raw stream that echoes it in one of them, even split across the stream's chunks. Every
+secret kept for the run's scope is, whether this provider sends it or not (the app's for the scope,
+the command line's `--secret` files'). (A value shorter than 4 characters isn't redacted: it would
+be cut out of ordinary words and numbers.)
 
 **Old spellings.** `${env:NAME}` and `{{scope.NAME}}` are problems now, at their line in the file
 (exit `2`, nothing sent): write `{{secret.NAME}}`, or `{{env.NAME}}` for a value of the environment
@@ -70,8 +72,8 @@ A provider can also use:
 | Variable | Is |
 |---|---|
 | `{{user}}` | This turn's message |
-| `{{messages}}` | The conversation so far, shaped by `messages_format` (with `history: messages`) |
-| `{{history}}` | The earlier turns as `[{ query, response }]`: each message and its reply's text |
+| `{{messages}}` | The conversation so far, shaped by `messages_format` (with `history: messages`; with `history: none`, this turn's message alone) |
+| `{{history}}` | The earlier turns as `[{ query, response }]`: each message and its reply's text (`[]` with `history: none`) |
 | `{{session}}` | The session value |
 | `{{turn.index}}` | The turn's number |
 
@@ -89,7 +91,7 @@ body:
 |---|---|
 | `messages` | The whole conversation, as `{{messages}}`, shaped by `messages_format`: `openai` (`[{role, content}]`), `anthropic` (`[{role, content: [blocks]}]`), `gemini` (`[{role, parts}]`) or `text` (one string, `User: …\nAssistant: …`) |
 | `session` | Only this turn's message; the endpoint keeps the conversation. `session.extract` reads the session from each reply, and `session.send` puts it back: in the `body` (the default, via `{{session}}`), a `header` (with `session.name`), or a `cookie` |
-| `none` | Only this turn's message, with no conversation |
+| `none` | Only this turn's message, with no conversation: `{{messages}}` is that message alone, `{{history}}` is `[]`, and no session goes back (`{{session}}` is empty, an A2A agent's `contextId` isn't sent). The presets send it alone too, and so does a conversation in the app |
 
 ### Responses (not streamed)
 
@@ -210,8 +212,13 @@ response: { text: $.data.reply }
 
 A provider plugin writes them the same way in its requests, `headers: { cookie: "{{secret.ACME_COOKIE}}" }`,
 and Hafen fills them in as the request leaves. Either way the values are redacted wherever they'd
-show. `before`, `after` and `afterAll` lists run around each
-test and at the end of the run ([Fixtures](plugins.md#fixtures)).
+show, and so is the credential in one given as `Bearer <token>`: the token in the login's own answer
+too (`{"access_token":"[redacted]"}`, on its call's step). `before`, `after` and `afterAll` lists run around each
+test and at the end of the run ([Fixtures](plugins.md#fixtures)). A fixture says which lists it can be
+in (its `phases`), can stop the run before the provider's tests are sent by returning `false` (the
+service is down, say), and can set the environment's values for the rest of the run, as
+`env.set("chat_url", …)` for a provider whose `url: "{{env.chat_url}}"`
+([Setting the environment's values](plugins.md#setting-the-environments-values)).
 
 ## Presets
 

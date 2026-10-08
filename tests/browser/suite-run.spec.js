@@ -11,7 +11,6 @@ const openTest = (page, name) => page.locator("#suiteList .list-open", { hasText
 const runKeys = ["Control+Enter", "Meta+Enter"];
 
 test.beforeEach(async ({ app: { page } }) => {
-  await page.click("#openFolder");
   await expect(page.locator(`#suiteList .list-row[data-file="${SUITE}"]`)).toHaveCount(1);
 });
 test.afterEach(async ({ app: { errors } }) => {

@@ -27,8 +27,10 @@ tests
 9535 JSONPath library chosen by the compliance suite ([research §9](research.md#9-jsonpath)), Ajv
 (JSON Schema draft 2020-12); Playwright and electron-builder (development only)
 
-**Storage**: suite, provider and data files in the user's folder; runs in IndexedDB (`hafen`,
-store `runs`) and as run files (`.hafen/runs/`, CI report paths); secrets in Electron
+**Storage**: suite, provider, plugin and data files in the app's workspace (the desktop app's data
+folder's `workspace/`; the browser's Origin Private File System, `workspace/`), imported from and
+exported to the user's folders; runs in IndexedDB (`hafen`, store `runs`), and on the command line
+as run files (`.hafen/runs/`, CI report paths); secrets in Electron
 `safeStorage` (desktop), the environment (CLI) or localStorage (browser build); UI state in
 localStorage (`eval.*`)
 
@@ -64,7 +66,7 @@ requests; about 10 sidebar, panel and dock views; 13 user stories, P1 to P3
 |---|---|---|
 | I. UI matches the design system | The app is built from the design system copied into `evals/app/`; new parts are written into `spec/design/components.md` (Additions) first; a parity test and the gallery's baseline screenshots catch drift (T004, T005) | ✅ |
 | II. One engine | `evals/engine/` runs in a Web Worker, Electron's utility process and the CLI; the UI never parses, checks or times; platform differences enter only as a transport, a file store and a secret store | ✅ |
-| III. The file is the test | Suites are files read and written in place, comment-keeping; the app keeps no state a test needs; schema versioned | ✅ |
+| III. The app keeps the tests; Export writes the files | Suites are files in the app's workspace, read and written in place, comment-keeping; Import and Export copy them and everything they use (the engine's `dependencies`), asking before writing over a file; the CLI runs an exported folder unchanged; schema versioned | ✅ |
 | IV. Local-first and private | `${env:…}` references only; `safeStorage` in the desktop app; redaction before storing or writing; plugins get credentials by name, never values; no telemetry | ✅ |
 | V. Honest results | Five result states; errors separate from failures; no truncation of judge input; sample counts on percentiles and pass rates; repeats built in | ✅ |
 | VI. Contracts tested first | Contract tests for the schemas, providers (mock endpoint), checks, CLI exit codes and reports, run file and relay, written before the code in each phase; engine tests run in Node and a browser | ✅ |
@@ -162,8 +164,8 @@ evals/                                # the whole project; imports nothing from 
 ├── server/                           # the browser build's server: serve.js (npm run serve) and relay.js, the allowlisted relay
 ├── desktop/                          # the Electron app
 │   ├── main.js                       # the window (no title bar), the engine's utility process, ports to the UI,
-│   │                                 #   folders (open, watch, read, write), secrets (safeStorage), notifications
-│   ├── engine-host.js                # the utility process's entry: the engine in Node, with the app's transport and files
+│   │                                 #   the workspace, the Import and Export dialogs, secrets (safeStorage), notifications
+│   ├── engine-host.js                # the utility process's entry: the engine in Node, on the workspace and the folders picked
 │   ├── preload.cjs                   # passes the engine port and the platform to the UI
 │   └── builder.json                  # electron-builder: app id, name, icons
 └── tests/                            # the app's

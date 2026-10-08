@@ -196,10 +196,19 @@ export function createRedactor({ secrets = new Set(), headers = [], patterns = [
     });
   };
 
+  // What this redactor gave back (an object), with the secrets and headers it knew then: given back as
+  // it is while they're the same, wherever it turns up again (a turn's record, stored redacted, in the
+  // event that says it ended and in the run at its end; a conversation's earlier turns, with each
+  // message). Once one is added, it's redacted again, as anything is.
+  const given = new WeakMap();
+  const knows = () => `${secrets.size ?? secrets.length}\u0000${more.size}`;
+  let now = "";
+
   const value = (v, key) => {
     if (typeof v === "string") return text(v);
     if (Array.isArray(v)) return key === "chunks" && v.every((c) => typeof c === "string") ? chunks(v) : v.map((item) => value(item));
     if (isObject(v)) {
+      if (key !== "headers" && given.get(v) === now) return v;
       return Object.fromEntries(Object.entries(v).map(([k, item]) => [k, key === "headers" && isSecretHeader(k) ? "[redacted]" : value(item, k)]));
     }
     return v;
@@ -207,7 +216,12 @@ export function createRedactor({ secrets = new Set(), headers = [], patterns = [
 
   // Headers anywhere are objects under a "headers" key: their secret ones go whole
   return {
-    redact: (v) => value(v),
+    redact: (v) => {
+      now = knows();
+      const out = value(v);
+      if (isObject(out) && out !== v) given.set(out, now);
+      return out;
+    },
     headers: (h) => Object.fromEntries(Object.entries(h ?? {}).map(([k, v]) => [k, isSecretHeader(k) ? "[redacted]" : text(String(v))])),
     text,
     isSecretHeader,

@@ -62,23 +62,30 @@ export default {
 `;
 
 const FIXTURE = (name) => `// A fixture plugin, run in a worker of its own around a provider's requests: a login, say. Name it
-// in a provider file's fixtures, by when it runs:  fixtures: { beforeAll: [${name}] }  (or before,
-// after, afterAll). What run() returns before is kept, as secrets of these names (for the run, or the
-// test): a provider file, or a provider plugin's request, uses each as {{secret.…}}. Each is redacted
-// wherever it would show. Its HTTP calls are steps on the timeline.
+// in a provider file's fixtures, by when it runs:  fixtures: { beforeAll: [${name}] }  (its phases
+// say which of the lists it can be in). What run() returns before the provider's requests is kept,
+// as secrets of these names (for the run, or the test): a provider file, or a provider plugin's
+// request, uses each as {{secret.…}}. Each is redacted wherever it would show. Its HTTP calls are
+// steps on the timeline.
 export default {
   kind: "fixture",
   name: "${name}",
   version: "1.0.0",
   // The only hosts it may reach
   hosts: ["auth.example.com"],
+  // When it runs: any of beforeAll, before, after and afterAll (all four when it doesn't say). A
+  // provider can list it only there, so run() needn't check its phase.
+  phases: ["beforeAll"],
   // The names it gives
   provides: ["EXAMPLE_COOKIE", "EXAMPLE_CSRF"],
-  // phase: beforeAll, before, after or afterAll. settings: the provider file's fields (login_url and
-  // user, say). env: the chosen environment's values. test (before and after): the test's name, its
-  // run and row, and after it, its status.
-  async run({ phase, settings, env, transport, signal }) {
-    if (phase === "after" || phase === "afterAll") return;  // (a logout would go here)
+  // settings: the provider file's fields (login_url and user, say). env: the chosen environment's
+  // values, and env.set(NAME, value), which sets one for the rest of the run ({{env.NAME}} from then
+  // on; never saved anywhere). phase, and test (before and after): the test's name, its run and row,
+  // and after it, its status.
+  // It returns the values it gives ({ NAME: "…" }), true or nothing to go on, or false to stop: in
+  // beforeAll the run stops before the provider's tests are sent; in before, that test does; after
+  // and afterAll, nothing changes.
+  async run({ settings, env, transport, signal }) {
     const res = await transport.fetch({
       url: settings.login_url ?? \`\${env.auth_url ?? "https://auth.example.com"}/login\`,
       method: "POST",
@@ -86,10 +93,14 @@ export default {
       body: { user: settings.user ?? "qa-bot", password: "{{secret.EXAMPLE_PASSWORD}}" },
       signal,
     });
+    // (the service is down for maintenance: stop the run, rather than fail every test)
+    if (res.status === 503) return false;
     if (res.status >= 400) throw new Error(\`login failed: \${res.status}\`);
     // One entry per cookie (the desktop app and the CLI: a browser doesn't let a page read them)
     const cookies = [res.headers["set-cookie"] ?? []].flat().map((c) => c.split(";")[0]);
-    const { csrf_token } = await res.json();
+    const { csrf_token, region } = await res.json();
+    // For the rest of the run: {{env.EXAMPLE_REGION}} in the provider file, the checks, other fixtures
+    if (region) env.set("EXAMPLE_REGION", region);
     return { EXAMPLE_COOKIE: cookies.join("; "), EXAMPLE_CSRF: csrf_token };
   },
 };

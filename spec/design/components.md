@@ -222,9 +222,11 @@ empty `<span class="tree-toggle">` so its text still lines up. Rows are indented
 | `.list-size` | At the right: mono 11px `--muted`; coloured by status (see [patterns](patterns.md#status)) |
 | `.list-del` | `×` (a ghost ConfirmButton), hidden until the row is hovered or focused; `delete` in `--danger` while asking. Always shown on touch screens |
 | `.list-add` (Addition) | A row's own action before `×` (`ListRow`'s `actions`), e.g. a suite's `+` that adds a test: a 24px ghost icon button (14px icon), `--muted`, `--fg` on hover, shown as `×` is |
+| `.list-more` (Addition) | A row's menu, with the `more` icon: as `.list-add`, but over the row's right end ([Scope panes](#scope-panes)) |
 | `.active` | The row on `--soft`, its text `--fg`, `aria-current="true"` |
 
 - **Ids:** with `id`, the row is `#<id>`, its button `#<id>-open`, its `×` `#<id>-delete`.
+- **No `×`** (an Addition): a row with no `onDelete` can't be deleted from the list, and has none.
 - **Data:** `data={{ status }}` becomes `data-status`, which colours `.list-size`.
 - **`before`:** goes ahead of the button (a tree toggle).
 - **Focus:** after the list redraws, the control that had focus has it again (found by id).
@@ -493,6 +495,10 @@ In a reply (which has no label), in the order they happened, before the text:
   `.msg-body.error`: `cut short: network error`. (One that failed before any text came shows only the
   error, with `show the response` for a body that came.) Its stats leave out `to first token` when no
   text came.
+- **Stopped:** a reply stopped on purpose (Esc, Stop) isn't an error, and isn't coloured as one: what
+  came shows as a cut-short reply's (`.msg-body.md.cut`, ending `…`), then `stopped` under it as
+  `.msg-body.hint`, in `--muted`; none came, `Stopped before any reply came.` (`.msg-body.hint`). Its
+  turn's head says `stopped · 0.5 s` in `--muted` ([patterns](patterns.md#status): stopped is text only).
 
 Then its foot (`.msg-foot`, 8px under the text, wrapping, 4px down and 10px across): the stats line
 (`.msg-stats`) and `copy`; then the check badges.
@@ -507,7 +513,8 @@ groups and row hover](#turn-groups-and-row-hover)), and scrolled into view.
 
 A thread's turn (or a suite's test) is a group (`section.turn-group`): no rule between groups, 6px
 apart; padded 14px 14px 18px, its edges 14px outside the column so its text lines up with the rest;
-a head (`.turn-head`: a `.label` in `--fg`, a status-coloured `.hint`, and its actions at the right:
+a head (`.turn-head`: a `.label` in `--fg`, cut with an ellipsis when it's too long for the head (a
+data row's name: `TURN 1 · ROW 3: A REFUND PLEASE`), a status-coloured `.hint`, and its actions at the right:
 `▷` and `×`, ghost, 24px, `--muted`, shown (opacity 1, else 0) when the group is pointed at or
 selected, when focused, on touch screens, and `▷` while it's a running run's stop).
 A click anywhere in it selects it, except on its own controls. Hover: a faint background,
@@ -519,6 +526,10 @@ message a step darker (`--fg` at 7% over `--bg`). A list row (`.list-row`) has t
 - **Section icons:** `NavSection` takes an `icon`: closed, the section shows it where the arrow is
   (`.section-icon`, 14px, `--muted`, `--fg` on hover; in the arrow's 6px place, its margins -4px, so
   the label doesn't move); open, the arrow.
+- **A section's name gives way to its actions:** in a sidebar section's head, when its actions need
+  the room (Suites' `+`, `import` and `export all` in a sidebar narrower than its default), the label
+  is cut with an ellipsis (`overflow: hidden`, `text-overflow: ellipsis`, `min-width: 0`) rather than
+  covered.
 - **Back:** a panel head can have `#panelBack` (a ghost icon button, the `back` icon) before its
   icon: to what holds the view.
 - **Field problems:** a field's problem shows right under it: `.hint.error.field-problem`
@@ -549,6 +560,7 @@ right-click), or under the control a key came from (the menu key, Shift+F10), ke
 | Line | `.context-menu-line` (`role="separator"`): 1px `--line`, 4px above and below |
 | Keys | It opens with its first item focused; ↑/↓ move (round), Home/End, Enter picks, Esc or Tab close it, focus going back where it was |
 | Closes | On a pick, Esc, Tab, a pointer down outside it, the window resized or left. Not on a scroll (a thread scrolls by itself while a run streams) |
+| In a modal | Opened while a modal is open (Settings), it's drawn inside the modal's dialog, so it's in the top layer with it, above it, and can be used; elsewhere, at the end of the page. Esc closes the menu, not the modal |
 
 ### Small charts
 
@@ -628,8 +640,9 @@ A turn in a list (the sidebar's tree, a suite's view) is shown by its icon, not 
 `test` icon (a box with a tick), 14px, `.turn-icon` inside the row's button, 8px before its text, in
 the colour of how the turn last went: `running` `--run`, `passed` `--ok`, `failed` and `error`
 `--danger`, `unsure` `--wait`, `unchecked` (no checks, or every one turned off: nothing says it's
-right) `--wait`, not run or skipped `--muted`. A row's size (`0 checks`) and a turn head's summary
-take the same colour. The row's
+right) `--wait`, not run, skipped or stopped `--muted`. A row's size (`0 checks`) and a turn head's summary
+take the same colour; a turn stopped or skipped ran none of its checks, and its size says `stopped` or
+`skipped`, not `0/2`. The row's
 button is named for screen readers with the number: `turn 2: It arrived broken`.
 
 ### Palette groups
@@ -688,12 +701,12 @@ Added to a project's `Icon` set, drawn as the others (18×18, stroke 1.5, no fil
 | `run` | `<path d="M5.5 3.5l9 5.5-9 5.5z"/>` | A run; the button that runs a test |
 | `runs` | `<path d="M3.6 10.5A5.6 5.6 0 1 0 4.4 5.6"/><path d="M3.8 2.8v3.1h3.1"/><path d="M9 6v3.3l2.3 1.4"/>` | Runs, their history: a clock turning back (the collapsed sidebar's icon) |
 | `chat` | `<path d="M3 4.5h12v8H8.5L5.5 15v-2.5H3z"/>` | Conversations (the collapsed sidebar's icon) |
-| `import` | `<path d="M2.5 5V14.5h13v-8.5H9L7.5 4.5h-5z"/><path d="M9 8.2v4.6M7 10.9l2 2 2-2"/>` | Open a folder (a folder with an arrow into it) |
 | `back` | `<path d="M11 4.5L6.5 9l4.5 4.5"/>` | Back, to what holds this |
 | `stop` | `<rect x="4.5" y="4.5" width="9" height="9"/>` | Stopping a run |
 | `scope` | `<path d="M9 2.5l6.5 3.25L9 9 2.5 5.75z"/><path d="M2.5 9.25L9 12.5l6.5-3.25M2.5 12.5L9 15.75l6.5-3.25"/>` (round joins) | A scope (stage, prod…): stacked layers; the scope button |
 | `settings` (changed) | A gear: an outline of eight teeth (r 7.2 at the tips, 5.3 between them, round joins) around a hub (`<circle cx="9" cy="9" r="2.25"/>`) | Settings, in place of the two sliders (`#openSettings`, the gallery) |
 | `fail` | `<path d="M5 5l8 8M13 5l-8 8"/>` (a ✗, a little smaller than `close`'s ×, the size of `check`'s ✓) | A check that failed or errored (its card) |
+| `more` | `<circle cx="4" cy="9" r=".9"/><circle cx="9" cy="9" r=".9"/><circle cx="14" cy="9" r=".9"/>` (three dots, in a row) | More actions: a row's or a head's menu ([Scope panes](#scope-panes)) |
 
 They're reviewed next to the existing icons, at 14, 16 and 18px, in both themes, before they're
 used.
@@ -813,7 +826,7 @@ doesn't resize it (as the timeline's empty state).
 ### Message box problems
 
 - **Known before sending:** the provider the message would go to has a problem the app can see (its
-  fixtures can't be read, name one twice, or name one the folder hasn't got; a provider plugin that
+  fixtures can't be read, name one twice, or name one the app hasn't got; a provider plugin that
   isn't there). It's said only in the panel, by the provider, under its fixtures
   (`.hint.error.fixtures-hint#convFixturesProblem`, `role="alert"`: `<provider>: <the problem>`, then
   `edit the provider`, an `.inline-link` to Settings → Providers, `#convFixturesFix`), in place of the
@@ -853,21 +866,248 @@ In the Suites list a suite's row size (`2 tests · 1 failed`) is cut, with an el
 the name keeps its width first (`.list-open` `flex: 1 1 auto`), the size gives way first (`flex-shrink`
 1000, at least 5 characters wide). Its full text is in the row's `title`.
 
-### The thread's first step
+### The thread's first steps
 
-With nothing open yet, the thread's note (`.empty#threadEmpty`) has a primary button under it, 14px
-below (`#threadOpenFolder`, `Open a folder`, or `Open files` in a browser that can't open folders),
-that opens the folder picker; the Suites section's note has the same as a link in its text
-(`#suitesOpenFolder`, `.btn.btn-ghost.inline-link`). The panel's `add one` (a provider) reads `open a
-folder` until a folder is open, and opens the picker.
+The app keeps its own work, so there's nothing to open first. A new conversation with no turns yet
+(the first start among them) has the thread's note (`.empty#threadEmpty`) with the first steps under
+it as buttons (`.empty-actions`: a row, centred, wrapping, 8px apart, 14px under the note): `Add a
+provider` (`#threadAddProvider`: Settings → Providers' new provider), `New conversation`
+(`#threadNewConversation`: the sidebar's `+` does the same) and `New suite` (`#threadNewSuite`: the
+Suites section's [New suite form](#new-suite-form), opened, and the sidebar with it). The next step
+to take is the primary (`.btn-primary`): `Add a provider` while there's none; with one, none is (the
+message box is). The Suites section's note offers Import as a link in its text (`No suites yet: press +
+to start one, or import some from files or a folder.`, `#suitesImport`, `.btn.btn-ghost.inline-link`,
+opening the Import items under it, as the head's [`import`](#suites-import-and-export) does). The panel's
+`add one` (a provider) opens the new provider form.
 
-### Key = value rows
+### Suites import and export
 
-What a scope keeps (Settings → Environments and Secrets) is a `.settings-list` of `.settings-row`s, one
-per name: the name (`.settings-row-name`) over a `.hint` (how a file uses it: `{{env.base_url}}`, and
-whether the open files use it), its value in an `.input` (plain for an environment's value, a password
-field for a secret's, never shown), and the row's own actions: `save` (a secret's), then `×` or
-`forget` as ConfirmButtons. Under the list, the add form (`.controls`: a name, a value, `add`), then a
-`.controls` row of what moves the whole list: `Import .env` (a `.btn` that opens the file picker, a
-hidden `<input type="file">`), `Export .env`, and the scope's own delete. A name the open files use
-that has no value yet has a row too, its hint `not set` in `--danger`.
+Importing and exporting suites: ghost text actions in the Suites section's head after `+`, as Runs'
+`open` and `clear all` are (`.when-open`: shown only while the section's open). `import`
+(`#importSuites`, `aria-haspopup="menu"`) opens a [context menu](#context-menu) under itself (as one
+opened from the keyboard is): `Import suite files…` (`#menu-import-files`, its hint `*.hafen.yml`) and
+`Import a folder…` (`#menu-import-folder`, `its suites`); each picks with the system's own picker (the
+desktop app's dialog; a browser's file or folder picker), then goes on in the app, asking a
+[question](#question-dialog) when files there have another text. `export all` (`#exportSuites`, shown
+only with a suite, as `clear all` is only with something to clear) opens the [Export
+dialog](#export-dialog) for every suite.
+
+### Question dialog
+
+A question asked part way through something the user started (Import: files that are here already
+with another text; Export: files in the folder already; the first start of this version: import the
+suites of the folder the app opened before?): a [modal](#modal) (`#question`, `.modal.question`),
+`min(480px, 100vw − 32px)` wide.
+
+| Part | Is |
+|---|---|
+| Head | The modal's: a `.label` (`IMPORT`, `EXPORT`, `YOUR SUITES`), then close (`#questionClose`) |
+| Body | `.question-body`: padded `--gutter`, a column 10px apart, scrolling when it's taller than the window allows. First the question as a `.note` (`#questionNote`: `1 file from repo is here already, with another text:`), then what it's about as a `.panel-code` list (`#questionFiles`, one path a line, at most 200px tall, scrolling), then a `.hint` saying what each answer does (`#questionHint`) |
+| Foot | The modal's: one `.btn` per answer, the one that changes nothing first (`Cancel`, `Not now`), the main one last and primary (`Replace`, `Overwrite`, `Import`), focused as it opens. Import's: `Cancel`, `Skip`, `Keep both`, `Replace` (`#questionCancel`, `#questionSkip`, `#questionBoth`, `#questionReplace`); Export's: `Cancel`, `Overwrite`; the folder before: `Not now`, `Import` (`#questionLater`, `#questionImport`) |
+| Closed | Esc, ×, or a click on the backdrop answer what changes nothing |
+
+### Export dialog
+
+Export (a suite panel's `Export…`, `#suiteExport`; the Suites head's `export all`; Copy CI command
+before the suite has been exported): a [question dialog](#question-dialog)'s box (`#exportDialog`,
+`.modal.question`), its head `EXPORT` and close (`#exportClose`).
+
+| Part | Is |
+|---|---|
+| Body | A `.note` (`#exportNote`): what's written, and where it goes (`Writes smoke.hafen.yml and everything it uses to a folder you pick, as plain files with the same paths: …`); a `.field-head` with a `.hint` (`4 files, never a secret`), 4px over the files as a `.panel-code` list (`#exportFiles`, `Reading what they use…` until they're known); a `.hint.error` for each file a suite names that isn't there, a `.hint` for plugin packages (not files); then, when Globals or the scope chosen has values, a `.check` (`#exportEnv`, on) naming the files it writes, only the ones with values, Globals' first (`Also write globals.env and stage.env: the values of Globals and of the stage scope`), else a `.hint` (`#exportNoScope`) saying there are none to write; with secrets kept for either, a `.hint` (`#exportSecretsHint`) naming the files Export with secrets writes (`globals.secret.env and stage.secret.env`) in plain text, to keep out of version control; and where it was last exported (`#exportLast`, `.hint`) |
+| Foot | `Cancel` (`#exportCancel`), `Export with secrets` (`#exportWithSecrets`, a ConfirmButton asking `write them in plain text?`, only with secrets kept), and `Export` (`#exportGo`, primary). Each then asks for a folder; done, the dialog closes and a toast says where they went |
+
+The suite's panel says where it was last exported to under Copy CI command (`#suiteCiHint`: `Runs
+hafen-tests, exported 2 mins ago with globals.env and stage.env: export again after a change.`),
+naming only the files that export wrote, which are the ones the command names; not exported yet,
+that it isn't, with `Export it` as an `.inline-link` (`#suiteCiHintExport`), and Copy CI command
+opens the Export dialog instead of copying.
+
+### Scope panes
+
+Settings → Environments and Settings → Secrets are alike, as an API client's environments are: the
+entries down the left, the one picked on the right (`.scope-panes`, a flex row; at 640px and narrower,
+where Settings stacks, a column: the entries above, a line under them instead of beside).
+
+Neither says how it works in words: no note under the title, none under the table. The one line kept
+is a warning, on Secrets only, while its values are kept unencrypted (`.note#secretsNote`, one line,
+over the panes): in the browser build `Kept in this browser's storage, unencrypted: use the desktop
+app for keys that matter.`, in the desktop app on a system that offers it no encryption `Kept
+unencrypted: this system offers the app no encryption yet.`
+
+The panes fill the rest of the content (`flex: 1 0 auto`), and, last in it, run to its bottom edge (its
+20px bottom padding taken into them: `margin-bottom: -20px`, each side padded 20px at its bottom), so
+the line down the entries' right runs the whole height, however little the entry has.
+
+Every action in them is a [button](#buttons), outlined (`.btn`), never a ghost one: 28px tall, as the
+fields beside them, and 24px in a label row (the entries' heads, the table's head). Icon-only ones are
+`.btn.btn-icon`, square (28×28; 24×24 in the entries). One that asks first is a ConfirmButton, which
+asks with its text, as `Export with secrets` does.
+
+**The entries** (`nav.scope-list`: 168px wide, a 1px `--line` down its right, 12px between it and
+the entry; a column):
+
+| Part | Is |
+|---|---|
+| Head | `.scope-list-head`: a row 32px tall, padded `0 0 0 8px`: a `.label` (`GLOBALS`, `SCOPES`), and its action at the right: Scopes' `+` (`#newScope`, `.btn.btn-icon` 24×24, the `plus` icon at 14px, `aria-expanded` while its form is open) |
+| Globals | A [list](#list) of one row (`#envGlobals`, `#secretsGlobals`), pinned at the top: what applies in every scope, and alone when none is chosen |
+| Line | `.scope-list-line` (`role="separator"`): 1px `--line`, 8px above and below |
+| Scopes | A list (`#envScopes`, `#secretsScopes`) of rows (`#envScope-<name>`, `#secretsScope-<name>`), in the order they were made |
+| A row | A [list row](#list) with no `×` (32px; sans 13px `--muted`; `--fg` on `--soft`, `aria-current`, when it's the entry shown): its name, cut with an ellipsis; after it (`extra`) on the scope chosen, the `check` icon (14px, `--fg`, its `title` `Chosen now`); at its right its `.list-size`: how many names the open files use that it hasn't got, Globals' counted in (`2 not set`, `--danger`), else nothing; then, on a scope, `more` (`.list-more`, `#<row id>-more`: `.btn.btn-icon` 24×24, the `more` icon at 14px, over the row's right end, 4px in from it and its top, on the row's background, shown only while the row's pointed at or it's focused, so it takes no room from the name; on touch screens, always, after the size), which opens its [context menu](#context-menu) under it, as a right-click on the row does |
+| New scope | Under Scopes' head, while `+` has it open (and always while there are no scopes): `form.controls.new-scope-form#newScopeForm`, as the [New suite form](#new-suite-form): an `.input.grow` (`#newScopeName`, 28px, mono 11px, its placeholder `stage, prod…`) and `add` (`.btn`, 28px); a name that won't do says why under it (`.hint.error.field-problem#newScopeProblem`). Enter adds it and shows it; Esc (or `+` again) closes it |
+| No scopes | A `.note` under the form, padded `4px 8px` (`#environmentsEmpty`: `No scopes yet: add one (stage, prod…).`) |
+
+A scope's menu (`<name>: what to do`): `Choose it` (`#menu-scope-choose`; disabled on the scope
+chosen), `Rename` (`#menu-scope-rename`: the scope shown, its name field focused, its text selected),
+`Duplicate` (`#menu-scope-duplicate`: a new scope, `<name>-copy` (or `-copy-2`…), with its values and
+its secrets, shown), a line, then `Delete` (`#menu-scope-delete`, `.danger`, asking `Click again to
+delete its values and secrets`).
+
+**The entry's head** (`.scope-head`: a row at least 32px tall, its items centred, gap 8):
+
+| Part | Is |
+|---|---|
+| Name | A scope's: its name field (`.input.scope-name-field`, `#envScopeName`, `#secretsScopeName`, named `Scope name`): sans 13px 500 `--fg`, 32px, its border `transparent` until pointed at (`--line`) or focused (`--fg`), padded `0 8px` and pulled 8px left, so its text lines up with the table's; it takes the width left. Enter, or leaving it, renames; Esc puts it back. Globals': `h3.scope-title`, `Globals`, sans 13px 500 (`.settings-subtitle`'s), taking the width left |
+| Chosen | On a scope: `choose it` (`.btn`, 28px, `#envChoose`, `#secretsChoose`), or, when it's the one chosen, `chosen now` in its place (`.btn`, disabled, `#envChosen`, `#secretsChosen`). On Globals: `choose no scope` (`.btn`): Globals alone; or, when none is chosen, `no scope chosen` (`.btn`, disabled) |
+| More | On a scope: `more` (`#envMore`, `#secretsMore`, `.btn.btn-icon` 28×28, the `more` icon at 14px): its menu, under it |
+
+**Its tools** (`.scope-tools`: a row 10px under the head, its items centred, gap 8, wrapping, 8px
+between its lines): `import .env` (`#envImport`, `#secretsImport`, opening a hidden file input),
+`export .env` (`#envExport`, its `title` the file it downloads; Secrets' `#secretsExport` a
+ConfirmButton asking `write them in plain text?`, its `title` `Write stage.secret.env, in plain text`)
+and `edit as .env` (`#envText`, `#secretsText`: the large editor, code style), each a `.btn` 28px; then
+the [search field](#search-field), taking the rest of the row and at least 200px of it (here not
+sticky, nothing under it; `#envSearch`, `#secretsSearch`, its placeholder `Search variables` or `Search
+secrets`), so at Settings' width it's a line of its own under the buttons, as wide as the table it
+searches.
+
+**Its table** (`.vars`, `role="table"`, 10px under the tools): one row a name, on a grid of three
+columns, 8px apart, which every row shares (`grid-template-columns: subgrid`): the name (as wide as
+the widest name needs, at most 25%: `fit-content(25%)`), its value (all the rest: `minmax(0, 1fr)`),
+and where it comes from, last (as wide as its words need, at most 68px: `fit-content(68px)`, its words
+wrapping). A row's buttons are in its value's cell, after the value: the value takes what they leave,
+so they take nothing from the other rows, and a long value (`https://stage.acme.example`) shows whole
+at Settings' width.
+
+| Part | Is |
+|---|---|
+| Head | `.vars-head` (`role="row"`): 32px, a 1px `--line` under it; a `.label` a column (`role="columnheader"`): `VARIABLE`, `VALUE`, `SOURCE` (Secrets: `NAME`, `VALUE`, `SOURCE`; the value's followed by `show all` or `hide all`, `#secretsRevealAll`, a `.btn` 24px tall) |
+| Row | `.vars-row` (`role="row"`, `#envVar-<name>`, `#secret-<name>`, `data-source`: `own`, `override`, `globals` or `unset`): at least 44px, padded `6px 0`, a 1px `--line` under it, so rows are divided |
+| Name | Sans 13px `--fg`, one line with an ellipsis (`.vars-name`), over a `.hint` (`.vars-use`): how a file uses it (`{{env.base_url}}`, `{{secret.API_KEY}}`), with ` · not used by the open files` when they don't |
+| Value | `.vars-cell`: a row, 4px apart, the value taking the width its buttons leave. An `.input` 28px (mono 12px), saved when it's left or on Enter; Esc puts it back. A secret's is a password field, empty, its placeholder `••••••••` (never its value) until `show` (`#secret-<name>-reveal`, `.btn` 28px, after the field) puts the value in it as text, until `hide`; `show all` shows every row's. An empty value left changes nothing (`forget` forgets) |
+| Buttons | After the value (and a secret's `show`), at the cell's right end: `×` (`#envVar-<name>-delete`, `.btn.btn-icon` 28×28, a ConfirmButton asking `delete`, as wide as the question while it asks), a secret's `forget` (`#secret-<name>-forget`, `.btn`, asking `forget it?`); an inherited row's `override` (`#envVar-<name>-override`, `#secret-<name>-override`, `.btn`: a value of the scope's own, from Globals' (a secret's: the add row, its name in, its value focused)) |
+| Source | A `.hint` (`.vars-source`), wrapping: `this scope`; `overrides Globals` (Globals has the name too); `from Globals` (inherited: the row's name and value `--muted`, its value as text (`.vars-value`, mono 12px, one line, padded as a field's), not a field); `not set` (`--danger`: the open files use the name, and neither the entry nor Globals has it; its field's placeholder `its value`); on Globals' own rows `Globals`, then `· overridden in stage, prod` when scopes have their own |
+| Add row | The last row, always there (`form.vars-row.vars-add`, `#envVarAdd`, `#secretAdd`): the name (`.input`, 28px, `#envVarName`, `#secretName`, its placeholder `New variable` or `New secret`) and the value (`#envVarValue`, `#secretValue`, its placeholder `its value, then Enter`; a secret's a password field), and no button: Enter in either adds it, then the name is focused for the next. An environment's value may be empty; a secret's may not, so Enter with no value goes to the value (and, with no name, to the name). A name that won't do says why, in the pane's error |
+| Nothing | No rows: a `.note` row (`#envVarsEmpty`, `#secretsEmpty`), padded `12px 0`, a line under it: what goes here; a search that matches none: `No variables match "x".` |
+
+The rows go: the entry's own, in the order they were added; the names the open files use that neither
+it nor Globals has (`not set`), by name; then, on a scope, Globals' it doesn't override (`from
+Globals`). The search keeps the
+rows whose name, or (an environment's) value, has its text, case aside; the add row always stays.
+An error from the pane is a `.hint.error` (`role="alert"`) under the tools. Under the table, only what
+the state needs: on Secrets, the names a provider's fixture gives when a run starts, while there are any
+(`#secretsFromFixtures`, a `.hint`). On a scope, the entry ends with its foot, as the panel's
+(`.panel-foot`: 16px above, a line, 12px under it): `Delete scope` (`#envDelete`, `#secretsDelete`, a
+`.btn` 28px at its left, a ConfirmButton asking `delete its values and secrets?`).
+
+Secrets kept for names that aren't scopes now (Settings → Secrets, under the panes, only while there
+are any) are a `.settings-list` under their own `.field-head` (a `.hint`: `Secrets of scopes that no
+longer exist`), one `.settings-row` per name: the name over a `.hint` of its secrets' names (`API_KEY,
+TOKEN`; never a value), and `delete`, a `.btn` ConfirmButton asking `delete its secrets?`.
+
+### Run error
+
+A run that broke off before it reached its tests (refused before sending anything, or a provider's
+fixture or a suite's setup that failed) has no turns to show: the thread shows why where they would be,
+above a test's turns (as the file has them, not run by it), above a suite's tests, or alone in an open
+run. It's laid out as a [turn group](#turn-groups-and-row-hover) but isn't one: nothing in it to pick,
+so no hover and no pointer.
+
+```html
+<section class="run-error" id="runError" data-status="error" aria-label="The run: couldn't run">
+  <div class="turn-head"><span class="label">Run</span>
+    <span class="hint turn-summary" data-status="error">couldn't run · nothing was sent · just now</span></div>
+  <div class="msg-body error" id="runError-0">providers/acme.yml:2: {{env.base_url}} isn't set: …</div>
+</section>
+```
+
+| Part | Is |
+|---|---|
+| Box | `section.run-error`: a turn group's (padded 14px 14px 18px, its edges 14px outside the column), 6px above the group after it |
+| Head | `.turn-head`: `RUN` (a `.label` in `--fg`), then a `.hint` in `--danger`: `couldn't run · nothing was sent · just now`, or `error · 0.04 s · just now` |
+| Why | One `.msg-body.error` each (sans, `--danger`), 6px apart: every problem the run's check found before sending (`<file>:<line>: ` first when it has them), or the error it broke off with (`auth.hafen.yml: the fixture "acme-login" (beforeAll) failed: …`) |
+
+
+### Settings sections
+
+A part of a Settings pane that opens and closes, as the sidebar's [sections](#collapsible-section)
+do: Settings → Providers' `Fixtures` and `YAML`, so a provider shows its name and facts first, and
+each long part only when it's wanted. `SettingsSection` (`design/collapsible.jsx`), on
+`useCollapsible`: open or closed is remembered per section (`<app>.section.<id>`), the same for every
+provider; until it's toggled, `defaultOpen` (Fixtures: open when the provider has any, or a problem with
+them; YAML: closed). Code opens one as a click on its toggle would (`openSection(name)`, as the rail
+opens a sidebar section): the pane does, to show what's wrong in it (YAML that doesn't parse, as it's
+left or tried), or what a link asked for (a panel's fixtures `edit`).
+
+```html
+<div class="settings-sections">
+  <section class="settings-section collapsible" id="providerFixturesSection" aria-labelledby="providerFixturesLabel">
+    <div class="settings-section-head collapsible-head">
+      <button class="collapsible-toggle" id="providerFixturesToggle" aria-expanded="false" aria-controls="providerFixturesBody">
+        <span class="chev"></span><span class="label" id="providerFixturesLabel">Fixtures</span>
+        <span class="hint settings-section-summary" id="providerFixturesSummary">acme-login → reset-cart</span>
+      </button>
+    </div>
+    <div class="settings-section-body collapsible-body" id="providerFixturesBody">…</div>
+  </section>
+  …
+</div>
+```
+
+| Part | Is |
+|---|---|
+| Run | `.settings-sections`: the sections one after another, nothing between them, out to the content's edges (`margin: 0 -20px`, as its sticky head is), 6px more than the content's gap above and below it, a 1px `--line` under the last |
+| Section | `.settings-section.collapsible`: a 1px `--line` on top. Open: the open bar (2px `--fg` down its left edge, 5px beside its head), as a sidebar section's |
+| Head | `.settings-section-head.collapsible-head`: 40px (a section head's), padded `0 20px 0 12px`, so with the toggle's own 8px its arrow lines up with the pane's text. The toggle (`#<name>Toggle`, `aria-expanded`, `aria-controls`) takes the width: the arrow, the `.label` (`#<name>Label`: `FIXTURES`, `YAML`; `--muted`, `--fg` open or pointed at) and, only while it's closed, what's in it: `.hint.settings-section-summary` (`#<name>Summary`), one line cut with an ellipsis, `--muted` (`acme-login → reset-cart`, `kind: http · 12 lines`, `none yet`), in `--danger` (`.error`) when what's in it has a problem (`… · has problems`, the YAML's `Not saved` reason) |
+| Body | `.settings-section-body.collapsible-body` (`#<name>Body`): padded `0 20px 16px`, a column 10px apart, as the content is; what's first in it isn't spaced from its top. Closed, it isn't shown, but stays in the page (a field in it keeps what's typed) |
+
+### Segmented choice
+
+A setting with a few values, all shown, one chosen: Settings → Appearance's theme (`Light`, `System`,
+`Dark`). `SegmentedChoice` (`design/select.jsx`): the [segmented](#segmented) group as a radio group,
+`div.segmented[role=radiogroup]` (named by its field label, `aria-labelledby`), in a `.controls` row
+so it's as wide as its values, a `button[role=radio]` for each (`aria-checked`; an id each:
+`#themeLight`, `#themeSystem`, `#themeDark`), each with a `title` saying what it does.
+
+```jsx
+<SegmentedChoice id="themeChoice" labelledBy="themeLabel" value={theme} onChange={setTheme}
+                 options={[["light", "Light", "Always light", "themeLight"], …]} />
+```
+
+| Rule | Value |
+|---|---|
+| Look | The segmented's: an outlined 32px group, 1px `--line` between the values, mono 12px 500, padded `0 12px`; the buttons have no fill or border of their own |
+| Chosen | `[aria-checked="true"]`: filled `--fg` with `--bg` text, as the segmented's current one |
+| Others | `--muted`, `--fg` on hover; the pointer |
+| Focus | The segmented's: a 1px `--fg` outline, 2px inside |
+| Keys | As a radio group's: only the chosen one takes Tab; ←/→ (and ↑/↓) move to the next value round, and choose it; Home and End, the first and last. A click chooses |
+
+### Settings groups
+
+A Settings pane with several settings (Notifications) keeps them in groups, each under its name, a
+line between them, as the [scope panes](#scope-panes) head their parts (`GLOBALS`, `SCOPES`):
+`SettingsGroup` (`design/collapsible.jsx`, beside `SettingsSection`; `{ id, label, state }`):
+
+```html
+<section class="settings-block" id="notifySoundGroup" aria-labelledby="notifySoundGroupLabel">
+  <div class="settings-block-head"><h3 class="label" id="notifySoundGroupLabel">Sound</h3></div>
+  …its settings
+</section>
+```
+
+| Part | Is |
+|---|---|
+| Group | `section.settings-block`: a 1px `--line` on top, its settings in a column under its head, 6px more than the content's gap under the last |
+| Head | `.settings-block-head`: a row 32px tall (as `.scope-list-head`): its name as a `.label` (`h3`, `SOUND`, `FOR RUNS THAT`, `SYSTEM NOTIFICATIONS`) at the left, and at the right what it needs to say about them all (a `.hint`: the browser's permission) |
+| In it | Its fields as anywhere (a field's label row, a select, `.check`s); a `.hint` 6px under what it explains |
+| Last | The pane's own actions (Notifications' `Try it`) after the last group, under a line of their own: a group with no head (`.settings-block`), its `.controls` 12px under the line |

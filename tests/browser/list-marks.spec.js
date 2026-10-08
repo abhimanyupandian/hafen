@@ -4,11 +4,11 @@
 // now"); the latest of a test's runs shown first; right-click to expand or collapse it all (the list
 // and the timeline).
 
-import { expect, test } from "./fixtures.js";
+import { expect, reopen, test } from "./fixtures.js";
 
 const writeFile = (page, path, text) => page.evaluate(async ([path, text]) => {
   const parts = path.split("/");
-  let dir = await navigator.storage.getDirectory();
+  let dir = await navigator.storage.getDirectory().then((root) => root.getDirectoryHandle("workspace", { create: true }));
   for (const p of parts.slice(0, -1)) dir = await dir.getDirectoryHandle(p, { create: true });
   const w = await (await dir.getFileHandle(parts.at(-1), { create: true })).createWritable();
   await w.write(text);
@@ -39,8 +39,8 @@ tests:
       - { user: again }
 `);
 };
-const openFolder = async (page) => {
-  await page.click("#openFolder");
+const openApp = async (page) => {
+  await reopen(page);
   await expect(page.locator(`#suiteList .list-row[data-file="${MARKS}"]`)).toHaveCount(1);
 };
 const suiteRow = (page, file = MARKS) => page.locator(`#suiteList .list-row[data-file="${file}"]`);
@@ -54,22 +54,20 @@ test.afterEach(async ({ app: { errors } }) => {
 
 test("a suite is listed by its name (its file in its tooltip); one with no name by its file", async ({ app: { page, servers } }) => {
   await files(page, servers.mock.url);
-  await openFolder(page);
+  await openApp(page);
   await expect(suiteRow(page).locator(".list-open .list-label")).toHaveText("Checkout flows");
   await expect(suiteRow(page).locator(".list-open")).toHaveAttribute("title", /^Checkout flows · marks\.hafen\.yml · not run yet$/);
   await expect(suiteRow(page, "smoke.hafen.yml").locator(".list-open")).toContainText("Smoke");
   await expect(suiteRow(page, "smoke.hafen.yml").locator(".list-open")).not.toContainText("smoke.hafen.yml");
   // No name: its file
   await writeFile(page, "plain.hafen.yml", "version: 1\nprovider: providers/slow.yml\ntests:\n  - name: one\n    turns: [ { user: hi } ]\n");
-  await page.reload();
-  await page.locator("html:not(.loading)").waitFor();
-  await openFolder(page);
+  await openApp(page);
   await expect(suiteRow(page, "plain.hafen.yml").locator(".list-open")).toHaveText("plain.hafen.yml");
 });
 
 test("groups: a badge on the suite and its tests (G1, G2), the same colour for the same number, in the list, the suite's view and the top bar", async ({ app: { page, servers } }) => {
   await files(page, servers.mock.url);
-  await openFolder(page);
+  await openApp(page);
   const suiteBadge = suiteRow(page).locator(".group-badge");
   const card = testRow(page, "pays by card").locator(".group-badge");
   const voucher = testRow(page, "pays by voucher").locator(".group-badge");
@@ -97,7 +95,7 @@ test("groups: a badge on the suite and its tests (G1, G2), the same colour for t
 
 test("×3 for a test that repeats: in the list, the suite's view, the top bar, the Runs list; its latest run shown first (run 3 of 3)", async ({ app: { page, servers } }) => {
   await files(page, servers.mock.url, 150);
-  await openFolder(page);
+  await openApp(page);
   await expect(testRow(page, "pays by card").locator(".repeat-badge")).toHaveText("×3");
   await expect(testRow(page, "pays by voucher").locator(".repeat-badge")).toHaveCount(0);
   await suiteRow(page).locator(".list-open").click();
@@ -120,7 +118,7 @@ test("×3 for a test that repeats: in the list, the suite's view, the top bar, t
 
 test("▷ on a test's row runs that test (and shows it); off while it runs; a circle goes round for what's running", async ({ app: { page, servers } }) => {
   await files(page, servers.mock.url, 1200);
-  await openFolder(page);
+  await openApp(page);
   const row = testRow(page, "no group here");
   const play = row.locator("[id$='-run']");
   await expect(play).toHaveAttribute("aria-label", "Run no group here");
@@ -148,10 +146,8 @@ test("▷ on a test's row runs that test (and shows it); off while it runs; a ci
 test("when it last ran: the top bar, the suite's view, the panels, the Runs list and the list's tooltips say how long ago", async ({ app: { page, servers } }) => {
   // (the page's clock, ours to move on later; it runs as ever meanwhile)
   await page.clock.install();
-  await page.reload();
-  await page.locator("html:not(.loading)").waitFor();
   await files(page, servers.mock.url, 100);
-  await openFolder(page);
+  await openApp(page);
   await testRow(page, "pays by voucher").locator(".list-open").click();
   await expect(page.locator("#status")).toHaveText("not run yet");
   await page.click("#testRun");
@@ -177,7 +173,7 @@ test("when it last ran: the top bar, the suite's view, the panels, the Runs list
 
 test("right-click on a suite or a test in the list: expand all, collapse all", async ({ app: { page, servers } }) => {
   await files(page, servers.mock.url);
-  await openFolder(page);
+  await openApp(page);
   const tests = page.locator(`#suiteList .list-row[id^='test-']`);
   await expect(turnRows(page)).not.toHaveCount(0);
   const visibleTurns = async () => (await turnRows(page).allTextContents()).length;
@@ -206,15 +202,13 @@ test("right-click on a suite or a test in the list: expand all, collapse all", a
   // Remembered after a reload
   await suiteRow(page).click({ button: "right" });
   await page.click("#menu-collapse-all");
-  await page.reload();
-  await page.locator("html:not(.loading)").waitFor();
-  await openFolder(page);
+  await openApp(page);
   await expect(suiteRow(page).locator(".tree-toggle")).toHaveAttribute("aria-expanded", "false");
 });
 
 test("right-click on a row of the timeline that has steps under it: expand all, collapse all", async ({ app: { page, servers } }) => {
   await files(page, servers.mock.url, 50);
-  await openFolder(page);
+  await openApp(page);
   await suiteRow(page).locator(".list-open").click();
   await page.click("#suiteRun");
   await expect(page.locator("#status")).toContainText(/passed/, { timeout: 10000 });
@@ -250,7 +244,7 @@ test("right-click on a row of the timeline that has steps under it: expand all, 
 
 test("while a test runs, its panel's Last run says only that it's running, and when it started (no undefined counts)", async ({ app: { page, servers } }) => {
   await files(page, servers.mock.url, 1500);
-  await openFolder(page);
+  await openApp(page);
   await testRow(page, "pays by voucher").locator(".list-open").click();
   await page.click("#testRun");
   await expect(page.locator("#testFacts")).toContainText("running");

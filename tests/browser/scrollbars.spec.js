@@ -3,12 +3,12 @@
 // the timeline's chart none at all. Playwright hides scrollbars in a headless browser: shown here, to
 // be measured (styled ones take room, as Windows' do).
 
-import { expect, test } from "./fixtures.js";
+import { expect, reopen, test } from "./fixtures.js";
 
 test.use({ launchOptions: { ignoreDefaultArgs: ["--hide-scrollbars"] } });
 
-const openFolder = async (page) => {
-  await page.click("#openFolder");
+const openApp = async (page) => {
+  await reopen(page);
   await expect(page.locator('#suiteList .list-row[data-file="smoke.hafen.yml"]')).toHaveCount(1);
 };
 // The width of the vertical scrollbar of what scrolls there: the element, or the nearest part that holds
@@ -32,7 +32,7 @@ test.afterEach(async ({ app: { errors } }) => {
 });
 
 test("scrollbars are thin everywhere, and the chat's thinner still", async ({ app: { page } }) => {
-  await openFolder(page);
+  await openApp(page);
   // The chat
   await fill(page, "#scroller");
   expect(await scrollbarWidth(page, "#scroller")).toBe(5);
@@ -52,7 +52,7 @@ test("scrollbars are thin everywhere, and the chat's thinner still", async ({ ap
 });
 
 test("the timeline's chart has no scrollbar at all: it's moved by the wheel, or Space and drag", async ({ app: { page } }) => {
-  await openFolder(page);
+  await openApp(page);
   await page.locator("#suiteList .list-open", { hasText: "refund for a broken item" }).first().click();
   await page.click("#testRun");
   await expect(page.locator("#status")).toContainText(/failed|passed/);

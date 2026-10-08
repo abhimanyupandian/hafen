@@ -151,8 +151,11 @@ describe("a scope that has only secrets", () => {
     };
     const files = { ...FILES, "providers/p.yml": PROVIDER.replace("{{env.path}}", "chat") };
     const host = scopedHost(files, { solo: { API_KEY: "k" }, stage: { API_KEY: "s" }, empty: {} }, null);
-    assert.deepEqual(await check(host, "solo"), []);
-    assert.deepEqual(await check(host, "empty"), ['there\'s no environment or scope "empty" (stage, prod)']);
-    assert.deepEqual(await check(memoryHost(files), "solo"), ['there\'s no environment or scope "solo" (stage, prod)']);
+    // (known: no "there's no environment or scope". But its provider's {{tier}} only the suite's
+    // environments give, and none of them is the scope's: said before a turn needs it)
+    assert.deepEqual(await check(host, "solo"), ['{{tier}} isn\'t set: of the suite\'s environments, "stage", "prod" give it, not "solo"']);
+    assert.deepEqual(await check(scopedHost({ ...files, "providers/p.yml": files["providers/p.yml"].replace("{{tier}}", "t") }, { solo: { API_KEY: "k" } }, null), "solo"), []);
+    assert.deepEqual(await check(host, "empty"), ['there\'s no environment or scope "empty" (stage, prod)', '{{tier}} isn\'t set: of the suite\'s environments, "stage", "prod" give it, not "empty"']);
+    assert.deepEqual(await check(memoryHost(files), "solo"), ['there\'s no environment or scope "solo" (stage, prod)', '{{tier}} isn\'t set: of the suite\'s environments, "stage", "prod" give it, not "solo"']);
   });
 });

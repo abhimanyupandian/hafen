@@ -10,7 +10,10 @@ Its exact shape is [suite.schema.json](suite.schema.json); this page explains it
 - **Providers:** `providers/*.yml` beside the suites, by convention; any path works.
 - **Data files:** CSV or JSON lines, by path relative to the suite.
 - **Prices:** `prices.yml`, by path from a suite.
-- **Runs (desktop app):** `.hafen/runs/` in the opened folder, git-ignored.
+- **Runs (CLI):** `.hafen/runs/` in the current folder (without `--report`), git-ignored. The app
+  keeps its runs itself.
+- **The app's workspace** holds these files laid out the same way; Import copies them in, Export
+  writes them out to a folder, with the same paths and text ([contracts/ui.md](ui.md#the-workspace)).
 
 YAML files can name the schema for editors on their first line:
 
@@ -45,7 +48,7 @@ providers:
 defaults:
   repeat: 3
   pass_rate: 0.67
-  unsure: warn            # pass | warn | fail
+  unsure: warn            # fail (the default) | warn | pass
   timeout_ms: 60000
 
 setup:
@@ -107,12 +110,12 @@ tests:
 | `group` | | The suite's group, a whole number of 1 or more ([Groups](#groups)) |
 | `provider` | yes, here or on every test | A provider: a name under `providers`, a preset (`openai-chat`, `openai-responses`, `anthropic-messages`, `gemini`, `ollama`), `plugin:<name>` or a file path, looked up in that order; an A2A agent (`kind: a2a`); or an inline provider object ([provider.md](provider.md)) |
 | `providers` | | Named providers, used by judges, simulated users, or tests that override `provider` |
-| `environments` | | Named sets of values; the chosen environment's ([Environments and secrets](#environments-and-secrets)) is `{{env.NAME}}` where the values passed don't have NAME, and each is a `{{name}}` too; with none chosen, the first. A value can't be called `env`, `secret` or `secrets` |
+| `environments` | | Named sets of values; the chosen environment's ([Environments and secrets](#environments-and-secrets)) is `{{env.NAME}}` where the values passed don't have NAME, and each is a `{{name}}` too; with no environment passed (the CLI with no `--env`), the first; with one passed (the app's scope, or no scope), only the one of its name. A value can't be called `env`, `secret` or `secrets` |
 | `variables` | | Suite variables. A variable can't be called `env`, `secret` or `secrets` (or `env.…`): `{{env.x}}` is the environment's, `{{secret.x}}` a secret |
 | `judges` | | Named judges ([checks.md](checks.md#judges)); `default` is used when a check names none |
 | `defaults` | | Test settings every test starts from |
 | `setup`, `teardown` | | Steps around the whole suite |
-| `plugins` | | More plugin modules: paths relative to the suite (`./plugins/acme.js`), or package names (found from the folder, in Node: the CLI and the desktop app). The folder's own plugins (`plugins/*.js`: the app's opened folder, the CLI's current folder) need no naming: any suite uses them by name (`kind: plugin:acme`, a judge's `plugin: acme`, a check's `type: acme`). Each is loaded, in a worker of its own, before anything is sent; one that can't be found or loaded, or a name no plugin has, is a setup error |
+| `plugins` | | More plugin modules: paths relative to the suite (`./plugins/acme.js`), or package names (found from the folder, in Node: the CLI and the desktop app). The folder's own plugins (`plugins/*.js`: the app's workspace; the CLI's current folder, and each folder it's given) need no naming: any suite uses them by name (`kind: plugin:acme`, a judge's `plugin: acme`, a check's `type: acme`). Each is loaded, in a worker of its own, before anything is sent; one that can't be found or loaded, or a name no plugin has, is a setup error |
 | `prices` | | A prices file path, or `{ <model>: { input, output, cached_input? } }` (USD per million tokens) |
 | `redact` | | `{ patterns: [email, card, phone], headers: [x-session-token] }`, added to the defaults |
 | `tests` | yes | The tests. An empty list (`tests: []`) is valid, with the warning "no tests yet"; running only empty suites (or a `--test` / `--tag` that matches nothing) exits 2 |
@@ -126,12 +129,34 @@ tests:
 | `tags` | For `--tag` |
 | `group` | The test's group in its suite, a whole number of 1 or more ([Groups](#groups)) |
 | `provider` | Overrides the suite's: a name under the suite's `providers`, or anything the suite's `provider` can be. A name that's none of them (no provider, preset or file) is a problem listing the suite's provider names, with the one it most likely meant |
-| `data` | A CSV (with a header row) or JSON-lines file; the test runs once per row; `{{row.<column>}}` |
+| `data` | A CSV (with a header row) or JSON-lines file; the test runs once per row; `{{row.<column>}}` ([Data rows](#data-rows)) |
+| `row_name` | Each data row's name: a template filled in with the row ([Data rows](#data-rows)). Without it, the row's first column's value |
 | `setup`, `teardown` | Steps; teardown always runs |
 | `turns` | The conversation |
 | `simulate` | A simulated user: `{ user: <provider name>, scenario, stop_when, max_turns, expect_each: [checks] }`. **Not built yet:** the file loads with a warning on it, and running the test is an error saying so (never a pass with nothing sent) |
 | `expect_conversation` | Checks after the last turn, on the whole conversation |
-| `repeat`, `pass_rate`, `history`, `on_fail`, `unsure`, `unsure_below`, `timeout_ms`, `retries`, `network`, `load` | Settings ([data-model.md](../data-model.md#testsettings)) |
+| `repeat`, `pass_rate`, `history`, `on_fail`, `unsure`, `unsure_below`, `timeout_ms`, `retries`, `network`, `load` | Settings ([data-model.md](../data-model.md#testsettings)). `unsure`: how an unsure result counts, `fail` (the default), `warn` or `pass` ([checks.md, Unsure](checks.md#unsure)); a judged check can say its own |
+
+### Data rows
+
+A test with `data` runs once per row (numbered from 1), the row's values as `{{row.<column>}}`. Each
+row has a name, recorded on its runs, turns and fixtures in the run file (`row_name`,
+[run-file.md](run-file.md)) and said wherever the row is, in one format: `row 3: a refund please`
+(none: `row 3`). The command line's lines, every report (JUnit's case `orders [row 3: a refund
+please]`) and the app say it so ([cli.md](cli.md#reports), [ui.md](ui.md)).
+
+- Without `row_name`: the value of the row's first column (a CSV file's first header column; a JSON
+  line's first key).
+- `row_name`: a template filled in with the row's scope: `{{row.<column>}}`, the suite's variables,
+  what the suite's setup steps extract, the builtins, and `{{env.NAME}}`. Never `{{secret.NAME}}`: a row's
+  name is in every report (a problem, [Validation](#validation)).
+- Either way: made text (a JSON value as JSON), each run of whitespace one space, trimmed, and cut at
+  60 characters ending with `…`. Empty: no name.
+- One that can't be filled in as the run goes (a JSON line without that key): no name; the row runs as
+  it would, never failing for its name.
+
+A row's name is redacted as everything in the run is: a secret's value in a data cell shows as
+`[redacted]` in it, in the run file, every report and every event.
 
 `load` turns a test into a load test (needs `--load` in CI and confirmation in the app; load mode
 isn't built yet: without `--load` it's skipped, with it a setup error, [cli.md](cli.md#options-for-run)):
@@ -193,7 +218,7 @@ test's teardown still runs.
 | `{{name}}` | Extractions and setup steps, then the data row, then suite `variables`, then the suite's environment of the chosen name | Latest extraction wins. Not found: a setup error before anything is sent |
 | `{{row.col}}` | The data file's current row | |
 | `{{run.id}}`, `{{test.name}}`, `{{turn.index}}`, `{{repeat}}` | The run | For ids in requests |
-| `{{env.NAME}}` | The chosen environment: the values passed (the app's, for its scope; `--env <file>`), then the suite's `environments.<name>` ([Environments and secrets](#environments-and-secrets)) | `{{env.db.host}}`: the key `db.host` first, else `db`'s `host`. Missing: a setup error |
+| `{{env.NAME}}` | The chosen environment: what a provider's fixture set with `env.set` in this run (or conversation: [provider.md](provider.md#fixtures)), then the values passed (the app's, for its scope; `--env <file>`), then the suite's `environments.<name>` ([Environments and secrets](#environments-and-secrets)) | `{{env.db.host}}`: the key `db.host` first, else `db`'s `host`. Missing: a setup error (one a `beforeAll` or `before` fixture sets counts as set) |
 | `{{secret.NAME}}` (or `{{secrets.NAME}}`) | A secret: the app's, kept for its scope; `--secret <file>`, then the process environment, in the CLI | Never written to files; every value is redacted in runs and reports. Missing: a setup error |
 | `${env:NAME}`, `{{scope.NAME}}` | The old ways ([Old spellings](#old-spellings)) | A problem where it's written, saying the new way. Never filled in |
 
@@ -212,12 +237,18 @@ written.) One that isn't there is never sent as written: it's an error saying wh
 - `{{env.base_url}} isn't set: no environment is chosen (the app's scope, or --env <file> in the CLI)`
 - `{{secret.API_KEY}} isn't set for the scope "stage"` (`{{secret.API_KEY}} isn't set`, with none chosen);
   the CLI says where it looked instead: `{{secret.API_KEY}} isn't set (not in the --secret file or the
-  environment)`, or with no `--secret`, `(not in the environment: set it, or pass --secret <file>)`
+  environment)` (`files`, with several), or with no `--secret`, `(not in the environment: set it, or
+  pass --secret <file>)`
+- `{{tier}} isn't set: of the suite's environments, "stage", "prod" give it, and none of them is
+  chosen` (or `not "qa"`): a `{{name}}` only the suite's `environments` give, the chosen one lacking it
+- `{{secret.1KEY}}: "1KEY" isn't a name (letters, digits, _ . -, not starting with a digit)`: a
+  `{{secret.NAME}}` or `{{env.NAME}}` whose name breaks the one rule for names (`engine/env-file.js`,
+  `NAME`: KEY=VALUE files, fixtures' values and the app's names follow it too); never looked up
 
 said before anything is sent, where it's first used, when the files show it.
 
-Files a suite names (its `provider`s, `data`, `prices`, `plugins`) are read only in the opened folder
-(the app's), or the current folder and the project of each path given (the command line's: the
+Files a suite names (its `provider`s, `data`, `prices`, `plugins`) are read only in the app's
+workspace, or the current folder and the project of each path given (the command line's: the
 nearest folder above it with a `.git` or a `package.json`, else its own folder). Links are followed
 first. One elsewhere is a problem that says so (`the data file /… isn't in the opened folder`), and
 nothing of it is read or sent.
@@ -259,12 +290,23 @@ calls and usage gathered into one object, plus the last chunk's fields).
 2. It matches the schema.
 3. Every provider, data file, prices file and plugin it names exists.
 4. Every `{{name}}` can be resolved from what the file declares (extractions count from the turn
-   they're made in) or what the run gives (`--var name=value`); every `{{env.NAME}}` from the chosen
-   environment (with none chosen, each is a problem saying so); and every `{{secret.NAME}}` the run
-   needs is set (`validate --env-check`; a run checks it before sending anything, including the
+   they're made in; one only its `environments` give, from the chosen one's) or what the run gives
+   (`--var name=value`); every `{{env.NAME}}` from the chosen environment (with none chosen, each is
+   a problem saying so), or one a provider's `beforeAll` or `before` fixture sets with `env.set`
+   ([provider.md](provider.md#fixtures)); and every `{{secret.NAME}}` the run needs is set (only the chosen
+   environment's block of `environments` is looked at for them) (`validate --env-check`; a run checks it before sending anything, including the
    presets' default keys, System One's, and the secrets its plugins write in their code).
-5. Every path parses; every regular expression compiles; every judge it names is declared.
-6. No variable, environment's value or extraction is called `env`, `secret` or `secrets`.
+5. Every path parses; every regular expression compiles; every judge it names is declared; every
+   check that isn't turned off has what its type needs ([checks.md](checks.md#what-a-check-needs)),
+   and a `confidence` only where it means something ([checks.md](checks.md#confidence)); every
+   fixture a provider lists is in a list its `phases` name ([provider.md](provider.md#fixtures)).
+6. No variable, environment's value or extraction is called `env`, `secret` or `secrets`; every
+   `{{env.NAME}}` and `{{secret.NAME}}` names a name (`engine/env-file.js`, `NAME`).
+7. A `row_name` is on a test with `data` (`tests.0.row_name: row_name names a data row: this test has
+   no data file (data)`), has no `{{secret.NAME}}` (`a row's name can't hold a secret
+   ({{secret.API_KEY}}): it's shown in every report`), and each `{{row.<column>}}` in it is a column
+   of the data file (a CSV file's header; the keys its JSON lines have): `{{row.qestion}} isn't a
+   column of data/orders.csv (did you mean {{row.question}}?)`, or, with none close, its columns.
 
 Each problem is reported with the file, the line and column, and what to fix. A secret that isn't set
 is reported where it's first used: its `{{secret.NAME}}` in the suite or in the provider file that
@@ -280,12 +322,15 @@ An environment is a named set of values to switch between, as stage and prod: Po
 environments. Its values and the secrets aren't read from the folder: whoever runs the engine passes
 them.
 
-- **The app:** each scope's values are kept in the app (per scope), its secrets in the app's keystore
-  (per scope, or for every scope). The scope chosen (the scope button) is passed with every run,
-  check and message.
+- **The app:** the global values and each scope's are kept in the app, the secrets in the app's
+  keystore (the global ones, and each scope's). With every run, check and message it passes the
+  environment: `{ name: scope, values: { ...global, ...scope } }` for the scope chosen (the scope
+  button; the app merges, a scope's value winning), `{ name: "", values: global }` for no scope.
+  Its host's `secrets(NAME, { env })` gives the scope's secret, else the global one's, and
+  `knownSecrets(env)` every one of them, to redact.
 - **The CLI:** `--env <file>` is a KEY=VALUE file of the environment's values (its name is the file's:
   `staging.env`, staging), `--secret <file>` one of secrets (then the process environment), each
-  anywhere on the disk ([cli.md](cli.md)).
+  anywhere on the disk, each as often as wanted, a later file's values winning ([cli.md](cli.md)).
 
 ```sh
 # staging.env
@@ -305,9 +350,17 @@ headers: { Authorization: "Bearer {{secret.API_KEY}}" }
 ```
 
 `{{env.NAME}}` is the value passed, else the suite's `environments.<name>` (for that name: so a suite
-with an `environments:` block works with none passed, its first with none chosen). Values passed for
-a name the suite has no environment of are its environment all the same. `{{secret.NAME}}` is the
-host's secret of that name for the chosen scope (what a provider's fixture gave first). Plugins are
+with an `environments:` block works with none passed, its first with no environment passed at all).
+An environment passed (`{ name, values }`, or `null` for none) never falls back to the suite's first:
+the suite's `environments.<name>` is used only for a name that isn't `""`, so the app's "no scope"
+(`name: ""`) uses none of them. A run and a conversation's message choose the same way
+(`engine/runner.js`, `environmentOf`). Values passed for a name the suite has no environment of are
+its environment all the same. Only the chosen environment's block is read for the names a run needs
+(its secrets, its `{{env.NAME}}`s): another's don't stop it. `{{secret.NAME}}` is the host's secret
+of that name for the chosen scope (what a provider's fixture gave first), looked up once a run (once a
+message in a conversation) and kept: one changed while it goes doesn't change its later turns. Only
+text is a secret's value: a host's lookup that finds anything else (a prototype's function) has found
+none. Every secret the host knows for the scope (`knownSecrets(env)`) is redacted, used or not. Plugins are
 given the environment's values as `env`, never a secret; their requests have `{{secret.NAME}}` and
 `{{env.NAME}}` filled in by the engine as they leave ([provider.md](provider.md#code-plugins)).
 

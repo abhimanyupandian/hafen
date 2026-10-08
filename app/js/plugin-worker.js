@@ -1,7 +1,7 @@
 // A plugin's worker in the browser build: a Web Worker of its own (started by the engine's worker), the
 // plugin loaded from its text as a module. It has nothing of the page's or the engine's. A page can't
-// resolve what a plugin imports from the folder, so here a plugin is one module (the desktop app and
-// the CLI load it from its file, imports and all).
+// resolve what a plugin imports from the files beside it, so here a plugin is one module (the desktop
+// app and the CLI load it from its file, imports and all).
 
 import { servePlugin } from "hafen/engine/plugin-worker-core.js";
 

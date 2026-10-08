@@ -83,11 +83,22 @@ describe("reference checks", () => {
     assert.equal(r.tests[0].status, "failed");
   });
 
-  it("a reference check with no reference answer is an error, not a pass", async () => {
-    const { results } = await run(suite(`  - name: none
+  it("a reference check with no reference answer is a problem before anything is sent; run anyway, an error, not a pass", async () => {
+    const { transport, state } = router();
+    const host = memoryHost({ "s.hafen.yml": suite(`  - name: none
     turns: [ { user: hi, expect: [ { type: reference, min: 0.5 } ] } ]
-`));
-    assert.deepEqual([results[0].status, results[0].reason], ["error", "a reference check needs a reference answer"]);
+`) }, { transport });
+    const loaded = await loadSuite(host, "s.hafen.yml");
+    const why = "a reference check needs reference (the expected answer)";
+    assert.deepEqual(loaded.errors, [{ file: "s.hafen.yml", line: 13, column: 36, message: why }]);
+    const stopped = await runSuites({ suites: [loaded], host });
+    assert.equal(stopped.status, "error");
+    assert.equal(transport.requests.length, 0);
+    // (the run's own guard: a suite that skipped loading's check, as the app's one-check run could)
+    const out = await runSuites({ suites: [{ ...loaded, errors: [] }], host });
+    const [result] = out.turns.flatMap((t) => t.results);
+    assert.deepEqual([result.status, result.reason], ["error", why]);
+    assert.equal(state.judged, 0);
   });
 });
 
@@ -181,11 +192,12 @@ ${extra}    turns: [ { user: hi, expect: [ { type: judge, rubric: [FLAKY polite]
     assert.equal(r.verdict, "passed");
   });
 
-  it("the check's unsure_below over it: unsure; the test's unsure_below the same; warn (the default) passes the test, the run's verdict unsure", async () => {
+  it("the check's unsure_below over it: unsure; the test's unsure_below the same; fail (the default) fails the test, saying so", async () => {
     const byCheck = await run(flaky("", ", unsure_below: 0.7"));
     assert.equal(byCheck.results[0].status, "unsure");
-    assert.equal(byCheck.run.tests[0].status, "passed");
-    assert.equal(byCheck.run.verdict, "unsure");
+    assert.match(byCheck.results[0].reason, /^2\/3 samples agree · .*, but confidence 0\.667 is below 0\.7$/);
+    assert.equal(byCheck.run.tests[0].status, "failed");
+    assert.equal(byCheck.run.verdict, "failed");
     const byTest = await run(flaky("    unsure_below: 0.7\n"));
     assert.equal(byTest.results[0].status, "unsure");
     // (the check's own wins over the test's)
@@ -193,18 +205,24 @@ ${extra}    turns: [ { user: hi, expect: [ { type: judge, rubric: [FLAKY polite]
     assert.equal(both.results[0].status, "pass");
   });
 
-  it("the test's unsure: fail fails it; pass passes it quietly (the run passed, not unsure)", async () => {
-    const failed = await run(flaky("    unsure_below: 0.7\n    unsure: fail\n"));
-    assert.equal(failed.run.tests[0].status, "failed");
-    assert.equal(failed.run.verdict, "failed");
+  it("the test's unsure: warn passes it with a warning (the run's verdict unsure); pass passes it quietly (the run passed, not unsure); fail fails it", async () => {
+    const warned = await run(flaky("    unsure_below: 0.7\n    unsure: warn\n"));
+    assert.equal(warned.run.tests[0].status, "passed");
+    assert.equal(warned.run.verdict, "unsure");
     const passed = await run(flaky("    unsure_below: 0.7\n    unsure: pass\n"));
     assert.equal(passed.results[0].status, "unsure");
     assert.equal(passed.run.tests[0].status, "passed");
     assert.equal(passed.run.verdict, "passed");
-    // (the suite's defaults say it for every test)
-    const byDefault = await run(flaky().replace("tests:\n", "defaults: { unsure: fail, unsure_below: 0.7 }\ntests:\n"));
-    assert.equal(byDefault.run.tests[0].status, "failed");
+    const failed = await run(flaky("    unsure_below: 0.7\n    unsure: fail\n"));
+    assert.equal(failed.run.tests[0].status, "failed");
+    assert.equal(failed.run.verdict, "failed");
+    // (the suite's defaults say it for every test; the check's own, over the test's)
+    const byDefault = await run(flaky().replace("tests:\n", "defaults: { unsure: warn, unsure_below: 0.7 }\ntests:\n"));
+    assert.equal(byDefault.run.tests[0].status, "passed");
+    const byCheck = await run(flaky("    unsure_below: 0.7\n    unsure: fail\n", ", unsure: warn"));
+    assert.deepEqual([byCheck.results[0].unsure, byCheck.run.tests[0].status, byCheck.run.verdict], ["warn", "passed", "unsure"]);
   });
+
 });
 
 describe("System One's bounds", () => {

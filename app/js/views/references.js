@@ -24,7 +24,11 @@ const DEFAULT_KEYS = { "openai-chat": "OPENAI_API_KEY", "openai-responses": "OPE
 
 // The names the open suites and providers use: { env: Set (values), secret: Set (secrets, with the
 // presets' default keys) }. (An old way isn't a use: it's a problem in its file, until it's written anew.)
+// Read again only when the suites or the providers are other ones: every field and both Settings panes
+// ask for it as the app draws.
+let usedFor = { suites: null, providers: null, used: null };
 export function usedNames({ suites = [], providers = [] }) {
+  if (usedFor.suites === suites && usedFor.providers === providers) return usedFor.used;
   const used = { env: new Set(), secret: new Set() };
   const scan = (value) => {
     for (const r of referencesIn(JSON.stringify(value ?? {}))) if (r.kind !== "old") used[r.kind].add(r.name);
@@ -41,6 +45,7 @@ export function usedNames({ suites = [], providers = [] }) {
     scan(p.config);
     keyOf(p.config);
   }
+  usedFor = { suites, providers, used };
   return used;
 }
 
@@ -53,4 +58,27 @@ export function hasValue(values, name) {
     v = v[part];
   }
   return true;
+}
+
+// The open suites' environment of a scope's name, all in one ({} with none chosen: the engine reads none
+// then). The engine takes a value from there when the scope (and Globals) haven't got it.
+export function suiteValues(scope, suites = []) {
+  if (!scope) return {};
+  return Object.assign({}, ...suites.map((s) => s.data?.environments?.[scope]).filter((e) => e && typeof e === "object"));
+}
+
+// The {{env.NAME}}s the open files use that a scope ("" none chosen: Globals alone) hasn't got, once
+// Globals' are counted in (values: lib/scopes.js effectiveValues), nor the suites' environment of its
+// name gives, nor a fixture sets as it runs (env.set: the fixture plugins' `sets`), by name
+export function unsetValues(scope, values, state) {
+  const fromSuites = suiteValues(scope, state.suites);
+  const sets = new Set((state.plugins ?? []).filter((p) => p.kind === "fixture").flatMap((p) => p.sets ?? []));
+  return [...usedNames(state).env].filter((n) => !hasValue(values, n) && !hasValue(fromSuites, n) && !sets.has(n)).sort();
+}
+
+// The {{secret.NAME}}s the open files use that a scope ("": Globals alone) and Globals have no secret
+// for, by name (less `given`: the names fixtures give, and System One's key, which has its own pane)
+export function unsetSecrets(scope, { scopeSecrets = {}, ...state }, given = []) {
+  const kept = new Set([...(scopeSecrets[scope ?? ""] ?? []), ...(scopeSecrets[""] ?? []), ...given]);
+  return [...usedNames(state).secret].filter((n) => !kept.has(n)).sort();
 }

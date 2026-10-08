@@ -9,6 +9,7 @@ import { ollama } from "./presets/ollama.js";
 import { openaiChat } from "./presets/openai-chat.js";
 import { openaiResponses } from "./presets/openai-responses.js";
 import { websocketProvider } from "./websocket.js";
+import { pluginsWhere } from "../plugin-place.js";
 
 export const PRESETS = {
   "openai-chat": openaiChat,
@@ -30,7 +31,7 @@ export function createProvider(config, { plugins = {} } = {}) {
   if (typeof config.kind === "string" && config.kind.startsWith("plugin:")) {
     const name = config.kind.slice("plugin:".length).split("@")[0];
     const plugin = plugins[name];
-    if (!plugin) throw new Error(`The provider plugin "${name}" isn't in the folder's plugins/ or the suite's plugins`);
+    if (!plugin) throw new Error(`The provider plugin "${name}" isn't in ${pluginsWhere()}`);
     if (!plugin.provider) throw new Error(`The plugin "${name}" is a ${plugin.kind}, not a provider`);
     return plugin.provider(config);
   }

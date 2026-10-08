@@ -1,6 +1,7 @@
 // The app's screenshots for the README and docs/, each in light and dark: the browser build (app/dist)
-// in Chromium, through the relay, with a folder of suites for a demo support bot that streams thinking,
-// tool calls and text, and the mock endpoint's System One and LLM judges. No keys, no network.
+// in Chromium, through the relay, its workspace holding suites for a demo support bot that streams
+// thinking, tool calls and text, and the mock endpoint's System One and LLM judges, with the scope
+// "staging" chosen. No keys, no network.
 // Run: npm run screenshots (it builds the app first).
 
 import { chromium } from "@playwright/test";
@@ -203,26 +204,18 @@ const context = await browser.newContext({ viewport: { width: 1440, height: 900 
 const page = await context.newPage();
 const errors = [];
 page.on("pageerror", (e) => errors.push(e.message));
-await page.addInitScript((files) => {
+await page.addInitScript(() => {
   if (!localStorage.getItem("eval.theme")) {
     localStorage.setItem("eval.theme", "system");
     localStorage.setItem("eval.secrets", JSON.stringify({ "": { JEV_API_KEY: "jev-demo-key" } }));
+    // (the scope "staging", made and chosen, as a user does: the suites' environments.staging applies)
+    localStorage.setItem("eval.scopes", JSON.stringify(["staging"]));
+    localStorage.setItem("eval.scope.staging", JSON.stringify({}));
+    localStorage.setItem("eval.env", "staging");
     localStorage.setItem("eval.section.console", "closed");
     localStorage.setItem("eval.navWidth", "340");
   }
-  window.showDirectoryPicker = async () => {
-    const root = await navigator.storage.getDirectory();
-    for (const [path, text] of Object.entries(files)) {
-      const parts = path.split("/");
-      let dir = root;
-      for (const p of parts.slice(0, -1)) dir = await dir.getDirectoryHandle(p, { create: true });
-      const w = await (await dir.getFileHandle(parts.at(-1), { create: true })).createWritable();
-      await w.write(text);
-      await w.close();
-    }
-    return root;
-  };
-}, files(botUrl, mock.url));
+});
 
 await mkdir(OUT, { recursive: true });
 // One screenshot in each theme, once the toasts have gone, with the pointer out of the way (an empty
@@ -243,9 +236,22 @@ const idle = () => page.locator("html:not([data-running])").waitFor({ timeout: 6
 const open = (name) => page.locator("#suiteList .list-open", { hasText: name }).first().click();
 
 try {
+  // The app's workspace (the browser's private file system's workspace/) filled before the app loads,
+  // from a page of its origin
+  await page.goto(`http://127.0.0.1:${relay.address().port}/relay/ping`);
+  await page.evaluate(async (files) => {
+    const root = await (await navigator.storage.getDirectory()).getDirectoryHandle("workspace", { create: true });
+    for (const [path, text] of Object.entries(files)) {
+      const parts = path.split("/");
+      let dir = root;
+      for (const p of parts.slice(0, -1)) dir = await dir.getDirectoryHandle(p, { create: true });
+      const w = await (await dir.getFileHandle(parts.at(-1), { create: true })).createWritable();
+      await w.write(text);
+      await w.close();
+    }
+  }, files(botUrl, mock.url));
   await page.goto(`http://127.0.0.1:${relay.address().port}/`);
   await page.locator("html:not(.loading)").waitFor();
-  await page.click("#openFolder");
   await page.locator('#suiteList .list-row[data-file="refunds.hafen.yml"]').waitFor();
 
   // Exploring: a conversation with the bot

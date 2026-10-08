@@ -39,7 +39,8 @@
   business audience; the spec is written for them in plain language, with terms they use.
 - **No clarifications needed.** Every open choice was resolved with a documented default in
   Assumptions (a standalone project; desktop and CI as defaults; System One through its API;
-  unsure warns in CI; no bundled judge model; user-entered prices; out-of-scope items listed).
+  unsure fails in CI unless set to warn or pass; no bundled judge model; user-entered prices;
+  out-of-scope items listed).
   Revisit them with `/speckit-clarify` if any is wrong.
 - **Scope** is bounded by priority: P1 (US1–US4) is the MVP; P2 and P3 follow; team sharing,
   scheduled production runs, safety packs and log import are out of scope.

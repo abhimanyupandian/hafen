@@ -6,10 +6,10 @@ import { createFixtures } from "./fixtures.js";
 import { fixturesOf } from "./fixture-lists.js";
 import { createProvider } from "./providers/index.js";
 import { createRedactor, headerSecrets } from "./redact.js";
-import { newRun, summarize } from "./runner.js";
+import { knownSecrets, newRun, summarize } from "./runner.js";
 import { createSpans } from "./spans.js";
 import { executeTurn } from "./turn.js";
-import { createScope } from "./vars.js";
+import { createScope, MissingVariable } from "./vars.js";
 
 // providerConfig: a provider's configuration. variables, environment: what its templates may use (the
 // suite's variables, and its environment of the chosen one's name, as {{name}}s).
@@ -18,15 +18,21 @@ import { createScope } from "./vars.js";
 // scopeValues: the chosen environment ({ name, values }: the app's scope, its values; or null, none),
 // for {{env.NAME}} (its values, then the suite's environment of its name) and where {{secret.NAME}}
 // comes from (its secrets). setScope changes it between messages, with the suite's variables and
-// environment read again for it.
+// environment read again for it. The host's secrets are looked up once for each message (one changed
+// while it's on its way doesn't change it), and every one it keeps for the scope
+// (host.knownSecrets?.(name)) is hidden wherever it shows, used or not.
+// A seed's turns are kept redacted: one whose message had a {{secret.…}} or {{env.…}} in it
+// (user_template) has it filled in again, by the scope of the first message after, for the history.
 // A provider's fixtures (engine/fixtures.js): beforeAll and before run before the first message, and
-// again for another scope (either again after it failed); after and afterAll when the conversation is
-// let go (close()), for each scope they ran in. What they give is kept for this conversation and
-// that scope only.
+// again for another scope (either again after it failed, or said to stop: that message is refused,
+// its turn skipped saying why, and sent to no one); after and afterAll when the conversation is let
+// go (close()), for each scope they ran in. What they give is kept for this conversation and that
+// scope only, and so is what they set with env.set ({{env.NAME}} for every message after, until it's
+// let go).
 export function createConversation({ host, providerConfig, providerFile, variables = {}, environment = {}, envName, prices = {}, plugins = {}, onEvent: emit = () => {}, history: historyMode = "live", seed = null, scopeValues = null }) {
   let chosen = scopeValues;
-  // (the scope's name: where its secrets come from)
-  let env = scopeValues?.name ?? envName ?? null;
+  // (the scope's name: where its secrets come from; null for none, a scope named "" too)
+  let env = scopeValues?.name || envName || null;
   const run = newRun({ mode: "explore", host, settings: { env: envName ?? null, provider: providerConfig?.kind } });
   run.status = "done";
   const earlier = seed?.turns?.filter(Boolean) ?? [];
@@ -81,52 +87,102 @@ export function createConversation({ host, providerConfig, providerFile, variabl
     run.settings.provider = next.kind;
   }
   // What later messages are sent with: each earlier turn's message and reply (and what its provider
-  // kept to replay)
-  const records = earlier.map((t) => ({ user: t.user, reply: t.reply, raw_blocks: t.raw_blocks, variables: t.variables }));
+  // kept to replay). (A seed's message as typed, `template`, when it had a {{secret.…}} or {{env.…}}:
+  // its record's is redacted)
+  const records = earlier.map((t) => ({ user: t.user, reply: t.reply, raw_blocks: t.raw_blocks, variables: t.variables, ...(typeof t.user_template === "string" ? { template: t.user_template } : {}) }));
   let session;
 
   async function send(message, { signal } = {}) {
     // (this message's scope, whatever is chosen while it's on its way)
     const scopeName = env;
     const key = scopeName ?? "";
+    // The host's secrets, each looked up once for this message and kept for it; and every one it keeps
+    // for the scope, hidden from now on
+    const looked = new Map();
+    const hostSecret = (name) => {
+      if (!looked.has(name)) {
+        const value = host.secrets(name, { env: scopeName });
+        looked.set(name, typeof value === "string" ? value : undefined);
+      }
+      return looked.get(name);
+    };
+    await knownSecrets(host, [scopeName], secretsUsed);
     const scope = createScope({
       layers: [Object.assign({}, ...records.map((r) => r.variables ?? {})), variables, environment],
       trusted: [variables, environment],
-      secrets: (name) => given.get(key)?.get(name) ?? fixtures.value(name, scopeName) ?? host.secrets(name, { env: scopeName }),
+      secrets: (name) => given.get(key)?.get(name) ?? fixtures.value(name, scopeName) ?? hostSecret(name),
       used: secretsUsed,
       environment: chosen ? { name: chosen.name ?? "", values: chosen.values ?? {}, suite: environment } : null,
+      // (what its fixtures set with env.set in this scope)
+      overlay: fixtures.env(scopeName),
     });
+    // (history none, the page's or the provider's: the message goes alone, with no earlier turns and
+    // no session to carry the conversation)
+    const alone = historyMode === "none" || config?.history === "none";
+    // A seed's messages as typed, filled in for the history (never its "[redacted]"): once, then kept
+    // as what was sent. One that can't be (a secret this scope hasn't) stops the message here.
+    for (const [i, r] of records.entries()) {
+      if (alone || r.template === undefined) continue;
+      try {
+        r.user = scope.typed(r.template);
+      } catch (err) {
+        throw new Error(`message ${i + 1} of the conversation, sent again as its history: ${err.message}`);
+      }
+      delete r.template;
+    }
     // The message's {{env.NAME}}s and {{secret.NAME}}s, filled in (its other {{…}} are sent as typed).
     // As typed, it's kept too (user_template): a test saved from the conversation has the {{env.NAME}},
-    // not its value
+    // not its value. (One its fixtures set with env.set is there once they've run: a message that has
+    // one before they have, in this scope, is filled in after them.)
     const typed = String(message);
-    message = scope.typed(message);
+    const lists = fixturesOf(config);
+    const pending = !given.has(key) && lists.beforeAll.length + lists.before.length > 0;
+    let later = false;
+    try {
+      message = scope.typed(message);
+    } catch (err) {
+      if (!(pending && err instanceof MissingVariable && err.kind === "environment")) throw err;
+      later = true;
+    }
     const index = run.turns.length;
     const turnSpan = spans.start("turn", `turn ${index + 1}`, { ref: { turn: index } });
     // (what the page is shown as it starts: redacted, as everything it's shown is)
     onEvent({ type: "turn:start", index, user: redactor.text(message) });
-    const history = records.map((r) => (historyMode === "none" ? null : { user: r.user, reply: r.reply, raw: r.raw_blocks?.at(-1) })).filter(Boolean);
-    // The provider's beforeAll fixtures, then its before ones, first (each once per scope)
+    const history = alone ? [] : records.map((r) => ({ user: r.user, reply: r.reply, raw: r.raw_blocks?.at(-1) }));
+    // The provider's beforeAll fixtures, then its before ones, first (each once per scope). One that
+    // says to stop refuses this message: it's sent to no one, and they run again with the next.
     let failed = null;
+    let refused = null;
     ranIn.set(key, { scope, env: scopeName });
     try {
-      await fixtures.beforeAll(config, { plugins, scope, envName: scopeName, spans, parent: turnSpan, signal, provider: providerFile });
-      if (!given.has(key)) given.set(key, await fixtures.before(config, { plugins, scope, envName: scopeName, spans, parent: turnSpan, signal, provider: providerFile }));
+      refused = await fixtures.beforeAll(config, { plugins, scope, envName: scopeName, spans, parent: turnSpan, signal, provider: providerFile });
+      if (!refused && !given.has(key)) {
+        const before = await fixtures.before(config, { plugins, scope, envName: scopeName, spans, parent: turnSpan, signal, provider: providerFile });
+        if (before.stop) refused = before.stop;
+        else given.set(key, before.given);
+      }
+      if (!refused && later) message = scope.typed(typed);
     } catch (err) {
       failed = err.message;
     }
     const out = failed
       ? { record: { user: message, error: failed, events: [], reply: "", thinking: [], tool_calls: [], metrics: {} }, error: failed, session }
-      : await executeTurn({
-        provider, message, history, scope, transport: host.transport, signal, session, spans, parent: turnSpan, price, now: host.now, onEvent, index,
-        secretHeader: redactor.isSecretHeader, noteSecret: (value) => { for (const secret of headerSecrets(value)) secretsUsed.add(secret); },
-      });
+      : refused
+        ? { record: { user: message, skipped: refused, events: [], reply: "", thinking: [], tool_calls: [], metrics: {} }, session }
+        : await executeTurn({
+          provider, message, history, scope, transport: host.transport, signal, session: alone ? undefined : session, spans, parent: turnSpan, price, now: host.now, onEvent, index,
+          secretHeader: redactor.isSecretHeader, noteSecret: (value) => { for (const secret of headerSecrets(value)) secretsUsed.add(secret); },
+        });
     session = out.session;
-    spans.end(turnSpan, out.error ? (out.stopped ? "skipped" : "error") : "ok", out.record.metrics);
+    spans.end(turnSpan, refused ? "skipped" : out.error ? (out.stopped ? "skipped" : "error") : "ok", out.record.metrics);
     const record = { ...out.record, index, results: [], ...(typed !== message ? { user_template: typed } : {}) };
-    records.push(record);
+    // (a refused message isn't the history the next one goes with: it was never sent)
+    if (!refused) records.push(record);
     const stored = redactor.redact(record);
     run.turns.push(stored);
+    // (the turns before it, stored redacted: redacted again only when a secret has been added since,
+    // so the run isn't all redacted again with each message)
+    run.turns = run.turns.map((t) => redactor.redact(t));
     run.ended = host.clock();
     run.ms = run.ended - run.started;
     run.summary = summarize(run);
@@ -139,7 +195,7 @@ export function createConversation({ host, providerConfig, providerFile, variabl
   // for it. Without a context, the suite's stay as they were.
   function setScope(next, context) {
     chosen = next;
-    env = next?.name ?? null;
+    env = next?.name || null;
     if (context) ({ variables = {}, environment = {} } = context);
   }
 

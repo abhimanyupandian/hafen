@@ -1,7 +1,7 @@
 // A part of the app that can't be drawn (a file written in a way nothing foresaw, say) says so, in its
 // own place, rather than leaving the whole window blank: the sidebar's sections, the thread, the
-// panel, the timeline each on their own. It tries again when what's selected or the folder's files
-// change, or when asked ("try again").
+// panel, the timeline each on their own. It tries again when what's selected or the files change, or
+// when asked ("try again").
 
 import { Component, useMemo } from "react";
 import { useStore } from "../design/hooks.js";

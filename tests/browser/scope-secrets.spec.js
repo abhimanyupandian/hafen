@@ -11,7 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { startMock } from "../../packages/hafen/tests/fixtures/mock-endpoint.mjs";
-import { addScope, chooseScope, expect, test } from "./fixtures.js";
+import { addScope, addSecret, chooseScope, expect, reopen, showEntry, test } from "./fixtures.js";
 
 const ROOT = fileURLToPath(new URL("../../", import.meta.url));
 
@@ -66,15 +66,15 @@ const runTest = async (page) => {
 test.describe("in the browser build", () => {
   const writeFile = (page, path, text) => page.evaluate(async ([path, text]) => {
     const parts = path.split("/");
-    let dir = await navigator.storage.getDirectory();
+    let dir = await navigator.storage.getDirectory().then((root) => root.getDirectoryHandle("workspace", { create: true }));
     for (const p of parts.slice(0, -1)) dir = await dir.getDirectoryHandle(p, { create: true });
     const w = await (await dir.getFileHandle(parts.at(-1), { create: true })).createWritable();
     await w.write(text);
     await w.close();
   }, [path, text]);
-  const openFolder = async (page) => {
+  const openApp = async (page) => {
     for (const [path, text] of Object.entries(FILES)) await writeFile(page, path, text);
-    await page.click("#openFolder");
+    await reopen(page);
     await expect(page.locator('#suiteList .list-row[data-file="scoped.hafen.yml"]')).toHaveCount(1);
   };
 
@@ -83,22 +83,17 @@ test.describe("in the browser build", () => {
   });
 
   test("a conversation carries on in the scope chosen now: its values, the secrets set in Settings for it, and the suite's environment of its name", async ({ app: { page, servers } }) => {
-    await openFolder(page);
+    await openApp(page);
     await makeScopes(page, servers.mock.url);
     // Each scope's secrets, set in Settings → Secrets with the folder open
     await page.click("#openSettings");
     await page.click("#settings-tab-secrets");
     for (const [scope, values] of Object.entries(SECRETS)) {
-      await page.selectOption("#secretsEnv", scope);
-      for (const [name, value] of Object.entries(values)) {
-        await page.fill("#secretName", name);
-        await page.fill("#secretValue", value);
-        await page.click("#secretAdd button[type=submit]");
-        await expect(page.locator(`#secret-${name} .hint`)).toHaveText("set");
-      }
+      await showEntry(page, scope, "secrets");
+      for (const [name, value] of Object.entries(values)) await addSecret(page, name, value);
     }
     // (API_KEY, which the files use as {{secret.API_KEY}}, isn't said to be unused by them)
-    await expect(page.locator("#secret-API_KEY .hint")).toHaveText("set");
+    await expect(page.locator("#secret-API_KEY .vars-use")).toHaveText("{{secret.API_KEY}}");
     await page.click("#settingsClose");
     await chooseScope(page, "stage");
     await page.selectOption("#convProvider", "providers/scoped.yml");
@@ -122,9 +117,7 @@ test.describe("in the browser build", () => {
       for (const [scope, own] of Object.entries(all)) localStorage.setItem(`eval.scope.${scope}`, JSON.stringify(own));
       localStorage.setItem("eval.secrets", JSON.stringify(secrets));
     }, [values(servers.mock.url), SECRETS]);
-    await page.reload();
-    await page.locator("html:not(.loading)").waitFor();
-    await openFolder(page);
+    await openApp(page);
     await chooseScope(page, "prod");
     await runTest(page);
     expect(await lastSent(servers.mock.url)).toEqual(sentIn("prod", "hello prod-team"));
@@ -139,9 +132,10 @@ test.describe("in the browser build", () => {
     // A secret changed in Settings → Secrets: the next run has it (the folder isn't opened again)
     await page.click("#openSettings");
     await page.click("#settings-tab-secrets");
-    await page.selectOption("#secretsEnv", "stage");
+    await showEntry(page, "stage", "secrets");
     await page.locator("#secret-API_KEY input").fill("k-stage-2");
-    await page.locator("#secret-API_KEY button", { hasText: "save" }).click();
+    await page.locator("#secret-API_KEY input").press("Enter");
+    await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem("eval.secrets")).stage.API_KEY)).toBe("k-stage-2");
     await expect(page.locator("#secret-API_KEY input")).toHaveValue("");
     await page.click("#settingsClose");
     await runTest(page);
@@ -149,7 +143,7 @@ test.describe("in the browser build", () => {
     // After a reload: the scope chosen before, and its secrets
     await page.reload();
     await page.locator("html:not(.loading)").waitFor();
-    await page.click("#openFolder");
+    await reopen(page);
     await expect(page.locator("#scopeButton .scope-name")).toHaveText("stage");
     await runTest(page);
     expect(await lastSent(servers.mock.url)).toEqual({ ...sentIn("stage", "hello stage-team"), auth: "Bearer k-stage-2" });
@@ -161,8 +155,9 @@ plain.describe("in the desktop app", () => {
 
   plain("secrets kept per scope reach runs, and a conversation as the scope changes; and again once the app is started again", async () => {
     const mock = await startMock({ chunkMs: 10 });
-    const folder = await mkdtemp(join(tmpdir(), "hafen-desktop-"));
     const data = await mkdtemp(join(tmpdir(), "hafen-data-"));
+    // (the app's workspace, in its data folder: filled before it starts)
+    const folder = join(data, "workspace");
     await cp(join(ROOT, "packages/hafen/tests/fixtures/suites"), folder, { recursive: true });
     const smoke = join(folder, "smoke.hafen.yml");
     await writeDisk(smoke, (await readFile(smoke, "utf8")).replace("http://127.0.0.1:8791", mock.url));
@@ -172,9 +167,7 @@ plain.describe("in the desktop app", () => {
     delete env.ELECTRON_RUN_AS_NODE;
     let app = await electron.launch({ args: [ROOT], cwd: ROOT, env });
     try {
-      await app.evaluate(({ dialog }, f) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [f] }); }, folder);
       let page = await app.firstWindow();
-      await page.click("#openFolder");
       await expect(page.locator('#suiteList .list-row[data-file="scoped.hafen.yml"]')).toHaveCount(1);
       await makeScopes(page, mock.url);
       // (kept by the main process, encrypted, as Settings → Secrets keeps them)
@@ -192,7 +185,7 @@ plain.describe("in the desktop app", () => {
       await send(page, "two");
       expect(await lastSent(mock.url)).toEqual(sentIn("stage", "two"));
       await app.close();
-      // Started again: the folder and the scope chosen, and the secrets the engine is given
+      // Started again: the workspace and the scope chosen, and the secrets the engine is given
       app = await electron.launch({ args: [ROOT], cwd: ROOT, env });
       page = await app.firstWindow();
       await expect(page.locator('#suiteList .list-row[data-file="scoped.hafen.yml"]')).toHaveCount(1);
@@ -202,7 +195,6 @@ plain.describe("in the desktop app", () => {
     } finally {
       await app.close();
       await mock.close();
-      await rm(folder, { recursive: true, force: true });
       await rm(data, { recursive: true, force: true });
     }
   });

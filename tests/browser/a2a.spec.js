@@ -9,7 +9,6 @@ test.afterEach(async ({ app: { errors } }) => {
 });
 
 test("an A2A agent from its address: a conversation that carries one task from input-required to completed", async ({ app: { page, servers } }) => {
-  await page.click("#openFolder");
   await page.click("#openSettings");
   await page.click("#settings-tab-providers");
   await page.click("#newProvider");

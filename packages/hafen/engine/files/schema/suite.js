@@ -328,6 +328,10 @@ export default {
             }
           ]
         },
+        "row_name": {
+          "type": "string",
+          "description": "Each data row's name, where the reports and the app say the row (row 3: <name>): a template filled in with the row ({{row.<column>}}), the suite's variables and {{env.NAME}}, never a secret. Without it, the row's first column's value. On one line, cut at 60 characters (contracts/test-file.md, data)"
+        },
         "setup": {
           "type": "array",
           "items": {
@@ -642,6 +646,20 @@ export default {
           "type": "number",
           "minimum": 0,
           "maximum": 1
+        },
+        "unsure": {
+          "enum": [
+            "pass",
+            "warn",
+            "fail"
+          ],
+          "description": "A judged check's: how its unsure result counts, over the test's unsure (default fail: counted as failed; warn: passed, with a warning; pass: passed). --unsure is over both. A check with confidence is never unsure, so it doesn't go with that."
+        },
+        "confidence": {
+          "type": "number",
+          "minimum": 0,
+          "exclusiveMaximum": 1,
+          "description": "A judged check's: it passes only when its value does and the judge's confidence is above this (0.5: above 0.5). It's never unsure, so unsure_below doesn't go with it."
         },
         "equals": {},
         "not_equals": {},

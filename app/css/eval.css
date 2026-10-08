@@ -234,6 +234,27 @@ button.check-card-text:focus-visible { outline: 1px solid var(--fg); outline-off
 .settings-form { display: flex; flex-direction: column; gap: 6px; }
 .settings-form .controls { margin-top: 6px; }
 
+/* ---------- Settings: a pane's parts that open and close (Additions: Settings sections) ---------- */
+
+/* As the sidebar's sections: out to the content's edges, a line on top of each (and under the last),
+   a 40px head whose arrow lines up with the pane's text, the open bar down the left of an open one;
+   closed, the head says what's in it */
+.settings-sections { margin: 6px -20px; border-bottom: 1px solid var(--line); }
+.settings-section { border-top: 1px solid var(--line); }
+.settings-section-head { display: flex; align-items: center; height: 40px; padding: 0 20px 0 12px; }
+.settings-section-summary { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.settings-section-body { display: flex; flex-direction: column; gap: 10px; padding: 0 20px 16px; }
+.settings-section-body > * { flex-shrink: 0; }
+.settings-section-body > :first-child { margin-top: 0; }
+
+/* ---------- a setting's values, one chosen (Additions: Segmented choice) ---------- */
+
+/* The segmented group as a radio group: its buttons have no fill or border of their own (the group's
+   lines are), and the one chosen is filled as the segmented's current one is */
+.segmented > button { height: auto; margin: 0; background: none; border: 0; border-radius: 0; cursor: pointer; }
+.segmented > button + button { border-left: 1px solid var(--line); }
+.segmented > [aria-checked="true"] { background: var(--fg); color: var(--bg); }
+
 /* ---------- a row's own actions (a suite's + that adds a test), shown as × is ---------- */
 
 .list-row .list-add { flex: none; width: 24px; height: 24px; opacity: 0; color: var(--muted); }
@@ -280,7 +301,7 @@ button.check-card-text:focus-visible { outline: 1px solid var(--fg); outline-off
 .turn-group :is(pre, .msg-body) { cursor: auto; }
 .turn-group > .msg + .msg { margin-top: 16px; }
 .turn-head { display: flex; align-items: center; gap: 10px; min-height: 24px; margin-bottom: 12px; }
-.turn-head > .label { color: var(--fg); }
+.turn-head > .label { color: var(--fg); min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .turn-summary { white-space: nowrap; }
 .turn-summary[data-status="passed"] { color: var(--ok); }
 .turn-summary:is([data-status="failed"], [data-status="error"]) { color: var(--danger); }
@@ -356,6 +377,11 @@ button.check-card-text:focus-visible { outline: 1px solid var(--fg); outline-off
 /* (14px wide, in the arrow's 6px place: the label stays where it is, open or closed) */
 .section-icon { display: inline-flex; flex: none; width: 14px; height: 14px; margin: 0 -4px; color: var(--muted); }
 .collapsible-toggle:hover .section-icon { color: var(--fg); }
+
+/* ---------- a sidebar section's name gives way to its actions: cut, never covered ---------- */
+
+/* (Suites' +, import and export all, in a sidebar narrower than its default) */
+.section-head .collapsible-toggle .label { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 
 /* ---------- a reply: its stats and "copy" under it, and its Markdown ---------- */
 
@@ -561,6 +587,17 @@ button.check-card-text:focus-visible { outline: 1px solid var(--fg); outline-off
 
 .notify-outcomes { display: flex; flex-wrap: wrap; gap: 8px 18px; }
 
+/* ---------- Settings: a pane's settings in groups, a line between them (Additions: Settings groups) ---------- */
+
+/* Each under its name in a 32px row (as the scope panes' heads), with what it says about them all at
+   the right; the pane's own actions after the last, under a line of their own */
+.settings-block { display: flex; flex-direction: column; padding-bottom: 6px; border-top: 1px solid var(--line); }
+.settings-block > * { flex-shrink: 0; }
+.settings-block-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: var(--control); }
+.settings-block-head > .label { margin: 0; }
+.settings-block > .hint { margin: 6px 0 0; }
+.settings-block > .controls:first-child { margin-top: 12px; }
+
 /* ---------- the console when empty (Additions: Console when empty) ---------- */
 
 /* Open with nothing to show, it's only as tall as its note (and it isn't resized) */
@@ -588,12 +625,108 @@ button.check-card-text:focus-visible { outline: 1px solid var(--fg); outline-off
 .new-suite-form .btn { height: 28px; }
 #suitesBody > .new-suite-hint { flex: none; margin: 0 0 8px; overflow-wrap: anywhere; }
 
-/* ---------- the thread's first step: a button under its note (Additions: The thread's first step) ---------- */
+/* ---------- the thread's first steps: buttons under its note (Additions: The thread's first steps) ---------- */
 
 .empty > p { margin: 0; }
-.empty-action { margin-top: 14px; }
+.empty-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 14px; }
+
+/* ---------- a question asked part way, and Export (Additions: Question dialog, Export dialog) ---------- */
+
+.question { width: min(480px, calc(100vw - 32px)); }
+.question-body { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 10px; overflow-y: auto; padding: var(--gutter); }
+.question-body .note { margin: 0; overflow-wrap: anywhere; }
+.question-body .hint { margin: 0; overflow-wrap: anywhere; }
+.question-body .field-head { margin: 0 0 -6px; }
+.question-files { flex: none; margin: 0; max-height: 200px; overflow: auto; }
 
 /* ---------- a reply cut short: its text, ending …, then why (Additions: Reply parts) ---------- */
 
 .msg-body.md.cut > :last-child::after { content: " …"; color: var(--muted); }
 .msg-cut { margin-top: 8px; }
+
+/* ---------- a run that broke off before its tests: why, where their turns would be (Additions: Run error) ---------- */
+
+/* Laid out as a turn's group, but not one: nothing in it to pick, so no hover and no pointer */
+.run-error { margin: 0 -14px; padding: 14px 14px 18px; }
+.run-error + .turn-group { margin-top: 6px; }
+.run-error > .msg-body + .msg-body { margin-top: 6px; }
+
+/* ---------- Settings → Environments and Secrets (Additions: Scope panes) ---------- */
+
+/* The entries down the left (Globals, a line, the scopes), the one picked on the right. Every action in
+   them is an outlined button (.btn, 28px as the fields beside it; 24px in a label row), never a ghost one. */
+.scope-panes { flex: 1 0 auto; display: flex; align-items: flex-start; gap: 12px; }
+.scope-list { flex: none; align-self: stretch; display: flex; flex-direction: column; width: 168px; padding-right: 8px; border-right: 1px solid var(--line); }
+.scope-list-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; height: var(--control); padding: 0 0 0 8px; }
+.scope-list-head .btn-icon { width: 24px; height: 24px; }
+.scope-list-line { height: 1px; margin: 8px 0; background: var(--line); }
+.scope-list .list-open.has-extra .icon-check { color: var(--fg); }
+/* A row's menu: as a row's own action (Additions: List), with the "more" icon; over the row's right end
+   as it's pointed at, so it takes no room from the name the rest of the time */
+.scope-list .list-row { position: relative; }
+.list-row .list-more { position: absolute; right: 4px; top: 4px; width: 24px; height: 24px; opacity: 0; }
+.list-row:hover .list-more, .list-more:focus-visible { opacity: 1; }
+@media (hover: none) { .list-row .list-more { position: static; opacity: 1; } }
+.new-scope-form { margin: 0 0 6px; }
+.new-scope-form .input { height: 28px; font-size: 11px; }
+.new-scope-form .btn { height: 28px; }
+.scope-list > .field-problem { margin: -2px 0 6px; padding: 0 8px; }
+.scope-list > .note { padding: 4px 8px; }
+/* The entry picked */
+.scope-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.scope-main > * { flex-shrink: 0; }
+.scope-head { display: flex; align-items: center; gap: 8px; min-height: var(--control); }
+.scope-head > .btn { height: 28px; }
+.scope-head > .btn-icon { width: 28px; }
+.scope-name-field { flex: 1; min-width: 0; margin-left: -8px; padding: 0 8px; border-color: transparent; font: 500 13px/1 var(--sans); color: var(--fg); }
+.scope-name-field:hover { border-color: var(--line); }
+.scope-name-field:focus { border-color: var(--fg); }
+.scope-title { flex: 1; min-width: 0; margin: 0; font: 500 13px/1.4 var(--sans); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Its tools: the buttons, then the search taking the rest of the row (a line of its own under them, as
+   wide as the table it searches, when the rest is under 200px, as at Settings' width) */
+.scope-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 10px; }
+.scope-tools > .btn { height: 28px; }
+.scope-tools .search-field { position: relative; flex: 1 1 200px; min-width: 0; padding: 0; }
+.scope-main > .hint { margin: 10px 0 0; overflow-wrap: anywhere; }
+.scope-main > .hint.error { margin-top: 6px; }
+.scope-main > .panel-foot { margin-top: 16px; }
+.scope-main > .panel-foot > .btn { align-self: flex-start; height: 28px; }
+/* Its table: a row a name, on three columns every row shares: the name (as wide as the names need, up to
+   25%), its value (the rest, with the row's buttons after it), and where it's from, last (as wide as
+   its words, up to 68px, wrapping), so a long value shows whole */
+.vars { display: grid; grid-template-columns: fit-content(25%) minmax(0, 1fr) fit-content(68px); column-gap: 8px; margin-top: 10px; }
+.vars-head, .vars-row { grid-column: 1 / -1; display: grid; grid-template-columns: subgrid; align-items: center; border-bottom: 1px solid var(--line); }
+.vars-head { min-height: var(--control); }
+.vars-head > :is(.label, span) { display: flex; align-items: center; gap: 6px; }
+.vars-head .btn { height: 24px; }
+.vars-row { min-height: var(--control-lg); padding: 6px 0; }
+.vars-row .input { height: 28px; }
+/* (the last row's fields are as wide as their columns, and never widen them) */
+.vars-add .input { width: 0; min-width: 100%; }
+.vars-key { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.vars-name { font-size: 13px; color: var(--fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vars-use { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* A value's cell: the value, then the row's buttons (a secret's show or hide; ×, forget or override),
+   which take their width from this row's value only */
+.vars-cell { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.vars-cell > :is(.input, .vars-value) { flex: 1; min-width: 0; }
+.vars-cell > .btn { height: 28px; }
+.vars-cell > .btn-icon { width: 28px; }
+/* (× asking "delete" is as wide as its question) */
+.vars-cell > .btn-icon.confirm { width: auto; padding: 0 12px; }
+.vars-value { display: block; height: 28px; padding: 0 var(--control-pad); border: 1px solid transparent; font: 12px/26px var(--mono); color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vars-source { overflow-wrap: anywhere; }
+.vars-row[data-source="unset"] .vars-source { color: var(--danger); }
+.vars-row[data-source="globals"] .vars-name { color: var(--muted); }
+.vars-none { grid-column: 1 / -1; margin: 0; padding: 12px 0; border-bottom: 1px solid var(--line); }
+/* Last in Settings' content, the panes run to its bottom edge (its 20px padding taken into them), so the
+   line between the entries and the one picked runs the whole height */
+@media (min-width: 641px) {
+  .settings-content > .scope-panes:last-child { margin-bottom: -20px; }
+  .settings-content > .scope-panes:last-child > * { padding-bottom: 20px; }
+}
+/* (stacked with Settings: the entries above the one picked, a line under them) */
+@media (max-width: 640px) {
+  .scope-panes { flex-direction: column; align-items: stretch; }
+  .scope-list { width: auto; padding: 0 0 8px; border-right: 0; border-bottom: 1px solid var(--line); }
+}

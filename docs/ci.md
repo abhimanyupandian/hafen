@@ -4,6 +4,28 @@ The command line runs your suite files unchanged, so the tests you build in the 
 pull request. It's the `hafen` package: the examples here assume it's one of your repository's dev
 dependencies ([Installing](#installing)), and your suites are under `tests/`.
 
+## Getting the suites into your repository
+
+The app keeps your suites itself; CI runs a folder of them. In the app, **Export…** on a suite (or
+Suites → **export all**) writes the suites and everything they use (provider
+files, data files, prices, JSON Schemas, plugins and what they import) to a folder you pick, as plain
+YAML, JSON and JavaScript files with the same paths ([Import and export](app.md#import-and-export)).
+Pick a folder in your repository (`tests/`), and commit it:
+
+```sh
+git add tests/
+git commit -m "Add the smoke suite"
+```
+
+With **Also write `<scope>.env`** on (it is, with a scope chosen), Export writes the scope's values
+beside them too (`tests/staging.env`): commit that as well, as below. Never commit the secrets file
+(**Export with secrets** writes `<scope>.secret.env`): write it in CI from the CI's secrets. After you
+change a suite in the app, export it again: files that changed are listed, and written over once you
+say so, so `git diff` shows what changed.
+
+A folder's `plugins/` holds the plugins its suites use by name, and `hafen run <folder>` finds them
+there, whichever folder you run it from.
+
 ## The command
 
 ```sh
@@ -13,9 +35,11 @@ npx hafen run tests/ --env environments/staging.env --secret "$RUNNER_TEMP/stagi
   --report md:results/summary.md
 ```
 
-In the app, **Copy CI command** (on a suite or a test) gives you the `run` line for what's open, with
-the scope's files (`--env staging.env --secret staging.secret.env`, as Settings → Environments and
-Secrets export them) and the JUnit and run file reports.
+In the app, **Copy CI command** (on a suite or a test) gives you the `run` line for what's open: the
+folder it was last exported to (its path from the top of your repository, in the desktop app), the
+scope's files (inside that folder when Export wrote them there: `--env tests/staging.env`; else as
+Settings → Environments and Secrets export them: `--secret staging.secret.env`), and the JUnit and
+run file reports. A suite that hasn't been exported yet offers Export instead.
 
 ## Installing
 
@@ -56,9 +80,22 @@ command line takes both from `KEY=VALUE` files you name, anywhere on the disk
   and give the secrets as the job's environment variables: a name the file hasn't (or with no file,
   every name) comes from the environment variable of that name.
 
+**Values every environment shares.** Both options can be given as often as you like, and the files'
+values are merged in the order given, a later file's winning. Keep what every environment shares in
+`globals.env` (and `globals.secret.env`), and each environment's own values in its file, over them:
+
+```sh
+npx hafen run tests/ --env globals.env --env staging.env \
+  --secret globals.secret.env --secret staging.secret.env
+```
+
+The environment is the last `--env`'s (`staging`): it picks each suite's `environments: staging:`.
+This is the app's global scope and a scope's values over it, as a run in the app has them. A secrets
+file that leaves a name empty (`NAME=`) doesn't set it: an earlier file's value stays.
+
 Secrets are redacted from the output and from every report and run file: every value in the secrets
-file, and every secret taken from the environment. The environment's values aren't secret, and
-aren't redacted.
+files (whether a suite uses it or not, and one a later file overrides too), and every secret taken
+from the environment. The environment's values aren't secret, and aren't redacted.
 
 A value or secret that isn't set stops the run before anything is sent (exit `2`), naming the file,
 line and variable. That's every `{{env.NAME}}` and `{{secret.NAME}}` your files use, and every one a
@@ -71,8 +108,8 @@ suite's `environments:`), but not the secrets.
 
 **Old spellings.** `${env:NAME}`, `{{scope.NAME}}` and a plugin's `{ secret: "NAME" }` stop the run
 too (exit `2`), each at its line, saying what to write instead: `{{secret.NAME}}`, or `{{env.NAME}}`
-for a value of the environment ([Old spellings](test-files.md#old-spellings)). A folder's
-`environments/<name>.yml` isn't read: give the values with `--env <file>`.
+for a value of the environment ([Old spellings](test-files.md#old-spellings)). An
+`environments/<name>.yml` file isn't read: give the values with `--env <file>`.
 
 ## GitHub Actions
 
@@ -119,6 +156,26 @@ jobs:
 ```
 
 The Markdown summary also appears on the job's page, through `GITHUB_STEP_SUMMARY`.
+
+With values every environment shares (the app's global scope, exported as `globals.env` and
+`globals.secret.env`), give both files, the shared ones first:
+
+```yaml
+      - name: Write the secrets files
+        run: |
+          printf '%s\n' "$GLOBAL_SECRETS" > "$RUNNER_TEMP/globals.secret.env"
+          printf '%s\n' "$STAGING_SECRETS" > "$RUNNER_TEMP/staging.secret.env"
+        env:
+          GLOBAL_SECRETS: ${{ secrets.HAFEN_GLOBAL_SECRETS }}
+          STAGING_SECRETS: ${{ secrets.HAFEN_STAGING_SECRETS }}
+
+      - name: Run the tests
+        run: >
+          npx hafen run tests/
+          --env environments/globals.env --env environments/staging.env
+          --secret "$RUNNER_TEMP/globals.secret.env" --secret "$RUNNER_TEMP/staging.secret.env"
+          --report junit:results/junit.xml --report run:results/run.hafen-run.json
+```
 
 With the secrets as CI secrets of their own instead, leave out the file: give them to the run step
 as environment variables, and drop `--secret`.
@@ -178,7 +235,8 @@ ci/refunds.hafen-pack.mjs info` says what's in it (each file with its hash), and
 A pack holds your suites, the files they name and their plugins, as they are. Never an environment's
 values or a secret's: only the names its suites, providers and plugins use (`{{env.NAME}}`,
 `{{secret.NAME}}`). It takes them where it runs, as the command line does: `--env <file>`, and
-`--secret <file>` or environment variables.
+`--secret <file>` or environment variables (each option as often as you like, a later file's values
+winning: `--env globals.env --env staging.env`).
 
 ### The names a pack needs
 
@@ -217,10 +275,21 @@ tests/ --env environments/staging.env --secret ~/secrets/staging.secrets.env`.
 
 | Code | Meaning |
 |---|---|
-| `0` | Everything passed (unsure results warn) |
+| `0` | Everything passed (an unsure result counts as failed, unless `--unsure` or the file says `warn` or `pass`) |
 | `1` | A test failed, or the run regressed past `--fail-on` against `--baseline` |
 | `2` | A setup error. Found before the run: a file that doesn't parse or validate, a variable, environment value or secret that isn't set, an `--env` or `--secret` file that doesn't exist or has a line that isn't `NAME=value` (nothing was sent). Or found as it ran: a suite's setup step or a provider's `beforeAll` fixture that failed (that suite's tests weren't sent; what ran before, and `afterAll` fixtures, were) |
 | `3` | Stopped early: `--max-cost`, `--bail`, or cancelled. Reports are written for what ran |
+
+The reports agree with the exit code: each test is one JUnit `<testcase>` with one status (a
+`<failure>` when its pass rate was missed, an `<error>` when it errored, `<skipped>` when it was
+skipped or stopped), and the Markdown and JSON summaries count it as the command line's summary does
+([How the reports count](cli.md#how-the-reports-count)). A test with a data file is a `<testcase>`
+for each row instead (`refunds [row 3: a refund please]`: its number, then its name, the value of
+its first column or the test's `row_name`; its repeats within it), each with the row's status: a row
+that failed is a `<failure>` when the test missed its pass rate, and a `<skipped>` saying it failed
+within the pass rate when the test met it, so JUnit's failures still say whether the run failed. A
+suite whose setup failed is a case of its own, an error. A stopped run that failed nothing has only
+skipped cases: its exit code, `3`, is what fails the job.
 
 ## Baselines and regressions
 
