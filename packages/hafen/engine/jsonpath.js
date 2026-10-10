@@ -1,5 +1,5 @@
 // JSONPath, as RFC 9535 standardises it (json-p3, which passes the JSONPath Compliance Test Suite:
-// tests/engine/jsonpath-compliance.test.js). Paths select values; operators then test them.
+// tests/engine/foundations.test.js). Paths select values; operators then test them.
 
 import { jsonpath } from "json-p3";
 

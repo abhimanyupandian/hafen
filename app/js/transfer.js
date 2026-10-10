@@ -27,8 +27,8 @@ const LEFT_OUT = /(^|\/)(node_modules|\.git|\.hafen|dist|release)\//;
 
 // A question the user answers in a dialog (views/transfer.jsx draws it), one at a time: { kind, …,
 // answer(choice) }. kind: "collisions" (Import: files here with another text: replace, both, skip or
-// cancel), "overwrite" (Export: files there already: overwrite or cancel), "legacy" (the folder opened
-// before: import or later). The first answer counts (the dialog closing after it answers nothing).
+// cancel), "overwrite" (Export: files there already: overwrite or cancel). The first answer counts (the
+// dialog closing after it answers nothing).
 export const questions = createStore({ open: null });
 function ask(question) {
   return new Promise((resolve) => {
@@ -227,37 +227,5 @@ export async function exportSuites(files, { env = false, secrets = false } = {})
     say(`couldn't export${target ? ` to ${target.path}` : ""}: ${err.message}`, "err");
     notify({ title: "Couldn't export", text: err.message, kind: "error" });
     return null;
-  }
-}
-
-/* ---------- the folder opened before ---------- */
-
-// The folder the desktop app opened before it kept its own workspace (remembered as KEYS.root): on the
-// first start of this version it's offered once, to import its suites from; then forgotten, whatever
-// the answer. (The browser build never remembered one.)
-export async function offerLegacyFolder() {
-  const path = store.get(KEYS.root);
-  if (!path) return;
-  if (!isApp) {
-    store.remove(KEYS.root);
-    return;
-  }
-  const name = path.split(/[\\/]/).filter(Boolean).pop() ?? path;
-  const choice = await ask({ kind: "legacy", name, path });
-  store.remove(KEYS.root);
-  if (choice !== "import") {
-    say(`${name}'s suites weren't imported: Suites → Import a folder… brings them in any time`, "log");
-    return;
-  }
-  try {
-    const picked = await invoke("import_legacy", { path });
-    if (!picked) {
-      notify({ title: `Couldn't import from ${name}`, text: "The folder isn't there any more.", kind: "error" });
-      return;
-    }
-    await importFrom({ from: { place: picked.place }, name: picked.name, files: null });
-  } catch (err) {
-    say(`couldn't import from ${name}: ${err.message}`, "err");
-    notify({ title: `Couldn't import from ${name}`, text: err.message, kind: "error" });
   }
 }

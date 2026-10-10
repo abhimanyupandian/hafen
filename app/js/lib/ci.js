@@ -19,8 +19,8 @@ export function ciFiles({ env, globals = {}, scopes = [], scopeSecrets = {} }) {
   };
 }
 
-// What an export wrote, as it was remembered: a list (a record from before it was one: the file, or none)
-export const written = (files) => (Array.isArray(files) ? files : files ? [files] : []);
+// What an export wrote, as it was remembered
+export const written = (files) => (Array.isArray(files) ? files : []);
 
 const quoted = (path) => (/^[\w./@:+-]+$/.test(path) ? path : JSON.stringify(path));
 

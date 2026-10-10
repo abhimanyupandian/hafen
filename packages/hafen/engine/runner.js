@@ -5,23 +5,22 @@
 // The host gives everything platform-specific: { transport, files, secrets(NAME), now(), clock(),
 // where, sha256?(text) }. onEvent(event) reports progress for a UI or a CLI (see EVENTS below).
 
-import { CHECK_TYPES, isBuiltIn, isJudged, runRule, typeOf, describe, valuesOf } from "./checks/index.js";
-import { callSteps } from "./calls.js";
+import { describe, runRule, typeOf } from "./checks/index.js";
+import { countChecks, isOff, OFF, runChecks, turnFailed, warned } from "./checks/run.js";
+import { environmentOf, knownSecrets, unknownEnvironment } from "./environment.js";
 import { createFixtures } from "./fixtures.js";
 import { firstCell, rowLabel, rowNameText } from "./files/data.js";
-import { fixtureEnvSets, fixtureProvides, folderPluginFiles, loadPlugins, pluginNames, pluginOldSpellings, pluginSecretProblems, versionProblems } from "./plugins.js";
-import { positionIn, problemsFor, providerOf, SIMULATE_NOT_BUILT, turnNotBuilt } from "./files/suite-file.js";
+import { providerOf } from "./files/suite-file.js";
 import { first } from "./jsonpath.js";
-import { runJudged } from "./judges/index.js";
+import { preflight } from "./preflight.js";
 import { createProvider } from "./providers/index.js";
-import { createRedactor, headerSecrets, noteSecret } from "./redact.js";
+import { tryJSON } from "./providers/http.js";
+import { createRedactor, headerSecrets } from "./redact.js";
+import { RUN_KIND, RUN_VERSION } from "./run-kind.js";
 import { closeAll, createSpans } from "./spans.js";
 import { executeTurn } from "./turn.js";
-import { anySignal, basename, closest, isObject, percentiles, short, textChunks, uid } from "./util.js";
+import { anySignal, isObject, percentiles, textChunks, uid } from "./util.js";
 import { createScope, MissingVariable } from "./vars.js";
-import { tryJSON } from "./providers/http.js";
-import { RUN_KIND, RUN_VERSION } from "./run-kind.js";
-import { pluginsWhere } from "./plugin-place.js";
 
 export { RUN_KIND, RUN_VERSION } from "./run-kind.js";
 
@@ -33,7 +32,7 @@ export { RUN_KIND, RUN_VERSION } from "./run-kind.js";
 // (unsure: an unsure result counts as failed unless --unsure, the suite's defaults, the test or the
 // check say warn or pass: what a judge wasn't sure of never passes quietly)
 const DEFAULTS = { repeat: 1, pass_rate: 1, history: "live", on_fail: "continue", unsure: "fail", unsure_below: 0.6, timeout_ms: 120000, retries: 2 };
-const SETTING_KEYS = Object.keys(DEFAULTS).concat(["network"]);
+const SETTING_KEYS = Object.keys(DEFAULTS);
 // The settings a provider can have too (its turns'): a suite's defaults and a test's own come before it
 const PROVIDER_SETTINGS = ["timeout_ms", "retries"];
 
@@ -67,7 +66,7 @@ export function newRun({ mode = "test", host, settings = {} }) {
 // turns always go in order.
 //
 // options: { env, environment, vars, tests: [names], tags, ids: [test ids], repeat, unsure, maxCost,
-//            bail, timeoutMs, network, redact: [patterns], load, untilTurn }
+//            bail, timeoutMs, redact: [patterns], untilTurn }
 // environment ({ name, values }: values a map of NAME → text, from KEY=VALUE files or the app's
 // store; name "" for one with none, the app's "no scope"; or null, none) is the chosen environment,
 // for {{env.NAME}} (environmentOf); env, its name when there are no values to pass (the suites'
@@ -86,7 +85,6 @@ export async function runSuites({ suites, host, options = {}, onEvent: emit = ()
     env: (isObject(options.environment) ? options.environment.name : options.env) || null,
     filters: { tests: options.tests ?? [], tags: options.tags ?? [], ids: options.ids ?? [] },
     unsure: options.unsure ?? null,
-    network: options.network ?? null,
     max_cost: options.maxCost ?? null,
     until_turn: Number.isInteger(options.untilTurn) && options.untilTurn >= 0 && !Number.isInteger(options.onlyTurn) ? options.untilTurn : null,
     only_turn: Number.isInteger(options.onlyTurn) && options.onlyTurn >= 0 ? options.onlyTurn : null,
@@ -246,184 +244,6 @@ export function byGroup(items, groupOf) {
   return [...groups.values()];
 }
 
-// The environment a suite runs with (contracts/test-file.md, Environments and secrets): { envName,
-// environment: { name, values, suite } (null: none chosen) }. A run and a conversation's message
-// choose it the same way (serve-port.js, send):
-//   options.environment passed: that one ({ name, values }; name "" for the app's "no scope"), or
-//     null, none (env's name with no values, when there's one); of the suite's environments, only
-//     the one of its name, never another
-//   passed nothing: env's name (--env <name>), else the suite's first environment (the CLI with no --env)
-// values: the ones passed (none passed, none: nothing is read from the folder); suite: the suite's own
-// environments.<name>.
-export function environmentOf(suite, options = {}) {
-  const environments = isObject(suite?.data?.environments) ? suite.data.environments : {};
-  const passed = options.environment !== undefined;
-  const given = isObject(options.environment) ? options.environment : null;
-  const named = given ? (typeof given.name === "string" ? given.name : "") : options.env;
-  const envName = named || (passed ? null : Object.keys(environments)[0]) || null;
-  if (!envName && !given) return { envName: null, environment: null };
-  const values = isObject(given?.values) ? given.values : {};
-  const own = envName && Object.prototype.hasOwnProperty.call(environments, envName) ? environments[envName] : null;
-  // (secretsFrom: where the host looks for secrets, said when one isn't set: the CLI's)
-  return { envName, environment: { name: envName ?? "", values, suite: isObject(own) ? own : {}, ...(options.secretsFrom ? { secretsFrom: options.secretsFrom } : {}) } };
-}
-
-// The secrets the host keeps for these scopes (host.knownSecrets(envName) → [values], each scope's
-// asked once), added to `into` (a run's or a conversation's, for redaction) and to what the HTTP log
-// hides
-export async function knownSecrets(host, envNames, into) {
-  if (!host.knownSecrets) return;
-  for (const envName of new Set(envNames)) {
-    for (const value of (await host.knownSecrets(envName)) ?? []) {
-      if (typeof value !== "string" || !value) continue;
-      into.add(value);
-      noteSecret(value);
-    }
-  }
-}
-
-// The name --env (or the app's scope) gives, when it's none of a suite's environments: a problem,
-// unless values are passed for it (they're the environment, whatever the suite's are called) or the
-// host keeps secrets for it (a scope that has only secrets is one: host.secretScopes(), the app's).
-// The message, or null.
-async function unknownEnvironment(suite, options, host) {
-  const environments = Object.keys(suite.data?.environments ?? {});
-  const passed = !!options.environment && typeof options.environment === "object";
-  if (passed || !options.env || !environments.length || environments.includes(options.env)) return null;
-  if ((await host.secretScopes?.())?.includes(options.env)) return null;
-  return `there's no environment or scope "${options.env}" (${environments.join(", ")})`;
-}
-
-// Everything that stops a run before anything is sent, for each suite: its files' problems, the
-// variables nothing sets, its environment's names ({{env.NAME}}) and its secrets (problemsFor); its
-// plugins, loaded (each in its worker), every name it uses that none gives (a provider, a fixture, a
-// judge, a check type), and the secrets and environment's names they write in their code; an
-// environment or scope --env names that isn't there; and load tests asked to run. A run's check, and
-// `validate`'s: so the two can't disagree.
-//
-// secretsFor(envName) → (NAME) → value: where secrets come from (validate without --env-check gives
-// a stand-in for each, to check everything but them). used: the run's secret values, for redaction:
-// each one found here is added, so it's hidden from the run's first event. Returns { problems,
-// suitePlugins (file → loaded), close() }: close ends the plugins' workers. (An old way a suite's
-// plugins name a secret in, { secret: "NAME" }, is a problem where its code writes it, as its files'
-// old ways are.)
-export async function preflight({ suites, host, options = {}, plugins = {}, secretsFor = (envName) => (name) => host.secrets(name, { env: envName }), used = new Set() }) {
-  // Each suite's plugins, loaded (each in its worker) before anything is sent: the ones it names, and
-  // the folder's (plugins/*.js, as Settings → Plugins lists them), which any suite may use by name
-  // without naming them. The folder's are loaded once (for each scope's secrets), and only when a
-  // suite uses a name its own don't give.
-  const suitePlugins = new Map();
-  const folderPlugins = new Map();  // scope name → loaded
-  const folderFor = async (envName) => {
-    if (!folderPlugins.has(envName)) {
-      const files = await folderPluginFiles(host);
-      folderPlugins.set(envName, await loadPlugins(host, files, null, { secrets: secretsFor(envName), used, transport: host.transport }));
-    }
-    return folderPlugins.get(envName);
-  };
-  const close = () => {
-    for (const loaded of [...suitePlugins.values(), ...folderPlugins.values()]) loaded.close();
-  };
-
-  const problems = [];
-  for (const s of suites) {
-    const from = problems.length;
-    const { envName, environment } = environmentOf(s, options);
-    const unknown = await unknownEnvironment(s, options, host);
-    if (unknown) problems.push({ file: s.file, ...positionIn(s, ["environments"]), message: unknown });
-    const loaded = (s.data?.plugins ?? []).length
-      ? await loadPlugins(host, s.data.plugins, s.file, { secrets: secretsFor(envName), used, transport: host.transport })
-      : { plugins: {}, problems: [], close: () => {} };
-    suitePlugins.set(s.file, loaded);
-    // (a plugin that didn't load is said once, as why: not again as a name nothing gives)
-    const failed = new Set(loaded.problems.map((p) => pluginFileName(p.file)));
-    const missing = [...pluginNames(s)].filter((name) => !loaded.plugins[name] && !plugins[name]);
-    if (missing.length) {
-      const folder = await folderFor(envName);
-      for (const name of missing) {
-        if (folder.plugins[name]) loaded.plugins[name] = folder.plugins[name];
-        // (one that didn't load, its file named as the plugin: why)
-        else {
-          const why = folder.problems.filter((p) => pluginFileName(p.file) === name);
-          if (why.length) failed.add(name);
-          problems.push(...why.map((p) => ({ ...p, file: s.file, message: `${p.file}: ${p.message}` })));
-        }
-      }
-    }
-    const all = { ...plugins, ...loaded.plugins };
-    // (one of its own that didn't load: said at its entry in plugins)
-    const entries = s.data?.plugins ?? [];
-    problems.push(...loaded.problems.map(({ entry, ...p }) => ({ ...p, ...(p.file === s.file && entries.includes(entry) ? positionIn(s, ["plugins", entries.indexOf(entry)]) : {}) })), ...versionProblems(s, all), ...namedPluginProblems(s, all, failed));
-    // (a name a provider's fixture gives is set, though only once the fixture has run; and so is an
-    // {{env.NAME}} one sets with env.set)
-    const given = fixtureProvides(Object.values(s.providers ?? {}), all);
-    const envGiven = fixtureEnvSets(Object.values(s.providers ?? {}), all);
-    // (each secret found is hidden from here on, wherever it shows: what's said before a turn fills it
-    // in too, a row's name from its data file)
-    const secret = (name) => {
-      const value = secretsFor(envName)(name);
-      if (typeof value === "string" && value) used.add(value);
-      return value;
-    };
-    problems.push(...problemsFor(s, options.vars ?? {}, (name) => (given.has(name) ? "(a fixture's)" : secret(name)), environment, options.secretsFrom, envGiven));
-    // The secrets its plugins name the old way in their code ({ secret: "NAME" }): problems, as its
-    // files' old ways are
-    problems.push(...pluginOldSpellings(s, all));
-    // The secrets its plugins name in their code ("{{secret.ACME_PASSWORD}}") and the environment's
-    // values they write ({{env.NAME}}), as its files' are: one that isn't set stops the run here, not
-    // once a fixture has sent its request
-    if (problems.length === from) problems.push(...pluginSecretProblems(s, all, given, secret, environment, options.secretsFrom, envGiven));
-    // Load mode (many requests at once, ramped up, with percentiles: spec US11) isn't built: a load
-    // test asked to run (--load) would be sent once, as any test, and look like a load test that
-    // passed. Said instead, before anything is sent.
-    if (options.load) {
-      for (const [t, test] of (s.data?.tests ?? []).entries()) {
-        if (test?.load && selected(test, options)) problems.push({ file: s.file, ...positionIn(s, ["tests", t, "load"]), message: `"${test.name}" is a load test, and load tests can't run yet (load mode isn't built): leave out --load to skip it` });
-      }
-    }
-    // (each says which suite it's of: its file can be a provider's, a data file's or a plugin's)
-    for (let k = from; k < problems.length; k++) problems[k] = { ...problems[k], suite: s.file };
-  }
-  return { problems, suitePlugins, close };
-}
-
-const pluginFileName = (file) => basename(file ?? "").replace(/\.m?js$/i, "");
-
-// A suite's checks whose type is neither Hafen's nor a check plugin's, and its judges whose plugin
-// isn't there: said before anything is sent, not once the reply is in. (failed: plugins that
-// didn't load, said already.) A check turned off is never looked at.
-function namedPluginProblems(suite, plugins, failed) {
-  const out = [];
-  const checkPlugins = Object.keys(plugins).filter((name) => plugins[name]?.kind === "check");
-  const each = (checks, path) => {
-    for (const [c, check] of (Array.isArray(checks) ? checks : []).entries()) {
-      if (!check || typeof check !== "object" || check.enabled === false || isBuiltIn(check)) continue;
-      const type = typeOf(check);
-      if (failed.has(type)) continue;
-      const plugin = plugins[type];
-      if (plugin?.kind === "check") continue;
-      const where = { file: suite.file, ...positionIn(suite, [...path, c, "type"]) };
-      if (plugin) out.push({ ...where, message: `the plugin "${type}" is a ${plugin.kind}, not a check` });
-      else {
-        const meant = closest(type, [...CHECK_TYPES, ...checkPlugins]);
-        out.push({ ...where, message: `"${type}" isn't a check type${meant ? ` (did you mean "${meant}"?)` : `, or a check plugin in ${pluginsWhere()}`}` });
-      }
-    }
-  };
-  for (const [t, test] of (Array.isArray(suite.data?.tests) ? suite.data.tests : []).entries()) {
-    for (const [i, turn] of (Array.isArray(test?.turns) ? test.turns : []).entries()) each(turn?.expect, ["tests", t, "turns", i, "expect"]);
-    each(test?.expect_conversation, ["tests", t, "expect_conversation"]);
-  }
-  for (const [name, judge] of Object.entries(suite.data?.judges ?? {})) {
-    if (judge?.kind !== "plugin" || !judge.plugin || failed.has(judge.plugin)) continue;
-    const plugin = plugins[judge.plugin];
-    const where = { file: suite.file, ...positionIn(suite, ["judges", name, "plugin"]) };
-    if (!plugin) out.push({ ...where, message: `the judge "${name}" uses the plugin "${judge.plugin}", which isn't in ${pluginsWhere()}` });
-    else if (plugin.kind !== "judge") out.push({ ...where, message: `the plugin "${judge.plugin}" is a ${plugin.kind}, not a judge` });
-  }
-  return out;
-}
-
 async function runSuite(suite, ctx) {
   const { options, host, spans, parent, signal } = ctx;
   const data = suite.data;
@@ -516,28 +336,10 @@ async function runTest(suite, test, index, ctx) {
   if (options.repeat) settings.repeat = options.repeat;
   if (options.unsure) settings.unsure = options.unsure;
   if (options.timeoutMs) settings.timeout_ms = options.timeoutMs;
-  if (options.network) settings.network = options.network;
   const testSpan = spans.start("test", test.name, { parent: ctx.parent, ref: { suite: suite.file, test: test.id ?? test.name } });
   const result = { suite: suite.file, id: test.id, name: test.name, index, status: "running", passed: 0, total: 0, unsure: false, instances: [], settings, ...(run.settings.until_turn !== null ? { until_turn: run.settings.until_turn } : {}), ...(run.settings.only_turn !== null ? { only_turn: run.settings.only_turn } : {}) };
   run.tests.push(result);
   onEvent({ type: "test:start", test: { suite: suite.file, id: test.id, name: test.name, index } });
-
-  if (test.load && !options.load) {
-    result.status = "skipped";
-    result.reason = "a load test (needs --load, or confirming in the app)";
-    spans.end(testSpan, "skipped");
-    onEvent({ type: "test:end", test: result });
-    return result;
-  }
-
-  // Simulated users aren't built: said, rather than pass having sent nothing
-  if (test.simulate) {
-    result.status = "error";
-    result.reason = SIMULATE_NOT_BUILT.replace(": running this test is an error", "");
-    spans.end(testSpan, "error");
-    onEvent({ type: "test:end", test: result });
-    return result;
-  }
 
   let provider;
   try {
@@ -685,14 +487,11 @@ async function runInstance(suite, test, ctx) {
     }
     let message;
     try {
-      // (attachments, an image: not built, so not sent without them)
-      const notYet = turnNotBuilt(turn);
-      if (notYet) throw new Error(notYet.replace(": running this turn is an error", ""));
       message = messageText(scope.resolve(turn.user));
     } catch (err) {
       errored = broke = true;
       instance.reason = err.message;
-      const record = { ...key, user: typeof turn.user === "string" ? turn.user : messageText(turn.user), error: err.message, events: [], reply: "", thinking: [], tool_calls: [], results: (turn.expect ?? []).map((check) => ({ check, name: describe(check), status: "error", reason: err.message })), metrics: {} };
+      const record = { ...key, user: messageText(turn.user), error: err.message, events: [], reply: "", thinking: [], tool_calls: [], results: (turn.expect ?? []).map((check) => ({ check, name: describe(check), status: "error", reason: err.message })), metrics: {} };
       run.turns[globalIndex] = record;
       instance.turns.push(globalIndex);
       instance.results.push(...record.results);
@@ -710,7 +509,7 @@ async function runInstance(suite, test, ctx) {
       : { user: r.user, reply: r.reply, raw: r.raw_blocks?.at(-1) }));
     const out = await executeTurn({
       provider, message, history, scope, transport: ctx.host.transport, signal: ctx.signal, wantThinking, session: alone ? undefined : session,
-      spans, parent: turnSpan, timeoutMs: settings.timeout_ms, retries: settings.retries, network: settings.network,
+      spans, parent: turnSpan, timeoutMs: settings.timeout_ms, retries: settings.retries,
       tools: turn.tools, price, now: ctx.host.now, onEvent, index: globalIndex,
       secretHeader: redactor.isSecretHeader, noteSecret: (value) => { for (const secret of headerSecrets(value)) ctx.secretsUsed.add(secret); },
     });
@@ -774,16 +573,22 @@ async function runInstance(suite, test, ctx) {
     await runStep(step, { ...ctx, scope, parent: instanceSpan, kind: "teardown", label: step.name ?? `teardown ${i + 1}`, signal: undefined });
   }
 
-  // Stopped, what had already gone wrong still counts (a check that failed, an error of its own):
-  // failed or error, not stopped
-  const stopped = instance.stopped || ctx.signal.aborted;
-  instance.status = halted ? "stopped" : (stopped ? broke : errored) ? "error" : stopped && !failed ? "stopped" : failed || instance.results.some((r) => r.status === "error") ? "failed" : "passed";
-  if (instance.status === "failed" && !failed && instance.results.some((r) => r.status === "error")) instance.status = "error";
+  instance.status = instanceStatus({ halted, stopped: instance.stopped || ctx.signal.aborted, broke, errored, failed, results: instance.results });
   // The provider's after fixtures, however it went (as teardown steps, they don't change its result)
   const afterErrors = await ctx.fixtures.after(ctx.providerConfig, { ...fixtureCtx, test: { ...fixtureTest, status: instance.status } });
   if (afterErrors.length) instance.after_errors = afterErrors;
   spans.end(instanceSpan, { passed: "pass", failed: "fail", error: "error", stopped: "skipped" }[instance.status], { checks: countChecks(instance.results) });
   return instance;
+}
+
+// An instance's status from what happened to it. Stopped, what had gone wrong already still counts: a
+// failed check makes it failed, an error of its own (not one the stop caused) an error.
+function instanceStatus({ halted, stopped, broke, errored, failed, results }) {
+  if (halted) return "stopped";                   // a before fixture said to stop
+  if (stopped ? broke : errored) return "error";  // it went wrong on its own
+  if (stopped && !failed) return "stopped";
+  if (failed) return "failed";
+  return results.some((r) => r.status === "error") ? "error" : "passed";  // a check errored, none failed
 }
 
 // A data row's name (contracts/test-file.md, Data rows): the test's row_name filled in with it
@@ -798,109 +603,6 @@ function rowNameOf(test, row, scope) {
     return undefined;
   }
 }
-
-// A turn failed when a check did, or an unsure result counts as failed (its unsure: fail, the default).
-// One that counts as passed with a warning (warn) makes the test unsure; with pass, it passes quietly.
-const turnFailed = (results) => results.some((r) => r.status === "fail" || (r.status === "unsure" && r.unsure === "fail"));
-const warned = (results) => results.some((r) => r.status === "unsure" && r.unsure === "warn");
-
-// A check turned off (enabled: false) is skipped, and says so (contracts/checks.md)
-const isOff = (check) => check?.enabled === false;
-const OFF = { status: "skipped", reason: "turned off (enabled: false)" };
-
-// A turn's checks: rule checks at once, judged ones together (contracts/checks.md)
-async function runChecks(checks, checkCtx, ctx) {
-  const { spans, parent } = ctx;
-  const results = new Array(checks.length);
-  const spanIds = [];
-  const judged = [];
-  const pluginChecks = [];
-  // Variables in checks resolve first ({{row.want}}); one that can't is that check's error (one
-  // turned off isn't looked at)
-  const resolved = checks.map((check) => {
-    if (isOff(check)) return { check };
-    try {
-      const out = ctx.scope ? ctx.scope.resolve(check) : check;
-      // (a schema in a file: the one the suite read for it)
-      const schema = typeof out.schema === "string" ? ctx.suite?.schemas?.[check.schema] : undefined;
-      return { check: schema === undefined ? out : { ...out, schema } };
-    } catch (err) {
-      return { check, error: err.message };
-    }
-  });
-  for (const [index, check] of checks.entries()) {
-    const name = describe(check);
-    spanIds[index] = spans.start("check", name, { parent, ref: { check: index } });
-    if (isOff(check)) {
-      results[index] = { ...OFF };
-      continue;
-    }
-    // A turn the stop cut short: none of its checks can say anything of it (its latency and status
-    // aren't the endpoint's). One that failed on its own still has its latency, status and events checked
-    if (ctx.stopped) {
-      results[index] = { status: "skipped", reason: "the run was stopped" };
-      continue;
-    }
-    if (resolved[index].error) {
-      results[index] = { status: "error", reason: resolved[index].error };
-      continue;
-    }
-    if (ctx.error && !(check.on === "events" || typeOf(check) === "latency" || typeOf(check) === "status")) {
-      results[index] = { status: "skipped", reason: `the turn failed: ${short(ctx.error, 120)}` };
-      continue;
-    }
-    const plugin = ctx.plugins?.[typeOf(check)];
-    if (plugin?.check) pluginChecks.push({ index, check: resolved[index].check, plugin });
-    else if (isJudged(check)) judged.push({ index, check: resolved[index].check });
-    else results[index] = runRule(resolved[index].check, checkCtx);
-  }
-  // A check plugin's checks (in its worker): given what the check's on/path selects
-  for (const { index, check, plugin } of pluginChecks) {
-    try {
-      let value;
-      try {
-        const values = valuesOf(check, checkCtx);
-        value = values.length === 1 ? values[0] : values;
-      } catch (err) {
-        results[index] = { status: "error", reason: err.message };
-        continue;
-      }
-      const t = checkCtx.turn ?? {};
-      const turn = { user: t.user, reply: t.reply, thinking: t.thinking, tool_calls: t.tool_calls, usage: t.usage, metrics: t.metrics, status: t.response?.status };
-      const conversation = (checkCtx.conversation ?? []).map((x) => ({ user: x.user, reply: x.reply }));
-      // (its HTTP calls: steps under the check)
-      // (and the environment's values; its requests' {{secret.…}}s and {{env.…}}s from the turn's scope)
-      const out = await plugin.check({ value, turn, conversation, params: check, env: ctx.scope?.envValues?.() ?? {} }, { signal: ctx.signal, onCall: callSteps(spans, spanIds[index]), ...(ctx.scope?.request ? { scope: ctx.scope } : {}) });
-      const status = ["pass", "fail", "unsure", "skipped", "error"].includes(out?.status) ? out.status : "error";
-      results[index] = {
-        status, reason: out?.reason ?? (status === "error" ? "the plugin's check gave no status" : ""),
-        ...(out?.value !== undefined ? { value: out.value } : {}), ...(out?.confidence !== undefined ? { confidence: out.confidence } : {}),
-        ...(out?.actual !== undefined ? { actual: out.actual } : {}), ...(out?.expected !== undefined ? { expected: out.expected } : {}),
-      };
-    } catch (err) {
-      results[index] = { status: "error", reason: err.message };
-    }
-  }
-  if (judged.length) {
-    const judgedResults = await runJudged(judged, checkCtx, {
-      suite: ctx.suite, scope: ctx.scope, transport: ctx.host.transport, signal: ctx.signal, spans,
-      parentFor: (index) => spanIds[index], prices: ctx.suitePrices, plugins: ctx.plugins, redact: ctx.redactor?.redact,
-    });
-    for (const [index, r] of judgedResults) results[index] = r;
-  }
-  // How an unsure result counts (unsure: fail, warn or pass), kept on it: the most specific says it,
-  // --unsure over all, then the check's own, then the test's (its suite's defaults, Hafen's: fail)
-  const unsureOf = (check) => ctx.options?.unsure || check?.unsure || checkCtx.settings?.unsure || "fail";
-  return checks.map((check, index) => {
-    const r = results[index] ?? { status: "error", reason: "the check didn't run" };
-    const name = r.value !== undefined && typeof r.value === "number" && isJudged(check) ? `${describe(check)} ${round2(r.value)}` : describe(check);
-    spans.end(spanIds[index], r.status, { ...(r.confidence !== undefined ? { confidence: r.confidence } : {}) });
-    spans.update(spanIds[index], { name });
-    return { check, name, ...r, ...(r.status === "unsure" ? { unsure: unsureOf(check) } : {}) };
-  });
-}
-
-const round2 = (n) => Math.round(n * 100) / 100;
 
 // A setup or teardown step: an HTTP request, with extractions and checks
 async function runStep(step, ctx) {
@@ -932,11 +634,7 @@ async function runStep(step, ctx) {
   }
 }
 
-function messageText(user) {
-  if (typeof user === "string") return user;
-  if (Array.isArray(user)) return user.map((p) => p.text ?? "").filter(Boolean).join("\n");
-  return String(user ?? "");
-}
+const messageText = (user) => String(user ?? "");
 
 function safeResolve(scope, value) {
   try {
@@ -944,18 +642,6 @@ function safeResolve(scope, value) {
   } catch {
     return messageText(value);
   }
-}
-
-export function countChecks(results) {
-  const c = { passed: 0, failed: 0, unsure: 0, skipped: 0, error: 0, total: results.length };
-  for (const r of results) {
-    if (r.status === "pass") c.passed++;
-    else if (r.status === "fail") c.failed++;
-    else if (r.status === "unsure") c.unsure++;
-    else if (r.status === "skipped") c.skipped++;
-    else c.error++;
-  }
-  return c;
 }
 
 export function summarize(run) {

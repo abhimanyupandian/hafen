@@ -5,9 +5,7 @@
 // worker_threads with no environment in Node. A plugin reaches the network only through the engine, to
 // the hosts it names; its address, its headers and its body can have {{secret.NAME}} and {{env.NAME}}
 // in them ("Bearer {{secret.ACME_KEY}}"), which the engine fills in as the request leaves, so the
-// plugin never holds a secret's value. (The old way, a header or a value in a JSON body naming one,
-// { secret: "ACME_KEY", prefix: "Bearer " }, is a problem where its code writes it, and a request
-// that has one fails, saying the new way.) Where the host loads it from its file
+// plugin never holds a secret's value. Where the host loads it from its file
 // (Node: the desktop app, the CLI), a plugin imports other files and packages as any module does; in
 // the browser build it's one module.
 //
@@ -15,9 +13,10 @@
 
 import { isBuiltIn, typeOf } from "./checks/index.js";
 import { FIXTURE_PHASES, fixturesOf } from "./fixture-lists.js";
-import { canRead, envHas, providerPlace, whyMissing } from "./files/suite-file.js";
+import { canRead, providerPlace, whyMissing } from "./files/suite-file.js";
+import { envHas } from "./files/needs.js";
 import { joinPath, missingFile, textChunks } from "./util.js";
-import { createScope, missingMessage, oldWay, placeholders, secretsWhere } from "./vars.js";
+import { createScope, missingMessage, placeholders, secretsWhere } from "./vars.js";
 import { pluginsWhere } from "./plugin-place.js";
 
 export const PLUGIN_FILE = /^plugins\/[^/]+\.m?js$/i;
@@ -54,8 +53,6 @@ export function satisfies(version, range) {
 // it imports), so a name it builds as it runs isn't seen.
 const SECRET_TEXT = /\{\{\s*secrets?\.([A-Za-z_][\w.-]*)\s*\}\}/g;
 const ENV_TEXT = /\{\{\s*env\.([A-Za-z_][\w.-]*)\s*\}\}/g;
-// (the old way to name one: { secret: "ACME_PASSWORD" }, with a prefix or not)
-const SECRET_OBJECT = /\bsecret\s*:\s*["'`]([A-Za-z_][A-Za-z0-9_]*)["'`]/g;
 // (a fixture's env.set("NAME", …): a name it sets in the environment, written as it is)
 const ENV_SET = /\benv\s*\??\.\s*set\s*\(\s*["'`]([A-Za-z_][A-Za-z0-9_.-]*)["'`]/g;
 const namedBy = (pattern) => (source) => namedAt(String(source ?? ""), [...String(source ?? "").matchAll(pattern)]);
@@ -64,8 +61,6 @@ export const secretsNamed = namedBy(SECRET_TEXT);
 export const envNamed = namedBy(ENV_TEXT);
 // The environment's names a fixture's code sets, as env.set("NAME", …), each where it's first written
 export const envSetNamed = namedBy(ENV_SET);
-// The secrets its code names the old way ({ secret: "NAME" }), each where it's first written
-export const oldSecretsNamed = namedBy(SECRET_OBJECT);
 function namedAt(text, found) {
   const out = new Map();
   for (const m of found) {
@@ -130,12 +125,8 @@ export async function startPlugin(host, { file, source }) {
       }
       const allowed = (meta.hosts ?? []).some((h) => h === hostName || (h.startsWith("*.") && (hostName === h.slice(2) || hostName.endsWith(h.slice(1)))));
       if (!allowed) throw new Error(`${hostName} isn't one of the plugin's hosts (${(meta.hosts ?? []).join(", ") || "it names none"})`);
-      // (a secret named the old way, { secret: "NAME" }, as it's built: refused, saying the new way)
       const headers = {};
-      for (const [k, v] of Object.entries(request.headers ?? {})) {
-        if (v && typeof v === "object" && typeof v.secret === "string") throw new Error(oldWay("plugin", v.secret));
-        headers[k] = fill(String(v));
-      }
+      for (const [k, v] of Object.entries(request.headers ?? {})) headers[k] = fill(String(v));
       let body = request.body;
       if (typeof body === "string") body = fill(body);
       else if (body !== undefined && body !== null) {
@@ -199,12 +190,10 @@ export async function startPlugin(host, { file, source }) {
   return {
     meta,
     file,
-    // (the secrets and the environment's values its code names, and the secrets it names the old way,
-    // each where: for the check before a run)
+    // (the secrets and the environment's values its code names, each where: for the check before a run)
     secrets: secretsNamed(source),
     envNamed: envNamed(source),
     envSets: envSetNamed(source),
-    oldSecrets: oldSecretsNamed(source),
     // A method of it: opts { signal, transport, scope (the turn's, the run's or the conversation's:
     // where its requests' {{secret.…}}s and {{env.…}}s come from), secrets(NAME) (with no scope, where
     // its {{secret.…}}s come from), used (a Set for redaction), onEvent, whole (the result's message:
@@ -228,7 +217,7 @@ function fillerFor(args, opts) {
 // What the engine uses: a provider, a check or a judge, by its plugin's kind
 function adapter(running, defaults) {
   const { meta } = running;
-  const base = { meta, file: running.file, kind: meta.kind, secrets: running.secrets ?? [], envNamed: running.envNamed ?? [], envSets: running.envSets ?? [], oldSecrets: running.oldSecrets ?? [], close: running.close };
+  const base = { meta, file: running.file, kind: meta.kind, secrets: running.secrets ?? [], envNamed: running.envNamed ?? [], envSets: running.envSets ?? [], close: running.close };
   if (meta.kind === "provider") {
     return {
       ...base,
@@ -253,7 +242,6 @@ function adapter(running, defaults) {
             // (no secret in any: a request has {{secret.NAME}}, and the engine fills it in)
             variables: scope?.variables?.() ?? {},
             env: scope?.envValues?.() ?? {},
-            attachments: [],
             settings: scope?.plain ? scope.plain(config) : config,
           }, {
             signal, transport: transport ?? defaults.transport, onEvent: push, onCall: (call) => push({ type: "call", ...call }),
@@ -426,16 +414,6 @@ export function pluginSecretProblems(suite, plugins, given, secret, environment,
   return out;
 }
 
-// The plugins a suite uses that name a secret the old way ({ secret: "NAME" }): a problem for each,
-// where its file names it, that says the new way
-export function pluginOldSpellings(suite, plugins) {
-  const out = [];
-  for (const name of pluginNames(suite)) {
-    const plugin = plugins[name];
-    for (const use of plugin?.oldSecrets ?? []) out.push({ file: plugin.file, line: use.line, column: use.column, message: oldWay("plugin", use.name) });
-  }
-  return out;
-}
 
 // The names the fixtures that run before these providers' requests give (beforeAll's and before's
 // plugins' provides): a Set
@@ -484,13 +462,10 @@ export async function suiteFixtureGives(host, suite) {
   return gives;
 }
 
-// A JSON body with its texts' {{secret.…}}s and {{env.…}}s filled in (fill). A value that names a
-// secret the old way ({ secret: "NAME", prefix? }: only those keys) is refused, saying the new way.
+// A JSON body with its texts' {{secret.…}}s and {{env.…}}s filled in (fill)
 function fillBody(value, fill) {
   if (typeof value === "string") return fill(value);
   if (Array.isArray(value)) return value.map((v) => fillBody(v, fill));
   if (!value || typeof value !== "object") return value;
-  if (isOldSecret(value)) throw new Error(oldWay("plugin", value.secret));
   return Object.fromEntries(Object.keys(value).map((k) => [k, fillBody(value[k], fill)]));
 }
-const isOldSecret = (value) => !!value && typeof value === "object" && typeof value.secret === "string" && Object.keys(value).every((k) => k === "secret" || k === "prefix");

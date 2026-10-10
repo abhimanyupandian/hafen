@@ -10,7 +10,9 @@ import { FIXTURE_PHASES, fixturesOf } from "../fixture-lists.js";
 import { folderPluginFiles, loadPlugins, pluginNames } from "../plugins.js";
 import { PRESETS } from "../providers/index.js";
 import { basename, isObject, joinPath } from "../util.js";
-import { climbsOut, editText, loadSuite, parseText, SUITE_FILE } from "./suite-file.js";
+import { climbsOut, loadSuite, SUITE_FILE } from "./suite-file.js";
+import { editText } from "./edit.js";
+import { parseText } from "./places.js";
 
 const listOf = (v) => (Array.isArray(v) ? v : []);
 // A plugin entry that's a file (a path, or a name ending .js), not a package

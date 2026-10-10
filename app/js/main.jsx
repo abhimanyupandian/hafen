@@ -37,7 +37,6 @@ import { ChecksSection, ConversationsSection, RunsSection, SuitesSection } from 
 import { panes, usage } from "./views/settings.jsx";
 import { Thread } from "./views/thread.jsx";
 import { ExportDialog, Question } from "./views/transfer.jsx";
-import { offerLegacyFolder } from "./transfer.js";
 import { repeatOf, runName, runOutcome, testResult, testStatusText } from "./views/derive.js";
 import { ago, sec } from "./lib/format.js";
 
@@ -344,9 +343,5 @@ async function followRoute({ tab, _id }) {
 start()
   .then(() => followRoute(readRoute()))
   .catch((err) => say(`couldn't start: ${err.message}`, "err"))
-  .finally(() => {
-    pageReady();
-    // (the folder the desktop app opened before it kept its suites itself: offered once, to import)
-    offerLegacyFolder();
-  });
+  .finally(pageReady);
 onRouteChange(followRoute);

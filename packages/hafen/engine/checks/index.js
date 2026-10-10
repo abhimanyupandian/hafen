@@ -110,7 +110,7 @@ const RULES = {
   },
   status(check, ctx) {
     const status = ctx.turn.response?.status;
-    if (status === undefined || status === 101) throw new CheckError(status === 101 ? "a WebSocket turn has no HTTP status" : "there's no response status");
+    if (status === undefined) throw new CheckError("there's no response status");
     const ops = hasOperator(check) ? check : { equals: check.value ?? 200 };
     return { ...evaluate(ops, [status]), expected: expectedOf(ops) };
   },

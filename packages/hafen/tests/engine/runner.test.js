@@ -1,17 +1,24 @@
-// Running suites (spec US2, US4, US7): turns in order, extractions, on_fail, repeats and pass rates,
-// data rows, setup and teardown, conversation checks, pinned history, judges with confidence and
-// "unsure", spending limits, and the run record.
+// Running suites: turns in order, extractions, groups, on_fail, repeats and data rows, setup and
+// teardown, a run's variables, a provider's timeout and retries, stopping (--max-cost), and metrics.
 
 import assert from "node:assert/strict";
 import { after, before, beforeEach, describe, it } from "node:test";
+import { parse } from "yaml";
 import { loadSuite } from "../../engine/files/suite-file.js";
+import { createProvider } from "../../engine/providers/index.js";
+import { jsonSummary } from "../../engine/reports/json.js";
+import { junit } from "../../engine/reports/junit.js";
+import { markdown } from "../../engine/reports/markdown.js";
 import { runSuites } from "../../engine/runner.js";
-import { MOCK_SSE_PROVIDER, memoryHost, startMock } from "../helpers.js";
+import { createSpans } from "../../engine/spans.js";
+import { executeTurn, metricsOf } from "../../engine/turn.js";
+import { createScope } from "../../engine/vars.js";
+import { fakeTransport, memoryHost, MOCK_SSE_PROVIDER, sseChunks, startMock } from "../helpers.js";
 
 let mock;
 before(async () => { mock = await startMock({ chunkMs: 1 }); });
-after(() => mock.close());
 beforeEach(() => mock.reset());
+after(() => mock.close());
 
 const JSON_PROVIDER = `kind: http
 url: "{{base_url}}/json"
@@ -124,6 +131,21 @@ tests:
     const none = await runYaml(yaml, { options: { onlyTurn: 2 } });
     assert.deepEqual(none.turns.map((t) => t.carried ?? "sent"), ["sent", "fixed reply", "sent"]);
     assert.equal(mock.log.length, 2);
+  });
+
+  it("\"this turn only\" counts only the turn it sent: not the turns carried from the last run", async () => {
+    const yaml = "version: 1\nprovider: providers/json.yml\ntests:\n  - name: three\n    id: t_three000\n    turns:\n      - user: first\n        expect: [ { contains: nope } ]\n      - user: second\n        expect: [ { contains: nope } ]\n      - user: third\n        expect: [ { contains: third } ]\n";
+    const host = memoryHost({ "s.hafen.yml": yaml, "providers/json.yml": JSON_PROVIDER });
+    const suite = await loadSuite(host, "s.hafen.yml");
+    const full = await runSuites({ suites: [suite], host, options: { vars: { base_url: mock.url } } });
+    assert.equal(full.summary.turns, 3);
+    mock.reset();
+    const only = await runSuites({ suites: [suite], host, options: { vars: { base_url: mock.url }, onlyTurn: 2, carry: { t_three000: [full.turns[0], full.turns[1]] } } });
+    assert.equal(mock.log.length, 1);
+    assert.equal(only.summary.turns, 1);
+    assert.deepEqual([only.summary.checks.total, only.summary.checks.failed], [1, 0]);
+    assert.equal(only.summary.latency.total.n, 1);
+    assert.equal((junit(only).match(/<failure/g) ?? []).length, 0);
   });
 
   it("tests in different groups run at once: each turn's record, spans and history stay its own test's", async () => {
@@ -436,169 +458,361 @@ tests:
   });
 });
 
-describe("judges", () => {
-  const judges = `judges:
-  default: { kind: systemone, endpoint: "{{base_url}}/systemone" }
-  rubric: { kind: llm, provider: judge, samples: 3 }
-providers:
-  judge: { kind: openai-chat, base_url: "{{base_url}}/judge", model: mock-judge, api_key: "" }
+async function runFiles(files, { options = {}, secrets = {}, signal, onEvent } = {}) {
+  const host = memoryHost({ "providers/json.yml": JSON_PROVIDER, ...files }, { secrets });
+  const suites = [];
+  for (const file of Object.keys(files).filter((f) => f.endsWith(".hafen.yml")).sort()) {
+    const suite = await loadSuite(host, file);
+    assert.deepEqual(suite.errors, [], JSON.stringify(suite.errors));
+    suites.push(suite);
+  }
+  return runSuites({ suites, host, options: { vars: { base_url: mock.url }, ...options }, signal, onEvent });
+}
+const sent = (path = "/json") => mock.log.filter((x) => x.path === path).map((x) => x.body.message);
+
+describe("variables (docs/test-files.md, Variables)", () => {
+  it("{{run.id}}, {{test.name}}, {{repeat}} and {{turn.index}} are the run's", async () => {
+    const run = await runFiles({ "s.hafen.yml": `version: 1
+provider: providers/json.yml
+tests:
+  - name: the run's own
+    repeat: 2
+    turns:
+      - user: "run {{run.id}} · {{test.name}} · repeat {{repeat}} · turn {{turn.index}}"
+      - user: "turn {{turn.index}} of {{test.name}}"
+` });
+    assert.equal(run.verdict, "passed", JSON.stringify(run.error));
+    assert.deepEqual(sent(), [
+      `run ${run._id} · the run's own · repeat 1 · turn 1`, "turn 2 of the run's own",
+      `run ${run._id} · the run's own · repeat 2 · turn 1`, "turn 2 of the run's own",
+    ]);
+  });
+
+  it("a {{name}}: the latest extraction, then a setup step's, then --var, then the suite's variables, then its environment's", async () => {
+    const run = await runFiles({ "s.hafen.yml": `version: 1
+provider: providers/json.yml
+environments:
+  local: { who: env-who, only_env: from-env, shadow: env-shadow, given: env-given }
+variables: { who: var-who, shadow: var-shadow, given: var-given }
+setup:
+  - name: log in
+    request: { url: "{{base_url}}/login", method: POST }
+    extract: { shadow: $.access_token }
+tests:
+  - name: layers
+    turns:
+      - user: "1 {{who}} {{only_env}} {{shadow}} {{given}}"
+        extract: { who: $.data.order.id }
+      - user: "2 {{who}}"
+        extract: { who: $.session_id }
+      - user: "3 {{who}}"
+` }, { options: { vars: { base_url: mock.url, given: "from --var" } } });
+    assert.equal(run.verdict, "passed", JSON.stringify(run.error));
+    assert.deepEqual(sent(), ["1 var-who from-env tok_mock_123 from --var", "2 4417", "3 sess_1"]);
+  });
+
+  it("a value that is exactly one {{name}} keeps its type; inside text, it's text", async () => {
+    const run = await runFiles({ "s.hafen.yml": `version: 1
+provider: providers/json.yml
+variables: { order: 4417 }
+tests:
+  - name: typed
+    turns:
+      - user: "order {{order}}"
+        expect:
+          - { path: $.data.order.id, equals: "{{order}}", type_is: integer }
+          - { path: $.data.order.id, equals: "{{order}}" }
+` });
+    assert.deepEqual(run.turns[0].results.map((r) => r.status), ["pass", "pass"]);
+    assert.deepEqual(sent(), ["order 4417"]);
+  });
+});
+
+describe("a test's settings (docs/test-files.md, Test keys)", () => {
+  it("the suite's defaults (repeat, pass_rate) are every test's, and a test's own win", async () => {
+    const run = await runFiles({ "s.hafen.yml": `version: 1
+provider: providers/json.yml
+defaults: { repeat: 3, pass_rate: 0.5 }
+tests:
+  - name: by default
+    turns: [ { user: a } ]
+  - name: its own
+    repeat: 1
+    turns: [ { user: b } ]
+` });
+    assert.deepEqual(run.tests.map((t) => [t.name, t.total, t.settings.pass_rate]), [["by default", 3, 0.5], ["its own", 1, 0.5]]);
+  });
+});
+
+describe("timeouts, retries, a stop, and how a turn's error is said", () => {
+  const statuses = (record) => record.results.map((r) => [r.name, r.status, r.reason]);
+
+  // A JSON provider on one of the mock's paths, with more of its keys
+  const provider = (path, more = "") => `kind: http
+url: "{{base_url}}${path}"
+body: { message: "{{user}}" }
+response: { text: $.data.reply }
+${more}`;
+
+  // A suite of one test on providers/p.yml (its head and test keys given)
+  const suite = ({ head = "", test = "", expect = "[ { contains: \"You said\" } ]" } = {}) => `version: 1
+provider: providers/p.yml
+${head}
+tests:
+  - name: t
+${test}    turns: [ { user: hi, expect: ${expect} } ]
 `;
 
-  it("System One: noul, choice and score, one request per turn", async () => {
-    const run = await runYaml(`version: 1
-provider: providers/json.yml
-${judges}
-tests:
-  - name: t
-    turns:
-      - user: a refund for 4417
-        expect:
-          - { type: systemone.noul, question: "Does the reply ask why?", min: 0.8 }
-          - { type: systemone.choice, question: "What does it offer?", options: [refund, replacement], equals: refund }
-          - { type: systemone.score, question: "How helpful?", rubric: [poor, ok, great], min: 2 }
-`);
-    const [noul, choice, score] = run.turns[0].results;
-    assert.equal(noul.status, "pass");
-    assert.equal(noul.value, 0.91);
-    assert.equal(noul.confidence, 0.82);
-    assert.equal(choice.status, "pass");
-    assert.equal(choice.actual, "refund");
-    assert.equal(score.status, "pass");
-    assert.equal(mock.log.filter((r) => r.path === "/systemone/v1/systemone").length, 1);
-    assert.equal(mock.log.find((r) => r.path === "/systemone/v1/systemone").headers.authorization, "Bearer jev-secret-key-1");
-    // The key is redacted from the record
-    assert.ok(!JSON.stringify(run).includes("jev-secret-key-1"));
+  async function runFiles(files, { secrets = {}, transport, signal, options = {} } = {}) {
+    const host = memoryHost(files, { secrets, ...(transport ? { transport } : {}) });
+    const s = await loadSuite(host, "s.hafen.yml");
+    assert.deepEqual(s.errors, [], JSON.stringify(s.errors));
+    return runSuites({ suites: [s], host, signal, options: { vars: { base_url: mock.url }, ...options } });
+  }
+
+  describe("a provider's timeout_ms and retries: the test's, then the suite's defaults, then the provider's, then Hafen's", () => {
+    it("a provider's timeout_ms: 300 times out a reply that takes 1.5 s, saying 300 ms", async () => {
+      const started = Date.now();
+      const r = await runFiles({ "providers/p.yml": provider("/slow?ms=1500", "timeout_ms: 300\nretries: 0\n"), "s.hafen.yml": suite() });
+      assert.ok(Date.now() - started < 1400, `${Date.now() - started} ms`);
+      assert.equal(r.tests[0].status, "error");
+      assert.equal(r.turns[0].error, "timed out after 300 ms");
+      assert.equal(r.tests[0].settings.timeout_ms, 300);
+    });
+
+    it("the suite's defaults win over the provider's, and the test's over both", async () => {
+      const files = { "providers/p.yml": provider("/slow?ms=600", "timeout_ms: 200\nretries: 0\n") };
+      const defaults = await runFiles({ ...files, "s.hafen.yml": suite({ head: "defaults: { timeout_ms: 5000 }" }) });
+      assert.equal(defaults.tests[0].status, "passed", JSON.stringify(defaults.turns[0].error));
+      assert.equal(defaults.tests[0].settings.timeout_ms, 5000);
+      const test = await runFiles({ ...files, "s.hafen.yml": suite({ head: "defaults: { timeout_ms: 5000 }", test: "    timeout_ms: 250\n" }) });
+      assert.equal(test.turns[0].error, "timed out after 250 ms");
+      // (--timeout, over all of them)
+      const option = await runFiles({ ...files, "s.hafen.yml": suite({ test: "    timeout_ms: 250\n" }) }, { options: { timeoutMs: 5000 } });
+      assert.equal(option.tests[0].status, "passed");
+    });
+
+    it("a provider's retries: 0 sends a 500 once; none, three times; the suite's and the test's win over it", async () => {
+      const calls = async (more, s) => {
+        const transport = fakeTransport(() => ({ status: 500, headers: { "content-type": "application/json", "retry-after-ms": "1" }, body: "{\"error\":\"down\"}" }));
+        const r = await runFiles({ "providers/p.yml": provider("/json", more), "s.hafen.yml": s }, { transport });
+        assert.equal(r.tests[0].status, "error");
+        return transport.requests.length;
+      };
+      assert.equal(await calls("retries: 0\n", suite()), 1);
+      assert.equal(await calls("", suite()), 3);
+      assert.equal(await calls("retries: 0\n", suite({ head: "defaults: { retries: 1 }" })), 2);
+      assert.equal(await calls("retries: 3\n", suite({ head: "defaults: { retries: 1 }", test: "    retries: 0\n" })), 1);
+    });
+
+    it("a turn given no settings (a conversation) takes the provider's own", async () => {
+      const transport = fakeTransport(() => ({ status: 500, headers: { "content-type": "application/json", "retry-after-ms": "1" }, body: "{}" }));
+      const spans = createSpans({ now: () => performance.now() });
+      const scope = createScope({ layers: [{ base_url: mock.url }] });
+      const out = await executeTurn({ provider: createProvider(parse(provider("/json", "retries: 0\n"))), message: "hi", scope, transport, spans, now: () => performance.now() });
+      assert.equal(transport.requests.length, 1);
+      assert.match(out.error, /^500/);
+      const slow = await executeTurn({ provider: createProvider(parse(provider("/slow?ms=1500", "timeout_ms: 1200\n"))), message: "hi", scope, transport: memoryHost().transport, spans, now: () => performance.now() });
+      assert.equal(slow.error, "timed out after 1.2 s");
+    });
   });
 
-  it("low confidence on a passing value is unsure, which fails by default and warns or passes when asked", async () => {
-    const yaml = `version: 1
-provider: providers/json.yml
-${judges}
+  describe("a turn the stop cut short", () => {
+    it("has every check skipped, latency and status too; a turn that failed on its own still has them checked", async () => {
+      const controller = new AbortController();
+      setTimeout(() => controller.abort(), 300);
+      const expect = "[ { type: latency, max_ms: 5000 }, { type: status, equals: 200 }, { contains: \"You said\" } ]";
+      const stopped = await runFiles({ "providers/p.yml": provider("/slow?ms=3000"), "s.hafen.yml": suite({ expect }) }, { signal: controller.signal });
+      assert.equal(stopped.status, "stopped");
+      assert.equal(stopped.turns[0].error, "stopped");
+      assert.deepEqual(statuses(stopped.turns[0]), [
+        ["latency ≤ 5.0 s", "skipped", "the run was stopped"],
+        ["status 200", "skipped", "the run was stopped"],
+        ["contains You said", "skipped", "the run was stopped"],
+      ]);
+      assert.equal(stopped.verdict, null);
+      // One that failed on its own (a 500): its latency and status are what it had
+      const failed = await runFiles({ "providers/p.yml": provider("/error/500", "retries: 0\n"), "s.hafen.yml": suite({ expect }) });
+      assert.deepEqual(statuses(failed.turns[0]).map(([name, status]) => [name, status]), [["latency ≤ 5.0 s", "pass"], ["status 200", "fail"], ["contains You said", "skipped"]]);
+    });
+  });
+
+  describe("how a turn's error is said", () => {
+    const turn = (config, transport, rest = {}) => executeTurn({
+      provider: createProvider(typeof config === "string" ? parse(config) : config), message: "hi", scope: createScope({ layers: [{ base_url: mock.url, scenario: "cut" }] }),
+      transport, spans: createSpans({ now: () => performance.now() }), now: () => performance.now(), retries: 0, ...rest,
+    });
+
+    it("a timeout in ms or s, as latency is", async () => {
+      const hang = { send: (req, { signal }) => new Promise((_, reject) => signal.addEventListener("abort", () => reject(Object.assign(new Error("aborted"), { name: "AbortError" })))) };
+      assert.equal((await turn(provider("/json"), hang, { timeoutMs: 300 })).error, "timed out after 300 ms");
+      assert.equal((await turn(provider("/json"), hang, { timeoutMs: 1200 })).error, "timed out after 1.2 s");
+    });
+
+    it("a stream cut off mid-reply: the response ended early, after how many chunks, and the reply so far is kept", async () => {
+      const out = await turn(MOCK_SSE_PROVIDER, memoryHost().transport);
+      // (how many chunks the reader saw depends on how the network grouped the mock's writes: 1 or 2)
+      assert.match(out.error, /^the response ended early: the connection closed after [12] chunks? \(the reply so far is kept\)$/);
+      assert.match(out.record.reply, /^This reply is going /);
+      assert.equal(out.stopped, false);
+      // A body cut before any of it was read; one cut after its first chunk
+      const cut = (chunks) => ({ async send() { return { status: 200, headers: { "content-type": "text/event-stream" }, body: (async function* body() { for (const c of chunks) yield new TextEncoder().encode(c); throw new TypeError("terminated"); })() }; } });
+      assert.equal((await turn(provider("/json"), cut([]))).error, "the response ended early: the connection closed before its body was all in");
+      assert.equal((await turn(MOCK_SSE_PROVIDER, cut(sseChunks([{ type: "text_delta", delta: "Hello" }], { split: 100 })))).error, "the response ended early: the connection closed after 1 chunk (the reply so far is kept)");
+    });
+
+    it("errors before the response, and the turn's own after it, are said as they were", async () => {
+      const refused = { send: async () => { throw new TypeError("fetch failed"); } };
+      assert.equal((await turn(provider("/json"), refused)).error, "fetch failed");
+      // (a tool call the test has no result for: after the stream ended, not a cut)
+      const asks = fakeTransport(() => ({ headers: { "content-type": "text/event-stream" }, chunks: sseChunks([{ type: "tool_call", id: "c1", name: "lookup_order", args: { id: 1 } }, "[DONE]"]) }));
+      const out = await turn(`${MOCK_SSE_PROVIDER}done_marker: "[DONE]"\n`, asks, { tools: { other: { result: 1 } } });
+      assert.match(out.error, /^The model called lookup_order, and the test has no result for it/);
+    });
+  });
+});
+
+describe("a run stopped early (--max-cost)", () => {
+  // (a turn of "hi" costs $0.017 at these prices: 11 tokens in, 3 out)
+  const PRICEY = JSON_PROVIDER.replace("price: { input: 1, output: 2 }", "price: { input: 1000, output: 2000 }");
+
+  const host = (files, secrets = {}) => memoryHost({ "providers/json.yml": JSON_PROVIDER, "providers/sse.yml": MOCK_SSE_PROVIDER, "providers/pricey.yml": PRICEY, ...files }, { secrets });
+
+  async function load(yaml, files = {}, secrets = {}) {
+    const h = host({ "s.hafen.yml": yaml, ...files }, secrets);
+    return { host: h, suite: await loadSuite(h, "s.hafen.yml") };
+  }
+
+  async function run(yaml, { files = {}, options = {}, secrets = {} } = {}) {
+    const { host: h, suite } = await load(yaml, files, secrets);
+    assert.deepEqual(suite.errors, [], JSON.stringify(suite.errors));
+    return runSuites({ suites: [suite], host: h, options: { vars: { base_url: mock.url }, ...options } });
+  }
+
+  const three = `version: 1
+provider: providers/pricey.yml
 tests:
-  - name: t
-    turns:
-      - user: a refund
-        expect:
-          - { type: systemone.noul, question: "UNSURE: is it polite?", min: 0.5 }
+  - name: t1
+    turns: [ { user: hi, expect: [ { contains: "You said" } ] } ]
+  - name: t2
+    turns: [ { user: hi, expect: [ { contains: "nope" } ] } ]
+  - name: t3
+    turns: [ { user: hi, expect: [ { contains: "You said" } ] } ]
 `;
-    const failed = await runYaml(yaml);
-    assert.equal(failed.turns[0].results[0].status, "unsure");
-    assert.equal(failed.turns[0].results[0].unsure, "fail");
-    assert.equal(failed.tests[0].status, "failed");
-    assert.equal(failed.verdict, "failed");
-    const warned = await runYaml(yaml, { options: { unsure: "warn" } });
-    assert.deepEqual([warned.turns[0].results[0].unsure, warned.tests[0].status, warned.tests[0].unsure, warned.verdict], ["warn", "passed", true, "unsure"]);
-    const passed = await runYaml(yaml, { options: { unsure: "pass" } });
-    assert.deepEqual([passed.turns[0].results[0].unsure, passed.tests[0].status, passed.tests[0].unsure, passed.verdict], ["pass", "passed", false, "passed"]);
+
+  it("a test that had failed before the stop is failed, in the run and in every report; one that never ran is skipped", async () => {
+    const r = await run(three, { options: { maxCost: 0.03 } });
+    assert.equal(r.status, "stopped");
+    assert.match(r.stopped, /cost reached the limit/);
+    assert.deepEqual(r.tests.map((t) => [t.name, t.status]), [["t1", "passed"], ["t2", "failed"], ["t3", "skipped"]]);
+    assert.equal(r.tests[1].instances[0].status, "failed");
+    assert.deepEqual(r.summary.tests, { passed: 1, failed: 1, unsure: 0, error: 0, skipped: 1, stopped: 0, total: 3 });
+    assert.equal(r.verdict, "failed");
+    assert.equal(r.spans.find((s) => s.kind === "suite").status, "fail");
+    assert.equal(mock.log.length, 2);
+    const xml = junit(r);
+    const t2 = xml.match(/<testcase [^>]*name="t2"[^>]*>[\s\S]*?<\/testcase>/)[0];
+    assert.match(t2, /<failure message="contains nope/);
+    assert.doesNotMatch(t2, /<skipped/);
+    assert.match(xml, /<testcase [^>]*name="t3"[^>]*>\s*<skipped/);
+    assert.match(xml, /<testsuite [^>]*failures="1" errors="0" skipped="1"/);
+    assert.match(xml, /<property name="verdict" value="failed"\/>/);
+    const md = markdown(r);
+    assert.match(md, /3 tests · 1 failed/);
+    assert.match(md, /\| ✗ \| t2 \|/);
+    const json = JSON.parse(jsonSummary(r));
+    assert.equal(json.verdict, "failed");
+    assert.deepEqual(json.tests.map((t) => t.status), ["passed", "failed", "skipped"]);
   });
 
-  it("a value that misses its criterion fails, however low the confidence, under every policy: never unsure", async () => {
-    // (the mock's UNSURE answers: noul 0.55 with confidence 0.1, a choice of refund at 0.4, a score of 2 at 0.3)
-    const yaml = `version: 1
-provider: providers/json.yml
-${judges}
+  it("a passing test the stop caught is stopped, and the run's verdict is null: nothing failed, not everything ran", async () => {
+    const r = await run(three, { options: { maxCost: 0.01 } });
+    assert.deepEqual(r.tests.map((t) => [t.name, t.status]), [["t1", "stopped"], ["t2", "skipped"], ["t3", "skipped"]]);
+    assert.equal(r.verdict, null);
+    assert.equal(r.spans.find((s) => s.kind === "suite").status, "skipped");
+  });
+
+  it("with repeats, failed only when the runs that failed already rule out its pass rate", async () => {
+    const repeated = (rate) => `version: 1
+provider: providers/pricey.yml
 tests:
-  - name: t
-    turns:
-      - user: a refund
-        expect:
-          - { type: systemone.noul, question: "UNSURE: is it polite?", min: 0.8 }
-          - { type: systemone.choice, question: "UNSURE: what does it offer?", options: [refund, replacement], equals: replacement }
-          - { type: systemone.score, question: "UNSURE: how helpful?", rubric: [poor, ok, great], max: 1 }
+  - name: r
+    repeat: 3
+    pass_rate: ${rate}
+    turns: [ { user: hi, expect: [ { contains: "nope" } ] } ]
 `;
-    for (const unsure of [undefined, "fail", "warn", "pass"]) {
-      const run = await runYaml(yaml, { options: { unsure } });
-      assert.deepEqual(run.turns[0].results.map((r) => [r.status, r.confidence, r.unsure]), [["fail", 0.1, undefined], ["fail", 0.4, undefined], ["fail", 0.3, undefined]], unsure);
-      assert.deepEqual(run.turns[0].results.map((r) => r.reason), ["0.55 outside 0.8–1", 'chose "refund", not "replacement"', "scored 2 (great), outside 0–1"]);
-      assert.deepEqual([run.tests[0].status, run.verdict], ["failed", "failed"], unsure);
-    }
+    const strict = await run(repeated(1), { options: { maxCost: 0.01 } });
+    assert.deepEqual([strict.tests[0].status, strict.tests[0].total], ["failed", 1]);
+    const lenient = await run(repeated(0.5), { options: { maxCost: 0.01 } });
+    assert.deepEqual([lenient.tests[0].status, lenient.tests[0].total], ["stopped", 1]);
   });
 
-  it("how an unsure result counts: the check's unsure over the test's, the test's over the suite's defaults, --unsure over all", async () => {
-    const yaml = (defaults, test, check) => `version: 1
-provider: providers/json.yml
-${judges}${defaults ? `defaults: { unsure: ${defaults} }\n` : ""}tests:
-  - name: t
-${test ? `    unsure: ${test}\n` : ""}    turns:
-      - user: a refund
-        expect:
-          - { type: systemone.noul, question: "UNSURE: is it polite?"${check ? `, unsure: ${check}` : ""} }
-          - { type: systemone.noul, question: "UNSURE: is it kind?" }
-`;
-    const counted = async (args, options = {}) => (await runYaml(yaml(...args), { options })).turns[0].results.map((r) => r.unsure);
-    assert.deepEqual(await counted([]), ["fail", "fail"]);
-    assert.deepEqual(await counted(["warn"]), ["warn", "warn"]);
-    assert.deepEqual(await counted(["warn", "pass"]), ["pass", "pass"]);
-    assert.deepEqual(await counted(["warn", "pass", "fail"]), ["fail", "pass"]);
-    assert.deepEqual(await counted([null, null, "warn"]), ["warn", "fail"]);
-    assert.deepEqual(await counted(["pass", "pass", "warn"], { unsure: "fail" }), ["fail", "fail"]);
-    // The test: failed when one counts as failed; else unsure when one warns; else passed
-    const run = await runYaml(yaml(null, "pass", "warn"));
-    assert.deepEqual([run.tests[0].status, run.tests[0].unsure, run.verdict], ["passed", true, "unsure"]);
-    assert.equal(run.turns[0].metrics.accuracy, 1);
-    const failed = await runYaml(yaml(null, null, "pass"));
-    assert.deepEqual([failed.tests[0].status, failed.verdict, failed.turns[0].metrics.accuracy], ["failed", "failed", 0.5]);
+  it("an error of the test's own before the stop is an error, not stopped", async () => {
+    // (a's setup fails at once; while its teardown waits, b spends past the limit)
+    const r = await run(`version: 1
+provider: providers/pricey.yml
+tests:
+  - name: a
+    group: 1
+    setup:
+      - request: { url: "{{base_url}}/error/500", method: POST }
+        expect: [ { type: status, equals: 200 } ]
+    teardown:
+      - request: { url: "{{base_url}}/slow?ms=600", method: POST, body: { message: x } }
+    turns: [ { user: hi } ]
+  - name: b
+    group: 2
+    turns: [ { user: hi, expect: [ { contains: "You said" } ] } ]
+`, { options: { maxCost: 0.01 } });
+    assert.equal(r.status, "stopped");
+    const a = r.tests.find((t) => t.name === "a");
+    assert.equal(a.status, "error");
+    assert.match(a.instances[0].reason, /setup "1" failed/);
+    assert.equal(r.verdict, "failed");
+  });
+});
+
+describe("a turn's metrics", () => {
+  it("times the first token, the thinking and the first answer token", () => {
+    const m = metricsOf([{ type: "thinking", t: 400, t_end: 2400 }, { type: "text", t: 2500, t_end: 3000 }], { ms: 3100 });
+    assert.equal(m.ttft_ms, 400);
+    assert.equal(m.first_thinking_ms, 400);
+    assert.equal(m.thinking_ms, 2000);
+    assert.equal(m.first_answer_ms, 2500);
+    assert.equal(m.tokens_per_s, undefined);  // (no usage reported)
   });
 
-  it("an unsure check that counts as failed fails the test however it's written: on the whole conversation too", async () => {
-    const run = await runYaml(`version: 1
-provider: providers/json.yml
-${judges}
-tests:
-  - name: t
-    turns: [ { user: a refund } ]
-    expect_conversation:
-      - { type: systemone.noul, on: reply, question: "UNSURE: is it polite?" }
-`);
-    const [r] = run.tests[0].instances[0].conversation_results;
-    assert.deepEqual([r.status, r.unsure, run.tests[0].status], ["unsure", "fail", "failed"]);
-    const warned = await runYaml(`version: 1
-provider: providers/json.yml
-${judges}
-tests:
-  - name: t
-    unsure: warn
-    turns: [ { user: a refund } ]
-    expect_conversation:
-      - { type: systemone.noul, on: reply, question: "UNSURE: is it polite?" }
-`);
-    assert.deepEqual([warned.tests[0].status, warned.tests[0].unsure, warned.verdict], ["passed", true, "unsure"]);
+  it("with no thinking: the output tokens over the answer's time", () => {
+    const m = metricsOf([{ type: "text", t: 500, t_end: 2500 }], { ms: 2500, usage: { output: 100 }, provider: { kind: "openai-chat" } });
+    assert.equal(m.tokens_per_s, 50);
   });
 
-  it("an unreachable judge is an error, not a failure", async () => {
-    const run = await runYaml(`version: 1
-provider: providers/json.yml
-judges:
-  default: { kind: systemone, endpoint: "http://127.0.0.1:1" }
-tests:
-  - name: t
-    turns:
-      - user: hi
-        expect: [ { type: systemone.noul, question: "ok?" } ]
-`);
-    assert.equal(run.turns[0].results[0].status, "error");
-    assert.equal(run.tests[0].status, "error");
+  it("with the thinking shown: every output token over the thinking and the answer, not the answer's time alone", () => {
+    // 525 tokens (Ollama counts the thinking in them): 16.5 s of thinking, then a short answer
+    const events = [{ type: "thinking", t: 1100, t_end: 17600 }, { type: "text", t: 17800, t_end: 18300 }];
+    const m = metricsOf(events, { ms: 18300, usage: { input: 425, output: 525 }, provider: { kind: "ollama" } });
+    assert.equal(m.tokens_per_s, 30.5);
   });
 
-  it("LLM judges: rubric criteria, sample agreement as confidence", async () => {
-    const run = await runYaml(`version: 1
-provider: providers/json.yml
-${judges}
-tests:
-  - name: t
-    turns:
-      - user: a refund
-        expect:
-          - { type: judge, judge: rubric, rubric: [Asks why, Mentions the order] }
-          - { type: judge, judge: rubric, rubric: [Apologises, "NOT-MET: offers a discount"], min: 1 }
-          - { type: judge, judge: rubric, rubric: ["FLAKY criterion"] }
-`, { options: {} });
-    const [good, bad, flaky] = run.turns[0].results;
-    assert.equal(good.status, "pass");
-    assert.equal(good.confidence, 1);
-    assert.equal(bad.status, "fail");
-    assert.match(bad.reason, /not met: NOT-MET/);
-    assert.ok(flaky.confidence < 1 && flaky.confidence > 0.5, `confidence ${flaky.confidence}`);
-    assert.equal(flaky.judge.samples.length, 3);
+  it("with the thinking hidden (counted, not shown): the answer's own tokens over its time", () => {
+    const m = metricsOf([{ type: "text", t: 9000, t_end: 11000 }], { ms: 11000, usage: { output: 500, thinking: 400 }, provider: { kind: "openai-responses" } });
+    assert.equal(m.tokens_per_s, 50);
+  });
+
+  it("Gemini reports its thinking tokens apart: they're added (shown) or not taken away (hidden)", () => {
+    const shown = metricsOf([{ type: "thinking", t: 1000, t_end: 5000 }, { type: "text", t: 5000, t_end: 6000 }], { ms: 6000, usage: { output: 100, thinking: 300 }, provider: { kind: "gemini" } });
+    assert.equal(shown.tokens_per_s, 80);
+    const hidden = metricsOf([{ type: "text", t: 5000, t_end: 7000 }], { ms: 7000, usage: { output: 100, thinking: 300 }, provider: { kind: "gemini" } });
+    assert.equal(hidden.tokens_per_s, 50);
+  });
+
+  it("says nothing for a reply too quick to time, or with no tokens left to count", () => {
+    assert.equal(metricsOf([{ type: "text", t: 100, t_end: 120 }], { ms: 120, usage: { output: 5 } }).tokens_per_s, undefined);
+    assert.equal(metricsOf([{ type: "text", t: 100, t_end: 2100 }], { ms: 2100, usage: { output: 300, thinking: 300 } }).tokens_per_s, undefined);
+  });
+
+  it("keeps only the token counts reported", () => {
+    const m = metricsOf([{ type: "text", t: 100, t_end: 2100 }], { ms: 2100, usage: { input: 10, output: 20, thinking: undefined, cached: undefined } });
+    assert.deepEqual(m.tokens, { input: 10, output: 20 });
   });
 });

@@ -1,5 +1,5 @@
 // A new plugin's file (Settings → Plugins): a provider, a check or a judge that works as it is, to
-// change into your own. Each loads (tests/engine/plugins-scopes.test.js checks it).
+// change into your own. Each loads (tests/engine/plugins.test.js checks it).
 
 const PROVIDER = (name) => `// A provider plugin, run in a worker of its own. Use it in a provider file or a suite as
 // kind: plugin:${name}  (its other fields, url and model say, reach it as settings).

@@ -16,7 +16,6 @@ export function fixturesOf(config) {
     out.problems.push(message);
     out.at.push(path);
   };
-  if (config?.fixture !== undefined) problem("a provider's fixtures are in its fixtures: map, by when they run: fixtures: { beforeAll: [acme-login] } (fixture: is no longer read)", ["fixture"]);
   const lists = config?.fixtures;
   if (lists === undefined || lists === null) return out;
   if (typeof lists !== "object" || Array.isArray(lists)) {

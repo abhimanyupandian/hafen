@@ -1,6 +1,6 @@
 // The app's page carries only what it shows: what runs checks and validates files (JSON Schema, by Ajv;
 // JSONPath, by json-p3) is the engine's, in its worker (or the desktop app's engine process). Followed
-// from the page's entries (the app, the design gallery) through every static import, the engine's
+// from the page's entry (the app) through every static import, the engine's
 // modules too (the hafen package's, imported as hafen/engine/…, as Vite resolves them), the page reaches
 // neither: one that did would put them back in its bundle (500 kB over the build's warning).
 
@@ -40,7 +40,7 @@ function reach(entries) {
 }
 
 it("the page reaches neither Ajv nor json-p3, nor the engine's modules that use them", () => {
-  const { files, packages } = reach(["app/js/main.jsx", "app/js/gallery.jsx"]);
+  const { files, packages } = reach(["app/js/main.jsx"]);
   for (const name of ["ajv", "json-p3"]) assert.equal(packages.has(name), false, `${name}, from ${packages.get(name)}`);
   for (const file of ["engine/checks/index.js", "engine/checks/operators.js", "engine/schema.js", "engine/jsonpath.js", "engine/runner.js"]) {
     assert.equal(files.includes(join(HAFEN, file)), false, `${file} is reached from the page`);

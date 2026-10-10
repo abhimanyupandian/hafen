@@ -5,6 +5,11 @@ format: a constitution, then one folder per feature with its spec, plan, researc
 contracts, quickstart and tasks. The design system it follows (hafen's UI, written down so other
 projects can reuse it) is documented once, in `design/`.
 
+These are design documents, written before the code. Some features they describe were cut later, to
+keep Hafen small: the WebSocket and A2A providers, network simulation, load tests, simulated users,
+attachments and images in a message, the design-system gallery, and support for the spellings and
+data of earlier versions. The JSON schemas in `001-hafen/contracts/` match what Hafen reads today.
+
 | Path | What it is |
 |---|---|
 | [memory/constitution.md](memory/constitution.md) | Hafen's principles: the UI matches the design system exactly, one engine, files as tests, local-first, honest results, standalone |

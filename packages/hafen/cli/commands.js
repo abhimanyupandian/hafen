@@ -24,7 +24,7 @@ import { money } from "../engine/reports/markdown.js";
 import { casesOf, checksOf, costOf, countsText, problemsOf, unsureCounts, unsurePassed } from "../engine/reports/outcome.js";
 import { rowLabel } from "../engine/files/data.js";
 import { PLUGIN_FILE } from "../engine/plugins.js";
-import { preflight } from "../engine/runner.js";
+import { preflight } from "../engine/preflight.js";
 import { createRedactor, REDACT_PATTERNS } from "../engine/redact.js";
 import { fromRoot, nodeHost, secretsFrom, VERSION } from "./node-host.js";
 
@@ -55,8 +55,8 @@ const HELP = `hafen ${VERSION}: end-to-end tests for chat endpoints
 Options for run: --test, --tag, --env <file|name>…, --secret <file>…, --var name=value, --repeat,
   --unsure fail|warn|pass (how a result the judge wasn't sure of counts; default fail, or the file's),
   --max-cost <usd>, --bail, --timeout <ms>, --report <junit|run|md|json>:<path|->,
-  --baseline <run-file>, --fail-on pass_rate=<points>,p95=<percent>,cost=<percent>, --load,
-  --network delay=<ms>,jitter=<ms>,kbps=<n>,drop=<rate>, --redact email,card,phone, --quiet, --verbose, --no-color
+  --baseline <run-file>, --fail-on pass_rate=<points>,p95=<percent>,cost=<percent>,
+  --redact email,card,phone, --quiet, --verbose, --no-color
 Options for validate: --env <file|name>…, --secret <file>…, --var name=value, --env-check (every
   secret set), --quiet
 Environments and secrets: KEY=VALUE files, anywhere on the disk; each option as often as wanted,
@@ -87,8 +87,6 @@ const OPTIONS = {
   report: { type: "string", multiple: true },
   baseline: { type: "string" },
   "fail-on": { type: "string" },
-  load: { type: "boolean" },
-  network: { type: "string" },
   redact: { type: "string" },
   quiet: { type: "boolean" },
   verbose: { type: "boolean" },
@@ -122,8 +120,7 @@ export async function main(argv, pack = null) {
     parsed = parseArgs({ args: rest, allowPositionals: true, options: OPTIONS, tokens: true });
   } catch (e) {
     // An option that isn't one, or one missing its value: said plainly (no stack trace), exit 2
-    if (rest.some((a) => /^--concurrency(=|$)/.test(a))) err(red("--concurrency is no longer used: suites and tests run by their group (group: in the file), the same group one after another, different groups at the same time"));
-    else err(red(`${e.message.split(". ")[0].replace(/\.$/, "")}\n\n${HELP}`));
+    err(red(`${e.message.split(". ")[0].replace(/\.$/, "")}\n\n${HELP}`));
     return EXIT.setup;
   }
   const { values, positionals } = parsed;
@@ -314,22 +311,6 @@ function parseProfile(text, keys) {
   return outObj;
 }
 
-// --network's profile, each value in its range (a drop rate of 5, or 0 kbps, is a configuration
-// error, not a profile that does something else)
-const NETWORK = {
-  delay: ["delay_ms", (n) => n >= 0, "milliseconds (0 or more)"],
-  jitter: ["jitter_ms", (n) => n >= 0, "milliseconds (0 or more)"],
-  kbps: ["kbps", (n) => n > 0, "a number above 0"],
-  drop: ["drop_rate", (n) => n >= 0 && n <= 1, "a rate from 0 to 1 (1 drops every response)"],
-};
-function parseNetwork(text) {
-  const profile = parseProfile(text, Object.fromEntries(Object.entries(NETWORK).map(([name, [key]]) => [name, key])));
-  for (const [name, [key, ok, takes]] of Object.entries(NETWORK)) {
-    if (profile?.[key] !== undefined && !ok(profile[key])) throw Object.assign(new Error(`--network ${name} takes ${takes}, not ${profile[key]}`), { setup: true });
-  }
-  return profile;
-}
-
 // A number option's value, or a configuration error (exit 2): never NaN taken as "no limit"
 function numberOption(name, raw, { min = 0, max = Infinity, integer = false } = {}) {
   if (raw === undefined) return undefined;
@@ -368,16 +349,12 @@ async function run(paths, values) {
       maxCost: numberOption("max-cost", values["max-cost"]),
       bail: !!values.bail,
       timeoutMs: numberOption("timeout", values.timeout, { min: 1, integer: true }),
-      load: !!values.load,
-      network: parseNetwork(values.network),
       redact: values.redact ? values.redact.split(",").map((s) => s.trim()) : [],
     };
     if (options.unsure && !["pass", "warn", "fail"].includes(options.unsure)) throw Object.assign(new Error("--unsure takes pass, warn or fail"), { setup: true });
     // (a pattern misspelled would redact nothing, and say nothing)
     const unknown = options.redact.filter((name) => !REDACT_PATTERNS.includes(name));
     if (unknown.length) throw Object.assign(new Error(`--redact takes ${REDACT_PATTERNS.join(", ")}, not ${unknown.map((n) => `"${n}"`).join(", ")}`), { setup: true });
-    // (gone: groups in the files say what runs at once)
-    if (process.env.HAFEN_CONCURRENCY?.trim()) throw Object.assign(new Error("HAFEN_CONCURRENCY is no longer used: suites and tests run by their group (group: in the file); unset it"), { setup: true });
     // (with nothing to compare with, it would be ignored, and say nothing)
     if (values["fail-on"] !== undefined && !values.baseline) throw Object.assign(new Error("--fail-on compares with a baseline: add --baseline <run file>"), { setup: true });
   } catch (e) {

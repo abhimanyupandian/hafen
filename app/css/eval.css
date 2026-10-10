@@ -416,7 +416,7 @@ button.check-card-text:focus-visible { outline: 1px solid var(--fg); outline-off
 .md hr { border: 0; border-top: 1px solid var(--line); margin: 12px 0; }
 .md img { max-width: 100%; }
 
-/* ---------- a field's problem (an unknown {{scope.NAME}}), right under it ---------- */
+/* ---------- a field's problem (an unknown {{env.NAME}}), right under it ---------- */
 
 .field-problem { margin: 4px 0 0; color: var(--danger); overflow-wrap: anywhere; }
 

@@ -314,7 +314,7 @@ function NewProvider() {
         ) : (
           <>
             <FieldHead label="URL" htmlFor="newProviderUrl" />
-            <input className="input" id="newProviderUrl" type="text" autoComplete="off" spellCheck={false} placeholder={id === "websocket" ? "wss://chat.example.com/ws" : "{{env.base_url}}/chat"} value={url} onChange={(e) => setUrl(e.target.value)} />
+            <input className="input" id="newProviderUrl" type="text" autoComplete="off" spellCheck={false} placeholder="{{env.base_url}}/chat" value={url} onChange={(e) => setUrl(e.target.value)} />
             <ScopeProblem id="newProviderUrlProblem" value={url} />
             <p className="hint">Then say where the reply is, in the file it makes.</p>
           </>

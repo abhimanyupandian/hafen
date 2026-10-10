@@ -11,9 +11,7 @@ in a conversation.
 | `kind` | For |
 |---|---|
 | `http` | Any HTTP endpoint: one JSON reply, an SSE stream, or a newline-delimited JSON stream |
-| `websocket` | Endpoints that chat over a WebSocket |
 | `openai-chat`, `openai-responses`, `anthropic-messages`, `gemini`, `ollama` | [Presets](#presets) for those APIs |
-| `a2a` | An [A2A agent](#a2a-agents) (Agent2Agent protocol, 1.0 or 0.3) |
 | `plugin:<name>` | A [provider plugin](plugins.md#provider-plugins) |
 
 ## An HTTP provider
@@ -63,9 +61,6 @@ secret kept for the run's scope is, whether this provider sends it or not (the a
 the command line's `--secret` files'). (A value shorter than 4 characters isn't redacted: it would
 be cut out of ordinary words and numbers.)
 
-**Old spellings.** `${env:NAME}` and `{{scope.NAME}}` are problems now, at their line in the file
-(exit `2`, nothing sent): write `{{secret.NAME}}`, or `{{env.NAME}}` for a value of the environment
-([Old spellings](test-files.md#old-spellings)).
 
 A provider can also use:
 
@@ -91,7 +86,7 @@ body:
 |---|---|
 | `messages` | The whole conversation, as `{{messages}}`, shaped by `messages_format`: `openai` (`[{role, content}]`), `anthropic` (`[{role, content: [blocks]}]`), `gemini` (`[{role, parts}]`) or `text` (one string, `User: …\nAssistant: …`) |
 | `session` | Only this turn's message; the endpoint keeps the conversation. `session.extract` reads the session from each reply, and `session.send` puts it back: in the `body` (the default, via `{{session}}`), a `header` (with `session.name`), or a `cookie` |
-| `none` | Only this turn's message, with no conversation: `{{messages}}` is that message alone, `{{history}}` is `[]`, and no session goes back (`{{session}}` is empty, an A2A agent's `contextId` isn't sent). The presets send it alone too, and so does a conversation in the app |
+| `none` | Only this turn's message, with no conversation: `{{messages}}` is that message alone, `{{history}}` is `[]`, and no session goes back (`{{session}}` is empty). The presets send it alone too, and so does a conversation in the app |
 
 ### Responses (not streamed)
 
@@ -170,30 +165,6 @@ thinking:
   visibility: summary
 ```
 
-## A WebSocket provider
-
-```yaml
-kind: websocket
-url: "wss://chat.acme.example/ws"
-headers: { Authorization: "Bearer {{secret.ACME_TOKEN}}" }   # templated, sent with the handshake
-protocols: [acme-chat-v2]
-send: { type: message, text: "{{user}}", session: "{{session}}" }
-events:
-  - when: { $.type: delta }
-    text: $.text
-  - when: { $.type: end }
-    done: true
-end: { idle_ms: 5000 }     # or a rule with done: true
-```
-
-Each message is read by the `events` rules, as a stream's events are: when messages arrive and no
-rule matches any of them, or none gives the reply, the turn is an error, as above.
-
-The CLI and the desktop app send `headers`. A browser's WebSocket can't, so in the browser build a
-provider with `headers` fails its turns saying so: put credentials in the address
-(`?token={{token}}`) or a subprotocol instead, or use the desktop app. (The relay carries HTTP
-calls, not WebSockets.)
-
 ## Logging in first
 
 For an endpoint behind a login, list a [fixture](plugins.md#fixtures) in the provider file: a small
@@ -252,52 +223,6 @@ needs (signed thinking blocks, response ids), and answer tool calls with a test'
 
 In the browser build, Ollama refuses web pages unless `OLLAMA_ORIGINS` allows the app's address. Use
 the desktop app, or the relay.
-
-## A2A agents
-
-`kind: a2a` talks to an agent that speaks the [A2A protocol](https://a2a-protocol.org) (Agent2Agent),
-over JSON-RPC. It speaks the current version, 1.0, and the older 0.3, which many agents still use.
-
-```yaml
-# providers/refunds-agent.yml
-kind: a2a
-card: https://refunds.acme.example          # the agent's address: its card says the rest
-headers: { Authorization: "Bearer {{secret.REFUNDS_AGENT_TOKEN}}" }
-```
-
-| Key | Meaning |
-|---|---|
-| `card` | Where the agent card is: the agent's address (Hafen reads `/.well-known/agent-card.json` there) or the card's own URL. The card gives the JSON-RPC endpoint, the protocol version, and whether the agent streams |
-| `url` | Or the JSON-RPC endpoint itself; then no card is read |
-| `version` | `"1.0"` (the default) or `"0.3"`. With a card, what the card says |
-| `streaming` | `true`: `SendStreamingMessage` (`message/stream` in 0.3), streamed as server-sent events. `false`: `SendMessage` (`message/send`). Default: what the card says, else `true` |
-| `headers` | Sent with every request, templated: credentials for the agent's security scheme. For a login first, use a [fixture](plugins.md#fixtures) |
-| `configuration`, `metadata` | Sent with each message as they are (`acceptedOutputModes`, `historyLength`, …) |
-
-**What a turn shows:**
-- **The reply:** the text of the agent's artifacts, or its message, or, when it stops to ask for
-  more (`input-required`, `auth-required`), its question.
-- **Thinking:** a working task's status messages, shown as progress.
-- **Errors:** a task that ends `failed`, `rejected` or `canceled` is an error with the agent's
-  reason. So is a JSON-RPC error, named by its code: `A2A error -32001 (TaskNotFound): …`.
-
-**The conversation is the agent's.** Each turn sends only its own message. The agent's `contextId`
-goes with the next turn, and so does its task while it's waiting for an answer, so a test's turns
-carry one task through `input-required` to `completed`. Pinned history (`history: pinned`) has
-nothing to send here.
-
-**Checking the result:** `on: response` checks see `last`: the agent's final Task (or Message) as
-it sent it, with its artifacts gathered. State names follow the agent's version:
-
-```yaml
-expect:
-  - { contains: "refund" }
-  - { path: $.last.status.state, equals: TASK_STATE_COMPLETED }      # 0.3: completed
-  - { path: "$.last.artifacts[*].name", contains: refund-receipt }
-```
-
-**Not supported yet:** the gRPC and HTTP+JSON bindings, files sent in a message, push
-notifications, and reading the authenticated extended card.
 
 ## Prices
 

@@ -19,10 +19,10 @@ import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { fileRefs, isPluginPath as isPath } from "../engine/files/dependencies.js";
-import { loadSuite, runningData, secretsNeeded } from "../engine/files/suite-file.js";
+import { loadSuite } from "../engine/files/suite-file.js";
+import { runningData, secretsNeeded } from "../engine/files/needs.js";
 import { folderPluginFiles, loadPlugins, pluginNames, suiteFixtureGives } from "../engine/plugins.js";
 import { joinPath } from "../engine/util.js";
-import { oldWay } from "../engine/vars.js";
 import { VERSION } from "./node-host.js";
 
 const RUNTIME = fileURLToPath(new URL("./pack-runtime.js", import.meta.url));
@@ -89,10 +89,9 @@ export async function pack(paths, values, { cliHost, findSuites, out, err, red, 
   }
 
   // Their plugins, each bundled with what it imports (and loaded first: one that doesn't load isn't
-  // packed; one that names a secret the old way, { secret: "NAME" }, is a problem where it does)
+  // packed)
   const plugins = {};   // pack path → { kind, name, version, files }
   const packages = {};  // a package a suite names → its pack path
-  const oldWays = [];   // [{ file, line, column, message }]
   const bundle = async (input, label) => {
     const b = await rolldown({ input, platform: "node", logLevel: "silent" });
     let chunk;
@@ -111,7 +110,6 @@ export async function pack(paths, values, { cliHost, findSuites, out, err, red, 
     const plugin = Object.values(loaded.plugins)[0];
     loaded.close();
     if (!plugin) throw new Error(loaded.problems[0]?.message ?? `the plugin ${entry} can't be loaded`);
-    for (const use of plugin.oldSecrets) oldWays.push({ file: plugin.file, line: use.line, column: use.column, message: oldWay("plugin", use.name) });
     const { code, files: count } = await bundle(input, `the plugin ${entry}`);
     packed.set(at, code);
     plugins[at] = { kind: plugin.meta.kind, name: plugin.meta.name, version: plugin.meta.version, files: count };
@@ -148,11 +146,6 @@ export async function pack(paths, values, { cliHost, findSuites, out, err, red, 
     return 2;
   } finally {
     folder.close();
-  }
-  if (oldWays.length) {
-    for (const p of oldWays) err(`${red(`${p.file}:${p.line}:${p.column}`)}  ${p.message}`);
-    err(red(`\n${plural(oldWays.length, "problem")}: nothing was packed.`));
-    return 2;
   }
 
   // The environment's values it uses ({{env.NAME}}: in the suites, their providers and their plugins)
