@@ -36,7 +36,7 @@
 //                   clicked, the window comes forward and the page is told its tag (hafen:notification)
 //   set_theme       {applied} → the window's background and native parts follow the page
 
-import { app, BrowserWindow, dialog, ipcMain, Menu, MessageChannelMain, nativeTheme, Notification, safeStorage, utilityProcess } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, Menu, MessageChannelMain, nativeTheme, Notification, safeStorage, screen, utilityProcess } from "electron";
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -267,9 +267,14 @@ function themeNow() {
 
 function createWindow() {
   const applied = themeNow();
+  // It opens filling the screen, every time: the whole work area (the menu bar and the Dock stay in
+  // view), maximized
+  const { x, y, width, height } = screen.getPrimaryDisplay().workArea;
   win = new BrowserWindow({
-    width: 1440,
-    height: 900,
+    x,
+    y,
+    width,
+    height,
     minWidth: 720,
     minHeight: 480,
     title: NAME,
@@ -282,6 +287,7 @@ function createWindow() {
   if (!existsSync(PAGE)) {
     dialog.showErrorBox(NAME, "The app isn't built yet: run `npm run build` in evals/ first.");
   }
+  win.maximize();
   win.loadFile(PAGE);
   win.webContents.setWindowOpenHandler(({ url }) => {
     if (/^https?:/.test(url)) import("electron").then(({ shell }) => shell.openExternal(url));
