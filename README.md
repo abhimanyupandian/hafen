@@ -16,10 +16,9 @@ your work, and plain files to commit.
 
 ## Why Hafen
 
-- **Any chat endpoint.** Plain HTTP (one JSON reply, SSE or NDJSON streams), WebSocket, agents that
-  speak the A2A protocol, or presets for OpenAI (Chat Completions and Responses), Anthropic Messages,
-  Gemini and Ollama. Anything else
-  takes a small plugin, and an endpoint behind a login takes a fixture that logs in first.
+- **Any chat endpoint.** Plain HTTP (one JSON reply, SSE or NDJSON streams), or presets for OpenAI
+  (Chat Completions and Responses), Anthropic Messages, Gemini and Ollama. Anything else takes a
+  small plugin, and an endpoint behind a login takes a fixture that logs in first.
 - **See what really happened.** Each reply shows its thinking, tool calls, text, timings and a badge
   for every check, live as it streams. The timeline draws every step of the run as a bar: requests,
   thinking, tool calls, the answer, judge calls.
@@ -127,9 +126,7 @@ check it), **Export** writes it (and `providers/acme.yml`) to your repository, a
 it is. `providers/acme.yml` says where to send it:
 `url: "{{env.base_url}}/chat"`, a value of the environment chosen (the app's scope over its Globals,
 or the `--env` files, the later winning; then the suite's own `environments:` block of that name), and `"Bearer {{secret.ACME_KEY}}"`, a secret the app
-keeps, or the CLI reads from a `--secret` file or the environment. (The old spellings, `${env:NAME}`,
-`{{scope.NAME}}` and a plugin's `{ secret: "NAME" }`, are problems now:
-[Old spellings](docs/test-files.md#old-spellings).)
+keeps, or the CLI reads from a `--secret` file or the environment.
 
 ## Quick start
 
@@ -168,7 +165,7 @@ npx hafen run tests/ --env tests/staging.env --secret staging.secret.env
 | [Getting started](docs/getting-started.md) | Install, explore an endpoint, save your first test, export it, run it from the command line |
 | [The app](docs/app.md) | The desktop app and the browser build: the layout, exploring, building tests, runs, the timeline, settings, importing and exporting suites, shortcuts |
 | [Test files](docs/test-files.md) | The suite format: tests, turns, variables, environments and secrets, data files, groups, validation |
-| [Providers](docs/providers.md) | Connecting to an endpoint: HTTP, streams, WebSocket, presets, A2A agents, logins, conversation history, thinking |
+| [Providers](docs/providers.md) | Connecting to an endpoint: HTTP, streams, presets, logins, conversation history, thinking |
 | [Checks and judges](docs/checks.md) | Every check, its operators, System One and LLM judges, confidence and unsure results |
 | [Plugins](docs/plugins.md) | Your own providers, checks, judges and login fixtures, in JavaScript, importing any file or package |
 | [Command line](docs/cli.md) | `run`, `validate`, `report`, `compare`, `pack`: options, environments and secrets, exit codes, output, reports |

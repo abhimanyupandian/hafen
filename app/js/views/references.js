@@ -1,37 +1,27 @@
 // What a text, or the open files, take from the scope chosen (contracts/test-file.md, Scopes):
 // {{env.NAME}} (one of its environment values) and {{secret.NAME}} or {{secrets.NAME}} (one of its
-// secrets). The old ways, {{scope.NAME}} and ${env:NAME}, are found too, only so a field can say what
-// to write instead: they don't count as using a name. For the fields' checks as they're typed, and
-// Settings → Environments' and Secrets' "used by the open files". Nothing's resolved here: the engine
-// does that.
+// secrets). For the fields' checks as they're typed, and Settings → Environments' and Secrets' "used
+// by the open files". Nothing's resolved here: the engine does that.
 
-const REF = /\{\{\s*(env|secrets?|scope)\.([A-Za-z_][\w.-]*)\s*\}\}|\$\{env:([A-Za-z_][A-Za-z0-9_]*)\}/g;
+const REF = /\{\{\s*(env|secrets?)\.([A-Za-z_][\w.-]*)\s*\}\}/g;
 
-// A text's references, in order: [{ kind: "env" | "secret" | "old", name, text }] (old, an old way:
-// way "env" for ${env:NAME}, "scope" for {{scope.NAME}})
+// A text's references, in order: [{ kind: "env" | "secret", name, text }]
 export function referencesIn(text) {
-  const out = [];
-  for (const m of String(text ?? "").matchAll(REF)) {
-    if (m[3]) out.push({ kind: "old", way: "env", name: m[3], text: m[0] });
-    else if (m[1] === "scope") out.push({ kind: "old", way: "scope", name: m[2], text: m[0] });
-    else out.push({ kind: m[1] === "secrets" ? "secret" : m[1], name: m[2], text: m[0] });
-  }
-  return out;
+  return [...String(text ?? "").matchAll(REF)].map((m) => ({ kind: m[1] === "secrets" ? "secret" : m[1], name: m[2], text: m[0] }));
 }
 
 // The presets' keys, which a provider of theirs uses when it names none (engine/providers/presets)
 const DEFAULT_KEYS = { "openai-chat": "OPENAI_API_KEY", "openai-responses": "OPENAI_API_KEY", "anthropic-messages": "ANTHROPIC_API_KEY", gemini: "GEMINI_API_KEY" };
 
 // The names the open suites and providers use: { env: Set (values), secret: Set (secrets, with the
-// presets' default keys) }. (An old way isn't a use: it's a problem in its file, until it's written anew.)
-// Read again only when the suites or the providers are other ones: every field and both Settings panes
+// presets' default keys) }. Read again only when the suites or the providers are other ones: every field and both Settings panes
 // ask for it as the app draws.
 let usedFor = { suites: null, providers: null, used: null };
 export function usedNames({ suites = [], providers = [] }) {
   if (usedFor.suites === suites && usedFor.providers === providers) return usedFor.used;
   const used = { env: new Set(), secret: new Set() };
   const scan = (value) => {
-    for (const r of referencesIn(JSON.stringify(value ?? {}))) if (r.kind !== "old") used[r.kind].add(r.name);
+    for (const r of referencesIn(JSON.stringify(value ?? {}))) used[r.kind].add(r.name);
   };
   const keyOf = (config) => { if (DEFAULT_KEYS[config?.kind] && config?.api_key === undefined) used.secret.add(DEFAULT_KEYS[config.kind]); };
   for (const s of suites) {

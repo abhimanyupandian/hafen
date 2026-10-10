@@ -27,12 +27,16 @@
 
 import { createConversation, conversationToTest } from "./explore.js";
 import { dependencies, freeName, retarget } from "./files/dependencies.js";
-import { editText, loadSuite, newSuiteText, parseText, SUITE_FILE } from "./files/suite-file.js";
+import { editText } from "./files/edit.js";
+import { loadSuite, newSuiteText, SUITE_FILE } from "./files/suite-file.js";
+import { parseText } from "./files/places.js";
 import { stringify as stringifyYaml } from "yaml";
 import { compareRuns } from "./compare.js";
 import { hideSeenSecrets } from "./redact.js";
 import { FIXTURE_PHASES, fixtureProblems, fixtureSets, fixturesOf, loadPlugins, PLUGIN_FILE, pluginNames } from "./plugins.js";
-import { environmentOf, preflight, runSuites } from "./runner.js";
+import { environmentOf } from "./environment.js";
+import { preflight } from "./preflight.js";
+import { runSuites } from "./runner.js";
 import { validateProviderSchema } from "./schema.js";
 import { describeKind } from "./providers/index.js";
 import { basename, freeTestName, iterate, joinPath, testId } from "./util.js";
@@ -351,7 +355,7 @@ export function servePort(port, makeHost, makePlace = null) {
     },
     // What stops a run of each suite before anything is sent (runner.js, preflight): what `hafen validate`
     // lists, so the app can show it before a run (a check type that isn't one, a plugin that isn't there,
-    // the environment's names, the old ways it writes things). Secrets aren't checked (each is taken as
+    // the environment's names). Secrets aren't checked (each is taken as
     // set, as validate without --env-check). { files, env, environment } → [{ file, problems: [{ file,
     // line, column, message }], warnings }] (warnings: the suite's)
     async preflight({ files, env, environment }) {

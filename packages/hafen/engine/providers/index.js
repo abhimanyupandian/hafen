@@ -1,14 +1,12 @@
-// A provider from its configuration (contracts/provider.md): a configured HTTP endpoint, a preset
-// (an API's, or an A2A agent's), or a plugin's.
+// A provider from its configuration (contracts/provider.md): a configured HTTP endpoint, an API's
+// preset, or a plugin's.
 
 import { httpProvider } from "./http.js";
-import { a2a } from "./presets/a2a.js";
 import { anthropicMessages } from "./presets/anthropic-messages.js";
 import { gemini } from "./presets/gemini.js";
 import { ollama } from "./presets/ollama.js";
 import { openaiChat } from "./presets/openai-chat.js";
 import { openaiResponses } from "./presets/openai-responses.js";
-import { websocketProvider } from "./websocket.js";
 import { pluginsWhere } from "../plugin-place.js";
 
 export const PRESETS = {
@@ -17,16 +15,14 @@ export const PRESETS = {
   "anthropic-messages": anthropicMessages,
   gemini,
   ollama,
-  a2a,
 };
 
-export const KINDS = ["http", "websocket", ...Object.keys(PRESETS)];
+export const KINDS = ["http", ...Object.keys(PRESETS)];
 
 // plugins: { [name]: a loaded provider plugin } (engine/plugins.js)
 export function createProvider(config, { plugins = {} } = {}) {
   if (!config || typeof config !== "object") throw new Error("A provider needs a configuration");
   if (config.kind === "http") return httpProvider(config);
-  if (config.kind === "websocket") return websocketProvider(config);
   if (PRESETS[config.kind]) return PRESETS[config.kind](config);
   if (typeof config.kind === "string" && config.kind.startsWith("plugin:")) {
     const name = config.kind.slice("plugin:".length).split("@")[0];
@@ -42,8 +38,5 @@ export function createProvider(config, { plugins = {} } = {}) {
 export function describeKind(config) {
   if (!config) return "";
   if (config.kind === "http") return config.stream && config.stream !== "none" ? config.stream : "json";
-  if (config.kind === "websocket") return "ws";
-  // (a plugin's: which one, plugin:acme)
-  if (config.kind?.startsWith("plugin:")) return config.kind;
   return config.kind;
 }

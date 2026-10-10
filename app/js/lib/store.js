@@ -22,7 +22,6 @@ export const KEYS = {
   scopes: "eval.scopes",                   // the app's scopes, by name, in the order they were made
   scope: (name) => `eval.scope.${name}`,   // a scope's environment values: {NAME: text} (one key a scope)
   globals: "eval.globals",                 // Globals' environment values, for every scope: {NAME: text} (in no scope)
-  root: "eval.root",                       // the folder the desktop app opened last, before it kept its own workspace: offered once to import from, then forgotten
   exports: "eval.exports",                 // where each suite was last exported to: {suite file: { path, name, ci, env, secret, at }}
   relay: "eval.relay",                     // the relay's address (browser build)
   secrets: "eval.secrets",                 // secret values by scope, "" for Globals' (browser build only; the desktop app keeps them encrypted)

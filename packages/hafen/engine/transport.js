@@ -1,13 +1,12 @@
 // How requests reach the network. The engine never calls fetch itself: each host gives it a
-// transport (research §5), and the wrappers here add retries and network simulation on top, the
-// same way everywhere.
+// transport (research §5), and withRetries adds retries on top, the same way everywhere.
 //
 //   transport.send(request, { signal }) → response
 //     request:  { url, method, headers: {name: value}, body?: string, redirect?: "follow" | "manual" | "error" }
 //     response: { status, headers: {lowercase name: value}, body: ReadableStream | AsyncIterable }
 //               (set-cookie: a list, one per cookie, where the platform lets it be read: not in a browser)
 
-import { abortError, iterate, sleep } from "./util.js";
+import { iterate, sleep } from "./util.js";
 
 const headersObject = (headers) => {
   const out = Object.fromEntries([...headers.entries()].map(([k, v]) => [k.toLowerCase(), v]));
@@ -71,61 +70,4 @@ function retryAfter(headers) {
   if (Number.isFinite(seconds)) return Math.min(seconds * 1000, 60000);
   const at = Date.parse(value);
   return Number.isFinite(at) ? Math.max(0, Math.min(at - Date.now(), 60000)) : null;
-}
-
-// Network simulation (research §18): a delay (with jitter) before the response, bandwidth limited by
-// pacing the body's chunks, and a share of responses cut off partway: any response, a stream or a
-// JSON reply in one chunk. drop_rate 1 drops every one, 0 none (random: for a test, a seeded one).
-export function withNetwork(transport, profile, { random = Math.random } = {}) {
-  if (!profile) return transport;
-  const { delay_ms = 0, jitter_ms = 0, kbps, drop_rate = 0 } = profile;
-  return {
-    async send(request, options = {}) {
-      const delay = delay_ms + (jitter_ms ? (random() * 2 - 1) * jitter_ms : 0);
-      if (delay > 0) await sleep(delay, options.signal);
-      const res = await transport.send(request, options);
-      const drop = drop_rate > 0 && random() < drop_rate;
-      if (!kbps && !drop) return res;
-      return { ...res, body: paced(res.body, { kbps, drop, signal: options.signal, random }) };
-    },
-  };
-}
-
-async function* paced(body, { kbps, drop, signal, random }) {
-  let sent = 0;
-  // A dropped response stops after a few chunks (none to three), and never gets to its last one: a
-  // reply in one chunk is cut off too
-  const cutAt = drop ? Math.floor(random() * 4) : Infinity;
-  let chunks = 0;
-  for await (const [chunk, last] of ahead(body, drop)) {
-    if (drop && (chunks++ >= cutAt || last)) throw dropped();
-    if (kbps) {
-      const bytes = typeof chunk === "string" ? chunk.length : chunk.byteLength;
-      sent += bytes;
-      await sleep(((bytes * 8) / (kbps * 1000)) * 1000, signal);
-    }
-    if (signal?.aborted) throw abortError();
-    yield chunk;
-  }
-  // (an empty body, dropped)
-  if (drop) throw dropped();
-}
-
-const dropped = () => Object.assign(new Error("The connection dropped (network simulation)"), { network: true });
-
-// A body's chunks as [chunk, last]. With look, each waits for the next, to know whether it's the last
-// (without, none waits, and none is said to be)
-async function* ahead(body, look) {
-  let held;
-  let holding = false;
-  for await (const chunk of iterate(body)) {
-    if (!look) {
-      yield [chunk, false];
-      continue;
-    }
-    if (holding) yield [held, false];
-    held = chunk;
-    holding = true;
-  }
-  if (holding) yield [held, true];
 }

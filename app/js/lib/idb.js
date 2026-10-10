@@ -5,9 +5,6 @@
 const NAME = "hafen";
 const VERSION = 2;
 const STORES = ["runs", "conversations"];
-// Before the app was Hafen its database was "hafen-eval": what that holds is copied over (a record
-// already here stays as it is), then it's deleted. Until that's done, it's tried again each time.
-export const LEGACY = "hafen-eval";
 let db = null;
 
 const done = (req) => new Promise((resolve, reject) => {
@@ -23,47 +20,8 @@ function openDatabase() {
   return done(req);
 }
 
-// The legacy database's records, copied in; true once it's gone. (Only where the browser can list
-// its databases: opening one to look would make it.)
-export async function carryOver(into) {
-  if (!indexedDB.databases || !(await indexedDB.databases()).some((d) => d.name === LEGACY)) return false;
-  const old = await done(indexedDB.open(LEGACY));
-  try {
-    for (const name of STORES.filter((s) => old.objectStoreNames.contains(s))) {
-      const records = await done(old.transaction(name, "readonly").objectStore(name).getAll());
-      if (!records.length) continue;
-      const tx = into.transaction(name, "readwrite");
-      const store = tx.objectStore(name);
-      for (const record of records) {
-        // add(): a record that's here already (copied before, or newer) is kept, not written over
-        store.add(record).onerror = (e) => { e.preventDefault(); e.stopPropagation(); };
-      }
-      await new Promise((resolve, reject) => {
-        tx.oncomplete = resolve;
-        tx.onerror = () => reject(tx.error);
-        tx.onabort = () => reject(tx.error);
-      });
-    }
-  } finally {
-    old.close();
-  }
-  await new Promise((resolve) => {
-    const req = indexedDB.deleteDatabase(LEGACY);
-    // (Open in another tab of the old app: it's deleted once that closes it)
-    req.onsuccess = req.onerror = req.onblocked = () => resolve();
-  });
-  return true;
-}
-
 function open() {
-  db ??= openDatabase().then(async (opened) => {
-    try {
-      await carryOver(opened);
-    } catch (err) {
-      console.error(`couldn't copy the runs and conversations kept before the app was Hafen: ${err.message}`);
-    }
-    return opened;
-  });
+  db ??= openDatabase();
   return db;
 }
 

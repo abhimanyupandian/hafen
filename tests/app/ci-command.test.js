@@ -5,7 +5,7 @@
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { ciCommand, ciFiles, written } from "../../app/js/lib/ci.js";
+import { ciCommand, ciFiles } from "../../app/js/lib/ci.js";
 
 const REPORTS = "--report junit:results/junit.xml --report run:results/run.hafen-run.json";
 
@@ -25,14 +25,6 @@ describe("Copy CI command", () => {
     assert.equal(ciCommand("smoke.hafen.yml", null, { env: "stage", globals: { a: "1" }, scopes: [{ name: "stage", values: { b: "2" } }], scopeSecrets: { "": ["SHARED"] }, exports: exported }), `npx hafen run "." ${REPORTS}`);
     // (only Globals' had values: that one file)
     assert.equal(ciCommand("smoke.hafen.yml", null, { env: null, exports: { "smoke.hafen.yml": { ci: ".", scope: "", env: ["globals.env"], secret: [] } } }), `npx hafen run "." --env globals.env ${REPORTS}`);
-  });
-
-  it("an export remembered before it listed its files (one file, or none) still names what it wrote", () => {
-    const state = { env: "stage", exports: { "a.hafen.yml": { ci: "out", env: "stage.env", secret: null } } };
-    assert.equal(ciCommand("a.hafen.yml", null, state), `npx hafen run "out" --env out/stage.env ${REPORTS}`);
-    assert.deepEqual(written(null), []);
-    assert.deepEqual(written("x.env"), ["x.env"]);
-    assert.deepEqual(written(["a", "b"]), ["a", "b"]);
   });
 
   it("quotes a path that needs it (the desktop app's whole path, outside a repository)", () => {

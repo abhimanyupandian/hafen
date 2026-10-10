@@ -29,14 +29,6 @@
 //   POST /auth/login           { user, password }: with the password qa-pass-1234, two cookies (Set-Cookie: sid, region)
 //                              and { csrf_token }; else 401
 //   POST /auth/chat            /json, behind that login: the sid cookie and x-csrf-token, or 401
-//   GET  /a2a/.well-known/agent-card.json    an A2A agent's card, version 1.0 (supportedInterfaces: /a2a/v1, streaming)
-//   POST /a2a/v1               that agent, JSON-RPC: SendMessage, SendStreamingMessage (needs A2A-Version: 1.0)
-//   GET  /a2a03/.well-known/agent-card.json  the same agent in version 0.3 (url: /a2a03, no streaming)
-//   POST /a2a03                JSON-RPC: message/send, message/stream
-//                              The agent: a refund (no task yet) → working ("Looking up order 4417"), then
-//                              input-required (it asks why); the answer (with that taskId) → an artifact in two
-//                              pieces, completed. "ping" → a Message (no task). "break" → failed. Else → an
-//                              artifact "You said: …", completed. contextId: the one sent, else a new one.
 //   POST /systemone/v1/systemone   a System One API: noul 0.91 when the state asks "why", else 0.12; questions
 //                                  whose instructions say UNSURE answer 0.55 (confidence 0.1); CONFIDENCE=0.42
 //                                  in them, that confidence (any type); a choice's NO-CONFIDENCE, none (and no
@@ -91,73 +83,6 @@ export function createMock({ delayMs = Number(process.env.MOCK_DELAY_MS ?? 0), c
     return n;
   };
 
-  // An A2A agent (https://a2a-protocol.org), the same in version 1.0 and 0.3: what it does, as
-  // version-free steps, written out in the version asked for
-  const a2aTasks = new Map();  // taskId → { contextId, state }
-  let a2aCount = 0;
-  const a2aAgent = async ({ url, req, res, body, sse }) => {
-    const host = `http://${req.headers.host}`;
-    if (req.method === "GET" && url.pathname === "/a2a/.well-known/agent-card.json") {
-      return json(res, 200, { name: "Mock refunds agent", version: "1.0.0", supportedInterfaces: [{ url: `${host}/a2a/v1`, protocolBinding: "JSONRPC", protocolVersion: "1.0" }], capabilities: { streaming: true }, defaultInputModes: ["text/plain"], defaultOutputModes: ["text/plain"], skills: [] });
-    }
-    if (req.method === "GET" && url.pathname === "/a2a03/.well-known/agent-card.json") {
-      return json(res, 200, { name: "Mock refunds agent", version: "1.0.0", protocolVersion: "0.3.0", url: `${host}/a2a03`, preferredTransport: "JSONRPC", capabilities: { streaming: false }, defaultInputModes: ["text/plain"], defaultOutputModes: ["text/plain"], skills: [] });
-    }
-    const v1 = url.pathname === "/a2a/v1";
-    if (!v1 && url.pathname !== "/a2a03") return json(res, 404, { error: { message: `no A2A agent at ${url.pathname}` } });
-    const id = body?.id ?? null;
-    const fail = (code, message) => json(res, 200, { jsonrpc: "2.0", id, error: { code, message } });
-    if (v1 && req.headers["a2a-version"] !== "1.0") return fail(-32009, `A2A-Version ${req.headers["a2a-version"] ?? "(none: 0.3)"} isn't supported here`);
-    const methods = v1 ? { SendMessage: false, SendStreamingMessage: true } : { "message/send": false, "message/stream": true };
-    if (!(body?.method in methods)) return fail(-32601, `no method ${body?.method}`);
-    const streaming = methods[body.method];
-    const m = body.params?.message ?? {};
-    const text = (m.parts ?? []).map((p) => p.text ?? "").join("");
-    // What the agent does: steps { task } { status, said? } { artifact, text, append? } { message }
-    let taskId = m.taskId;
-    let steps;
-    if (taskId && !a2aTasks.has(taskId)) return fail(-32001, `there's no task ${taskId}`);
-    const contextId = m.contextId ?? (taskId ? a2aTasks.get(taskId).contextId : `ctx-${++a2aCount}`);
-    if (/^ping$/i.test(text.trim())) steps = [{ message: "pong" }];
-    else if (taskId) steps = [{ status: "working", said: "Starting the refund" }, { artifact: "refund", text: "I've started a refund " }, { artifact: "refund", text: "for order 4417.", append: true }, { status: "completed" }];
-    else if (/refund/i.test(text)) steps = [{ task: true }, { status: "working", said: "Looking up order 4417" }, { status: "input-required", said: "Could you tell me why you want a refund for order 4417?" }];
-    else if (/break/i.test(text)) steps = [{ task: true }, { status: "failed", said: "the agent broke" }];
-    else steps = [{ task: true }, { artifact: "echo", text: `You said: ${text}` }, { status: "completed" }];
-    if (!steps[0].message) {
-      taskId ??= `task-${++a2aCount}`;
-      a2aTasks.set(taskId, { contextId, state: "submitted" });
-    }
-    // Written in the version asked for
-    const state = (st) => (v1 ? `TASK_STATE_${st.toUpperCase().replace(/-/g, "_")}` : st);
-    const msg = (t) => (v1 ? { messageId: `m-${++a2aCount}`, role: "ROLE_AGENT", parts: [{ text: t }], contextId, ...(taskId ? { taskId } : {}) }
-      : { kind: "message", messageId: `m-${++a2aCount}`, role: "agent", parts: [{ kind: "text", text: t }], contextId, ...(taskId ? { taskId } : {}) });
-    const status = (step) => ({ state: state(step.status), ...(step.said ? { message: msg(step.said) } : {}) });
-    const artifacts = new Map();
-    const task = () => ({ ...(v1 ? {} : { kind: "task" }), id: taskId, contextId, status: { state: state(a2aTasks.get(taskId).state) }, ...(artifacts.size ? { artifacts: [...artifacts.values()] } : {}) });
-    const events = [];
-    let last = null;
-    for (const step of steps) {
-      if (step.message) { last = msg(step.message); events.push(v1 ? { message: last } : last); continue; }
-      if (step.task) { events.push(v1 ? { task: task() } : task()); continue; }
-      if (step.status) {
-        a2aTasks.get(taskId).state = step.status;
-        last = status(step);
-        const ends = !["working", "submitted"].includes(step.status);
-        events.push(v1 ? { statusUpdate: { taskId, contextId, status: last } } : { kind: "status-update", taskId, contextId, status: last, final: ends });
-        continue;
-      }
-      const part = v1 ? { text: step.text } : { kind: "text", text: step.text };
-      const kept = artifacts.get(step.artifact);
-      artifacts.set(step.artifact, { artifactId: step.artifact, parts: [...(step.append && kept ? kept.parts : []), part] });
-      const artifact = { artifactId: step.artifact, parts: [part] };
-      events.push(v1 ? { artifactUpdate: { taskId, contextId, artifact, ...(step.append ? { append: true } : {}) } } : { kind: "artifact-update", taskId, contextId, artifact, ...(step.append ? { append: true } : {}) });
-    }
-    if (streaming) return sse(events.map((result) => ({ jsonrpc: "2.0", id, result })));
-    // SendMessage: the task as it ended (its last status, its artifacts), or the message
-    const result = steps[0].message ? (v1 ? { message: last } : last) : (() => { const t = task(); t.status = last ?? t.status; return v1 ? { task: t } : t; })();
-    return json(res, 200, { jsonrpc: "2.0", id, result });
-  };
-
   const server = createServer(async (req, res) => {
     const url = new URL(req.url, "http://mock");
     const cors = url.pathname !== "/nocors";
@@ -197,7 +122,6 @@ export function createMock({ delayMs = Number(process.env.MOCK_DELAY_MS ?? 0), c
       res.end();
     };
     const textEvents = (text) => chunksOf(text).map((delta) => ({ type: "text_delta", delta }));
-    if (url.pathname.startsWith("/a2a")) return a2aAgent({ url, req, res, body, sse });
     const usage = { type: "usage", input_tokens: message.split(/\s+/).length + 10, output_tokens: reply.split(/\s+/).length };
 
     switch (url.pathname) {
@@ -337,7 +261,7 @@ export function createMock({ delayMs = Number(process.env.MOCK_DELAY_MS ?? 0), c
         return json(res, 404, { error: { message: `the mock has no scenario at ${url.pathname}` } });
     }
   });
-  return { server, log, reset: () => { log.length = 0; rateCalls = 0; flakyCalls = 0; judgeCalls = 0; sessions.clear(); flakyCounts.clear(); a2aTasks.clear(); a2aCount = 0; } };
+  return { server, log, reset: () => { log.length = 0; rateCalls = 0; flakyCalls = 0; judgeCalls = 0; sessions.clear(); flakyCounts.clear(); } };
 }
 
 function json(res, status, body) {

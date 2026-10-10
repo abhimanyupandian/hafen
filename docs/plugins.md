@@ -61,11 +61,6 @@ keeps secrets out of its hands, and keeps its requests to its hosts, but it's no
   checked until it's used.
 - What it imports runs in the same worker, with the same limits: no environment variables.
 
-**Old spellings.** The old way to name a secret, `{ secret: "NAME", prefix: "Bearer " }` as a header's
-value or a value in a JSON body, is a problem now, at that line of the plugin's file (exit `2`,
-nothing sent):
-`plugins/acme-login.js:14:48  { secret: "ACME_PASSWORD" } is the old way to name a secret: write "{{secret.ACME_PASSWORD}}" in the request (a header's "Bearer {{secret.ACME_PASSWORD}}")`.
-One the plugin builds as it runs fails that request, saying the same.
 
 The guarantee is that a plugin never holds a secret's value through Hafen: it's never given one, and
 its requests have them filled in as they leave. The one exception is a fixture, which reads its
@@ -111,7 +106,7 @@ export default {
   hosts: ["chat.acme.example"],          // the only hosts its transport will reach
 
   // Send one turn. Yield events as they arrive; throw to report an error.
-  async *send({ message, history, variables, env, attachments, settings, transport, signal }) {
+  async *send({ message, history, variables, env, settings, transport, signal }) {
     const res = await transport.fetch({
       url: `https://chat.acme.example/v2/turn`,
       method: "POST",
@@ -135,9 +130,8 @@ export default {
 | `history` | Earlier turns: `{ user, reply, raw }[]`. `raw` is what the plugin yielded as `{ type: "raw", value }`, for replaying (a turn's thinking and tool calls, say: yield what you need back as `raw`) |
 | `variables` | The test's variables. Never secrets |
 | `env` | The chosen environment's values: those given, over the suite's `environments:` entry of its name. Never secrets |
-| `attachments` | `{ name, type, bytes }[]` |
 | `settings` | The provider's other fields from its file, with `{{name}}`s and `{{env.NAME}}`s filled in. A `{{secret.NAME}}` stays as written: put it in a request, and Hafen fills it in there |
-| `transport` | `fetch(request)` → `{ status, headers, body, json(), text(), lines(), sse() }`, and `websocket(url, options)` |
+| `transport` | `fetch(request)` → `{ status, headers, body, json(), text(), lines(), sse() }` |
 | `signal` | Aborts when the run stops or the turn times out |
 
 It yields events: `text`, `thinking`, `tool_call`, `tool_result`, `usage`, `done`, `error`, and

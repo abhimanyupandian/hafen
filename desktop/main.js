@@ -12,8 +12,6 @@
 //   import_pick     {folder} → ask for suite files (or, folder, a folder of them) to import: { place,
 //                   name, files } (place: the engine's id for the folder they're in; files: the suite
 //                   files picked, from it; none for a folder), or null
-//   import_legacy   {path} → the folder the app opened before it kept its own workspace, offered once
-//                   to import from: { place, name }, or null (it isn't there, or was offered already)
 //   export_pick     → ask for a folder to export to: { place, path, name, ci (its path from its git
 //                   repository's top, else the whole path: what CI runs) }, or null
 //   secrets_state   → what's kept, never a value: { names: {env: [NAME…]} (the ones that can be read;
@@ -40,9 +38,8 @@
 
 import { app, BrowserWindow, dialog, ipcMain, Menu, MessageChannelMain, nativeTheme, Notification, safeStorage, utilityProcess } from "electron";
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
-import { basename, dirname, isAbsolute, join, relative, sep } from "node:path";
+import { basename, dirname, join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
-import { carryOver, LEGACY_FOLDER } from "./carry-over.js";
 // (a secret's name: the engine's, a .env file's and {{secret.NAME}}'s, as the page's is)
 import { envValueText, NAME as SECRET_NAME, NAME_RULE } from "hafen/engine/env-file.js";
 
@@ -65,16 +62,6 @@ if (process.platform === "win32") app.setAppUserModelId("dev.hafen.lab");
 // run doesn't meet the app you have open
 if (process.env.HAFEN_LAB_DATA) app.setPath("userData", process.env.HAFEN_LAB_DATA);
 if (!app.requestSingleInstanceLock()) app.quit();
-else {
-  // Once: what the app kept when it was "hafen eval" (carry-over.js). HAFEN_LAB_CARRY_FROM names the
-  // folder to copy from instead (a test's); a test's own data folder copies nothing otherwise.
-  const from = process.env.HAFEN_LAB_CARRY_FROM ?? (process.env.HAFEN_LAB_DATA ? null : join(app.getPath("appData"), LEGACY_FOLDER));
-  try {
-    carryOver(from, app.getPath("userData"));
-  } catch (err) {
-    console.error(`couldn't copy what the app kept before it was Hafen (${err.message}): it's tried again next time`);
-  }
-}
 
 let win = null;
 let engine = null;
@@ -116,8 +103,6 @@ function ciPath(dir) {
   }
 }
 
-// The folder opened before the app kept its own workspace is offered once: done, this says so
-const legacyMark = () => join(app.getPath("userData"), "legacy-folder.json");
 
 /* ---------- secrets: encrypted in the data folder ---------- */
 
@@ -320,17 +305,6 @@ const COMMANDS = {
     if (result.canceled || !result.filePaths.length) return null;
     const root = folder ? result.filePaths[0] : commonFolder(result.filePaths);
     return { place: addPlace(root, false), name: basename(root), files: folder ? null : result.filePaths.map((f) => relative(root, f).split(sep).join("/")) };
-  },
-  // The folder opened before (the page remembered it), once
-  import_legacy({ path }) {
-    if (existsSync(legacyMark())) return null;
-    writeFileSync(legacyMark(), `${JSON.stringify({ path, at: new Date().toISOString() }, null, 2)}\n`);
-    try {
-      if (!path || !isAbsolute(path) || !statSync(path).isDirectory()) return null;
-    } catch {
-      return null;
-    }
-    return { place: addPlace(path, false), name: basename(path) };
   },
   async export_pick() {
     const result = await dialog.showOpenDialog(win, { properties: ["openDirectory", "createDirectory"], title: "Export to a folder", buttonLabel: "Export here" });

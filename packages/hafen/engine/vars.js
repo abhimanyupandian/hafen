@@ -11,9 +11,6 @@
 //                   CLI's --secret files, then its process environment). Every value resolved this way
 //                   is remembered, so it can be redacted wherever it appears.
 //
-// The old ways to write them, ${env:NAME} and {{scope.NAME}}, are problems in a file (oldWay says what
-// to write instead: files/suite-file.js), and nothing fills them in: met as a run goes, one is an error.
-//
 // A string that is exactly one {{name}} becomes that value with its type (a number stays a number,
 // {{messages}} stays a list); inside other text it's text. A name that can't be found is an error
 // (a setup error, before anything is sent): nothing is ever sent as written.
@@ -29,11 +26,8 @@ import { isObject } from "./util.js";
 
 const VAR = /\{\{\s*([A-Za-z_][\w.-]*)\s*\}\}/g;
 const WHOLE = /^\{\{\s*([A-Za-z_][\w.-]*)\s*\}\}$/;
-// The old ways: ${env:NAME} (a secret) and {{scope.NAME}} (a value of the environment, or a secret)
-export const OLD_SECRET = /\$\{env:([A-Za-z_][A-Za-z0-9_]*)\}/g;
-const OLD_SCOPE = /^scope\.(.+)$/;
-// What trusted text has filled in: {{env.…}}, {{secret.…}}, {{secrets.…}} (and the old ways, refused)
-const TRUSTED = /\$\{env:([A-Za-z_][A-Za-z0-9_]*)\}|\{\{\s*((?:env|secrets?|scope)\.[\w.-]+)\s*\}\}/g;
+// What trusted text has filled in: {{env.…}}, {{secret.…}}, {{secrets.…}}
+const TRUSTED = /\{\{\s*((?:env|secrets?)\.[\w.-]+)\s*\}\}/g;
 // What a plugin's request has filled in as it leaves (engine/plugins.js): {{secret.…}} and {{env.…}}
 const REQUEST = /\{\{\s*((?:env|secrets?)\.[\w.-]+)\s*\}\}/g;
 const REF = /^(env|secrets?)\.(.+)$/;
@@ -48,22 +42,6 @@ export function refOf(name) {
 // What's wrong with a {{secret.NAME}} or {{env.NAME}} whose NAME isn't a name (env-file.js, NAME:
 // {{secret.1KEY}}), or "": a problem where a file writes it, and never looked up
 export const badName = (ref) => (ref && !NAME.test(ref.name) ? `{{${ref.kind}.${ref.name}}}: "${ref.name}" isn't a name (${NAME_RULE})` : "");
-
-// What an old way to write a secret or an environment's value is now a problem with: the new way.
-// kind: "env" (${env:NAME}), "scope" ({{scope.NAME}}) or "plugin" (a plugin's { secret: "NAME" })
-export function oldWay(kind, name) {
-  if (kind === "env") return `\${env:${name}} is the old way to write a secret: write {{secret.${name}}}`;
-  if (kind === "scope") return `{{scope.${name}}} is the old way: write {{env.${name}}} (a value of the environment) or {{secret.${name}}} (a secret)`;
-  return `{ secret: "${name}" } is the old way to name a secret: write "{{secret.${name}}}" in the request (a header's "Bearer {{secret.${name}}}")`;
-}
-// (met as a run goes: nothing fills it in, so nothing is sent as written)
-const refuse = (kind, name) => new Error(oldWay(kind, name));
-// Text with an old way's ${env:NAME} in it: refused
-const ownText = (text) => {
-  const old = [...text.matchAll(OLD_SECRET)][0];
-  if (old) throw refuse("env", old[1]);
-  return text;
-};
 
 // Why a name can't be found. kind: "variable" ({{name}}), "secret" ({{secret.NAME}}: where, the
 // scope's name) or "environment" ({{env.NAME}}: where, the environment's name, "" one with none, null
@@ -157,8 +135,6 @@ export function createScope({ layers = [], secrets = () => undefined, used = new
   const lookup = (name) => {
     const ref = refOf(name);
     if (ref) return refHit(ref);
-    const old = OLD_SCOPE.exec(name);
-    if (old) throw refuse("scope", old[1]);
     for (const layer of layers) {
       if (!layer) continue;
       if (Object.prototype.hasOwnProperty.call(layer, name)) return { found: true, value: layer[name], trusted: trust.has(layer) };
@@ -185,7 +161,6 @@ export function createScope({ layers = [], secrets = () => undefined, used = new
   // value has its own filled in too (`seen`: the ones on the way, so one that uses itself is said)
   const refText = (name, seen) => {
     const ref = refOf(name);
-    if (!ref) throw refuse("scope", name.slice("scope.".length));
     const hit = refHit(ref);
     if (!hit.found) throw missingRef(ref);
     if (!hit.trusted) return typeof hit.value === "string" ? hit.value : JSON.stringify(hit.value);
@@ -194,12 +169,9 @@ export function createScope({ layers = [], secrets = () => undefined, used = new
     return typeof value === "string" ? value : JSON.stringify(value);
   };
   // Trusted text: its {{env.…}}s and {{secret.…}}s filled in, in one pass (what one brings isn't
-  // looked at again: a secret's value is no template); an old way's ${env:…} or {{scope.…}}, refused.
-  // Its other {{name}}s stay as they are: a value isn't a template.
-  const fill = (text, seen = []) => text.replace(TRUSTED, (_, old, name) => {
-    if (old) throw refuse("env", old);
-    return refText(name, seen);
-  });
+  // looked at again: a secret's value is no template). Its other {{name}}s stay as they are: a value
+  // isn't a template.
+  const fill = (text, seen = []) => text.replace(TRUSTED, (_, name) => refText(name, seen));
   const fillValue = (value, seen = []) => {
     if (typeof value === "string") return fill(value, seen);
     if (Array.isArray(value)) return value.map((v) => fillValue(v, seen));
@@ -214,19 +186,14 @@ export function createScope({ layers = [], secrets = () => undefined, used = new
     return hit.trusted ? fillValue(hit.value, refOf(name) ? [name] : []) : hit.value;
   };
   // Resolve one string: each {{name}} with its value (whose {{env.…}} and {{secret.…}} are filled in
-  // only if a file wrote it). An old way's ${env:…} in its own text is refused.
+  // only if a file wrote it)
   const string = (text, extra) => {
     const whole = text.match(WHOLE);
     if (whole) return valueOf(whole[1], extra);
-    let out = "";
-    let last = 0;
-    for (const m of text.matchAll(VAR)) {
-      out += ownText(text.slice(last, m.index));
-      const value = valueOf(m[1], extra);
-      out += typeof value === "string" ? value : JSON.stringify(value);
-      last = m.index + m[0].length;
-    }
-    return out + ownText(text.slice(last));
+    return text.replace(VAR, (_, name) => {
+      const value = valueOf(name, extra);
+      return typeof value === "string" ? value : JSON.stringify(value);
+    });
   };
 
   // Resolve every string in a value (deeply). `extra`: variables for this call only.
@@ -241,7 +208,7 @@ export function createScope({ layers = [], secrets = () => undefined, used = new
   // filled from the variables, and {{env.NAME}} from the environment (one it hasn't is an error, as
   // anywhere); a {{secret.…}} stays as written (filled in when a request of the plugin's has it:
   // engine/plugins.js), in the text and in what a {{name}} brings; any other name not found stays as
-  // it's written. (An old way's {{scope.…}} is refused.) keep: an {{env.NAME}} the environment hasn't
+  // it's written. keep: an {{env.NAME}} the environment hasn't
   // stays as written too (a fixture's settings: one a fixture sets with env.set isn't set before it's
   // run, and the check before a run has said already of any that nothing sets).
   const plain = (value, { keep = false } = {}) => {
@@ -347,13 +314,12 @@ export function createScope({ layers = [], secrets = () => undefined, used = new
     // (what it adds isn't a file's: an extraction, a row, the run's own values)
     with: (layer) => createScope({ layers: [layer, ...layers], secrets, used, environment: chosen, trusted: trust, secretsFrom, overlay }),
     environment: chosen,
-    // A message typed in a conversation: its {{env.…}} and {{secret.…}} filled in (an old way's
-    // {{scope.…}} refused), its other {{…}} as they are (sent as typed)
-    typed: (text) => String(text).replace(TYPED, (_, name) => refText(name, [])),
+    // A message typed in a conversation: its {{env.…}} and {{secret.…}} filled in, its other {{…}} as
+    // they are (sent as typed)
+    typed: (text) => String(text).replace(TRUSTED, (_, name) => refText(name, [])),
   };
 }
 
-const TYPED = /\{\{\s*((?:env|secrets?|scope)\.[\w.-]+)\s*\}\}/g;
 // (a {{secret.…}} or {{env.…}} in a text)
 const PLACEHOLDER = /\{\{\s*(?:env|secrets?)\./;
 

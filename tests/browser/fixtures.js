@@ -196,3 +196,20 @@ export async function openYaml(page) {
   if ((await toggle.getAttribute("aria-expanded")) === "false") await toggle.click();
   await expect(page.locator("#providerYaml")).toBeVisible();
 }
+
+// A colour token as the page computes it (rgb(…))
+export const token = (page, name) => page.evaluate((name) => {
+  const probe = document.createElement("span");
+  probe.style.color = `var(${name})`;
+  document.body.append(probe);
+  const color = getComputedStyle(probe).color;
+  probe.remove();
+  return color;
+}, name);
+// How an element is drawn: one of its computed styles, and its colour
+export const style = (locator, prop) => locator.evaluate((el, prop) => getComputedStyle(el)[prop], prop);
+export const colour = (locator) => locator.evaluate((el) => getComputedStyle(el).color);
+// The toast that says `text`
+export const toast = (page, text) => page.locator(".toast", { hasText: text });
+// What the mock endpoint has been sent, in order
+export const mockLog = async (servers) => (await fetch(`${servers.mock.url}/_log`)).json();

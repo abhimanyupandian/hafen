@@ -106,10 +106,6 @@ environment variables and `--var`s as the run, and a suite that passes it isn't 
 Without `--env-check`, `validate` checks every `{{env.NAME}}` (against `--env`'s file, then the
 suite's `environments:`), but not the secrets.
 
-**Old spellings.** `${env:NAME}`, `{{scope.NAME}}` and a plugin's `{ secret: "NAME" }` stop the run
-too (exit `2`), each at its line, saying what to write instead: `{{secret.NAME}}`, or `{{env.NAME}}`
-for a value of the environment ([Old spellings](test-files.md#old-spellings)). An
-`environments/<name>.yml` file isn't read: give the values with `--env <file>`.
 
 ## GitHub Actions
 

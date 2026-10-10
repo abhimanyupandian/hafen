@@ -29,13 +29,13 @@ app's.
 
 | Path | What |
 |---|---|
-| `packages/hafen/engine/` | Everything about running tests: files and schemas, variables, JSONPath (RFC 9535, json-p3), transports and retries, stream parsers, providers and presets, checks, judges, the runner, spans and metrics, redaction, reports. Runs unchanged in Node, a Web Worker and Electron's utility process |
+| `packages/hafen/engine/` | Everything about running tests, with no platform code (a host passes in files, secrets and a transport). Runs unchanged in Node, a Web Worker and Electron's utility process. The run, in order: `preflight.js` (what stops a run before anything is sent), `runner.js` (suites → tests → repeats and data rows → turns), `turn.js` (one message sent and its stream collected), `providers/` (HTTP and the presets), `checks/run.js` (a turn's checks) and `judges/`. Around them: `files/` (loading, `validate.js`, `needs.js`, `edit.js`, the schemas), `vars.js` (variables, environments, secrets), `environment.js`, `redact.js`, `spans.js`, `reports/` |
 | `packages/hafen/cli/` | The command-line runner (`hafen`, `cli/hafen.js`), its Node host, and `pack` |
 | `packages/hafen/tests/` | The package's tests (`node --test`): `engine/`, `cli/`, and `fixtures/` (the mock endpoint, suites and providers for it, the JSONPath compliance suite) |
-| `app/` | The UI (React). `design/` is Hafen's design system and its additions (check badge, JSON tree, timeline, charts); `views/`; `state.js`; `transfer.js` imports and exports suites; `host.js` connects to the engine; `worker.js` runs it in a browser, on the app's workspace in the browser's private file system |
+| `app/` | The UI (React). `design/` is Hafen's design system and its additions (check badge, JSON tree, timeline, charts); `views/` (the panel's views in `views/panel/`); `state.js` and `state/` (what the app shows and does: scopes, suites, conversations, runs); `transfer.js` imports and exports suites; `host.js` connects to the engine; `worker.js` runs it in a browser, on the app's workspace in the browser's private file system |
 | `desktop/` | Electron: the window, the engine's utility process, the app's workspace (`<data folder>/workspace`), the dialogs that pick what to import and where to export, and secrets |
 | `server/` | The browser build's server (`npm run serve`, `serve.js`) and its relay (`relay.js`), which calls only the endpoints it's allowed |
-| `tests/` | The app's tests: `app/` (`node --test`: the app's helpers, the page's bundle, design parity, the relay and `npm run serve`, the desktop app's data carried over); `browser/` and `visual/` (Playwright) |
+| `tests/` | The app's tests: `app/` (`node --test`: the app's helpers, the page's bundle, the relay and `npm run serve`); `browser/` (Playwright) |
 | `spec/` | The product spec: user stories, data model, contracts, research, and the design system |
 
 ## Tests
@@ -43,7 +43,6 @@ app's.
 ```sh
 npm test               # the package's tests (npm test -w hafen), then the app's (tests/app/)
 npm run test:browser   # the app end to end in Chromium, and the desktop app in Electron
-npm run test:visual    # the design-system gallery against its baseline screenshots
 npm test -w hafen      # only the package's: engine and CLI
 ```
 

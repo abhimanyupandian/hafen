@@ -25,6 +25,9 @@ export default defineConfig({
     outDir: resolve(app, "dist"),
     emptyOutDir: true,
     target: "es2022",
-    rollupOptions: { input: { index: resolve(app, "index.html"), gallery: resolve(app, "gallery.html") } },
+    // One page, one bundle (about 640 kB: React and the app's views), loaded from disk by the desktop
+    // app. The engine's validators (Ajv, json-p3) stay out of it: tests/app/page-bundle.test.js
+    chunkSizeWarningLimit: 800,
+    rollupOptions: { input: { index: resolve(app, "index.html") } },
   },
 });
