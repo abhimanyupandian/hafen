@@ -301,7 +301,7 @@ test.describe("the panels, and the timeline fitting", () => {
     expect(await x.evaluate((el) => getComputedStyle(el).opacity)).toBe("1");
     await x.click();
     await x.click();
-    await expect.poll(async () => parse(await fileText(page, SUITE)).tests[0].turns[0].expect.length).toBe(3);
+    await expect.poll(async () => parse(await fileText(page, SUITE))?.tests[0].turns[0].expect.length).toBe(3);
   });
 
   test("the timeline fits without sideways scrolling, and the wheel over its labels scrolls it", async ({ app: { page } }) => {
@@ -313,7 +313,9 @@ test.describe("the panels, and the timeline fitting", () => {
     // The chart's width reaches the scale a frame after it changes (a ResizeObserver): it settles there
     await expect.poll(() => chart.evaluate((el) => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(0);
     expect(await chart.evaluate((el) => el.scrollHeight > el.clientHeight)).toBe(true);
-    expect(await chart.evaluate((el) => el.scrollTop)).toBe(0);
+    // (from the top: while the run went on, it may have scrolled to follow it)
+    await chart.evaluate((el) => { el.scrollTop = 0; });
+    await expect.poll(() => chart.evaluate((el) => el.scrollTop)).toBe(0);
     await page.locator(".timeline-labels").hover();
     await page.mouse.wheel(0, 120);
     await expect.poll(() => chart.evaluate((el) => el.scrollTop)).toBeGreaterThan(0);
@@ -364,6 +366,7 @@ test.describe("spacing, placeholders, and small screens", () => {
     await page.click("#testRun");
     await expect(page.locator("#status")).toContainText("failed 0/1");
     await page.locator("#runList .list-open").first().click();
+    await expect(page.locator("#runFacts")).toBeVisible();
     const [body, facts] = [await box(page.locator("#panel .panel-body")), await box(page.locator("#runFacts"))];
     expect(Math.round(facts.y - body.y)).toBe(12);
   });
@@ -393,7 +396,9 @@ test.describe("spacing, placeholders, and small screens", () => {
       expect(await page.locator("#turnNotRun").evaluate((el) => getComputedStyle(el).textAlign)).toBe("center");
       await page.click("#openSettings");
       await page.click("#settings-tab-runs");
-      expect(await page.locator("#settingsEmpty").evaluate((el) => getComputedStyle(el).textAlign)).toBe("center");
+      // (the placeholder's drawn again each time the list is read: one that's gone has no style)
+      await expect(page.locator("#settingsTitle")).toHaveText("Runs");
+      await expect.poll(() => page.locator("#settingsEmpty").evaluate((el) => getComputedStyle(el).textAlign)).toBe("center");
     });
   });
 

@@ -2,7 +2,7 @@
 // name, only the opened folder read, a data row's name, and what suites use (Import and Export).
 
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -400,6 +400,17 @@ ${test}    turns: [ { user: hi, expect: ${expect} } ]
       assert.ok(suite.errors.some((e) => /isn't in the opened folder/.test(e.message)), JSON.stringify(suite.errors));
       await runSuites({ suites: [suite], host, options: {} });
       assert.equal(transport.requests.length, 0);
+    });
+
+    // (a short name on Windows, C:\Users\RUNNER~1, is the same; a disk that minds case has no other
+    // spelling to try)
+    it("a folder spelled otherwise than the disk has it (another case): its files are in it", async (t) => {
+      const spelled = join(root, "FOLDER");
+      if (!existsSync(spelled)) return t.skip("this disk minds case");
+      const host = nodeHost({ root: spelled });
+      assert.equal(await host.files.exists("data/rows.csv"), true);
+      assert.equal(await host.files.read("data/rows.csv"), "q\nhi\n");
+      await assert.rejects(host.files.read("data/link.csv"), /isn't in the opened folder/);
     });
 
     it("a folder the command line names is read too", async () => {

@@ -67,18 +67,18 @@ npm run icons          # icon.png, icon.icns and icon.ico from desktop/icons/sou
 
 ### Releasing
 
-A version tag builds all three on GitHub and publishes them as a release
+A version tag builds the macOS app on GitHub (Apple silicon and Intel) and publishes it as a release
 (`.github/workflows/release.yml`, its notes from `.github/release-notes.md`):
 
 ```sh
 git tag v0.0.1 && git push origin v0.0.1
 ```
 
-**Actions → Release → Run workflow** builds them without a release, to try a change first. The tests run on
-every push to `master` and every pull request (`.github/workflows/test.yml`): the unit tests on
-macOS, Windows and Linux, the browser tests on Linux. The builds
-aren't signed yet: the release notes say how to open them anyway (macOS: `xattr -cr`; Windows: More
-info → Run anyway). A version 0.x release is marked as a pre-release.
+**Actions → Release → Run workflow** builds it without a release, to try a change first. The tests
+run on every push to `master` and every pull request (`.github/workflows/test.yml`): the unit tests and
+the browser tests, on macOS. Windows and Linux builds are made by `npm run app:build` on those systems,
+not on GitHub for now. The build isn't signed yet: the release notes say how to open it anyway (`xattr
+-cr`). A version 0.x release is marked as a pre-release.
 
 ## Screenshots
 

@@ -9,7 +9,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { after, before, describe, it } from "node:test";
 import { startMock } from "../helpers.js";
-import { CLI, JSON_PROVIDER as PROVIDER, cli, dirs, mock, project, readJSON, said, suite, useMock } from "./helpers.js";
+import { CLI, JSON_PROVIDER as PROVIDER, NO_SIGNALS, cli, dirs, mock, project, readJSON, said, suite, useMock } from "./helpers.js";
 
 useMock();
 
@@ -190,7 +190,7 @@ ${expect.map((e) => `          - ${e}`).join("\n")}
       assert.match(r.stdout, /stopped: the run's cost reached the limit/);
     });
 
-    it("exits 3 when cancelled, writing what ran", async () => {
+    it("exits 3 when cancelled, writing what ran", { skip: NO_SIGNALS }, async () => {
       const r = await cli(["run", "slow.hafen.yml", "--var", `base_url=${mock.url}/slow?ms=300&x=`, "--report", "run:out/cancel.json"], { signalAfterMs: 1200 });
       assert.equal(r.code, 3, r.stdout + r.stderr);
       const run = JSON.parse(await readFile(join(dir, "out/cancel.json"), "utf8"));

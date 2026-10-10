@@ -8,7 +8,7 @@ import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { describe, it } from "node:test";
-import { CLI, JSON_PROVIDER, cli, dirs, mock, project, readJSON, said, useMock } from "./helpers.js";
+import { CLI, JSON_PROVIDER, NO_SIGNALS, cli, dirs, mock, project, readJSON, said, useMock } from "./helpers.js";
 
 useMock();
 
@@ -265,7 +265,7 @@ response: { text: $.data.reply }
     assert.equal(mock.log.filter((x) => x.path === "/slow").length, 0);
   });
 
-  it("a run cancelled part way (SIGTERM): exit 3, and the logout sent before it exits", async () => {
+  it("a run cancelled part way (SIGTERM): exit 3, and the logout sent before it exits", { skip: NO_SIGNALS }, async () => {
     const dir = await project(files());
     const r = await cli(dir, ["run", "--report", "run:out/run.json"], { signalAfterMs: 1500 });
     assert.equal(r.code, 3, said(r));

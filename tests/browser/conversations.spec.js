@@ -152,7 +152,7 @@ response:
     // Saved as a test, from what it has now
     await page.fill("#saveName", "without two");
     await page.click("#saveTest");
-    await expect.poll(async () => parse(await fileText(page, "tests.hafen.yml")).tests[0].turns.map((t) => t.user).join("|")).toBe("one|three|four");
+    await expect.poll(async () => parse(await fileText(page, "tests.hafen.yml"))?.tests[0].turns.map((t) => t.user).join("|")).toBe("one|three|four");
   });
 
   test("a conversation opened again saves as a test before anything's sent", async ({ app: { page } }) => {
@@ -161,7 +161,7 @@ response:
     await page.locator("#conversationList .list-open", { hasText: "kept one" }).click();
     await page.fill("#saveName", "from a kept conversation");
     await page.click("#saveTest");
-    await expect.poll(async () => parse(await fileText(page, "tests.hafen.yml")).tests[0].turns[0].user).toBe("kept one");
+    await expect.poll(async () => parse(await fileText(page, "tests.hafen.yml"))?.tests[0].turns[0].user).toBe("kept one");
   });
 
   test("a test's turn deleted from the chat", async ({ app: { page } }) => {
@@ -169,7 +169,7 @@ response:
     await page.locator("#turn-0").hover();
     await page.click("#turn-0-delete");
     await page.click("#turn-0-delete");
-    await expect.poll(async () => parse(await fileText(page, "smoke.hafen.yml")).tests[0].turns.map((t) => t.user).join("|")).toBe("It arrived broken");
+    await expect.poll(async () => parse(await fileText(page, "smoke.hafen.yml"))?.tests[0].turns.map((t) => t.user).join("|")).toBe("It arrived broken");
     await expect(page.locator("#thread .turn-group")).toHaveCount(1);
     await expect(page.locator("#turn-0-user")).toContainText("It arrived broken");
     expect(await fileText(page, "smoke.hafen.yml")).toContain("# fails by design");

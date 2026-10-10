@@ -278,7 +278,7 @@ fixtures:
     await page.fill("#providerYaml", `${before}timeout_ms: 9000\n`);
     await page.keyboard.press("Escape");
     await expect(page.locator("#settingsModal")).toHaveCount(0);
-    await expect.poll(async () => parse(await fileText(page, "providers/mock-json.yml")).timeout_ms).toBe(9000);
+    await expect.poll(async () => parse(await fileText(page, "providers/mock-json.yml"))?.timeout_ms).toBe(9000);
   });
 
   test("a provider's kind is its file's (kind: http), with how it reads its reply", async ({ app: { page } }) => {

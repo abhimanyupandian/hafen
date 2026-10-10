@@ -757,10 +757,14 @@ tests:
         await chooseScope(page, "prod");
         await runTest(page);
         expect(await lastSent(mock.url)).toEqual(sentIn("prod", "hello prod-team"));
-        // Kept encrypted: the file has no value as it was typed
+        // Kept encrypted: the file has no value as it was typed. (Where the system offers no encryption,
+        // Linux with no keyring as in CI, each is kept marked unencrypted.)
         const stored = await readFile(join(data, "secrets.json"), "utf8");
         expect(Object.keys(JSON.parse(stored)).sort()).toEqual(["", "prod", "stage"]);
-        for (const value of ["k-stage", "k-prod", "a-stage", "a-every"]) expect(stored).not.toContain(value);
+        const encrypted = await app.evaluate(({ safeStorage }) => safeStorage.isEncryptionAvailable());
+        const kept = Object.values(JSON.parse(stored)).flatMap((names) => Object.values(names));
+        expect(kept.every((v) => v.encrypted === encrypted)).toBe(true);
+        if (encrypted) for (const value of ["k-stage", "k-prod", "a-stage", "a-every"]) expect(stored).not.toContain(value);
         // The values, in the window's storage, one key a scope
         expect(await page.evaluate(() => [localStorage.getItem("eval.scopes"), JSON.parse(localStorage.getItem("eval.scope.prod"))])).toEqual(['["stage","prod"]', { base_url: mock.url, who: "prod-team" }]);
         // Exported only after saying it's plain text: the main process writes the file (asked where)

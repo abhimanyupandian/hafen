@@ -65,6 +65,11 @@ export function cli(dir, args, { env = {}, signalAfterMs, signal = "SIGTERM" } =
     child.on("close", (code) => resolve({ code, stdout, stderr, all: stdout + stderr }));
   });
 }
+// For a test that stops the command line with a signal: skipped on Windows, which can't send another
+// process one (kill() ends it at once, so what the command line does when stopped never runs). Ctrl+C
+// in a Windows terminal does reach it, as SIGINT.
+export const NO_SIGNALS = process.platform === "win32" && "Windows can't send another process a signal";
+
 export const readJSON = async (dir, path) => JSON.parse(await readFile(join(dir, path), "utf8"));
 export const said = (r) => `exit ${r.code}\n${r.stdout}\n${r.stderr}`;
 

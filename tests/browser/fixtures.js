@@ -136,7 +136,7 @@ export async function addScope(page, name, values = {}) {
   if (await page.locator("#envChoose").count()) await page.click("#envChoose");
   await expect(page.locator("#envChosen")).toHaveText("chosen now");
   await page.click("#settingsClose");
-  await page.locator("#settingsModal[open]").waitFor({ state: "detached" }).catch(() => {});
+  await expect(page.locator("#settingsModal")).toHaveCount(0);  // (gone once it's closed: the open attribute goes a moment before)
   await page.locator("#scopeButton .scope-name", { hasText: name }).waitFor();
 }
 
@@ -183,7 +183,7 @@ export async function chooseScope(page, name) {
   if (await page.locator("#envChoose").count()) await page.click("#envChoose");
   await expect(page.locator("#envChosen")).toHaveText(name ? "chosen now" : "no scope chosen");
   await page.click("#settingsClose");
-  await page.locator("#settingsModal[open]").waitFor({ state: "detached" }).catch(() => {});
+  await expect(page.locator("#settingsModal")).toHaveCount(0);  // (gone once it's closed: the open attribute goes a moment before)
   if (name) await page.locator("#scopeButton .scope-name", { hasText: name }).waitFor();
   else await expect(page.locator("#scopeButton")).toHaveAttribute("data-scope", "");
 }

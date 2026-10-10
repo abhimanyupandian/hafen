@@ -748,7 +748,8 @@ tests:
   });
 
   it("an error of the test's own before the stop is an error, not stopped", async () => {
-    // (a's setup fails at once; while its teardown waits, b spends past the limit)
+    // (a's setup fails at once; b waits first, so the stop can't cut a's setup short on a slow machine,
+    // then spends past the limit while a's teardown waits)
     const r = await run(`version: 1
 provider: providers/pricey.yml
 tests:
@@ -762,6 +763,8 @@ tests:
     turns: [ { user: hi } ]
   - name: b
     group: 2
+    setup:
+      - request: { url: "{{base_url}}/slow?ms=300", method: POST, body: { message: x } }
     turns: [ { user: hi, expect: [ { contains: "You said" } ] } ]
 `, { options: { maxCost: 0.01 } });
     assert.equal(r.status, "stopped");

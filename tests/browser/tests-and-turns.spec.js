@@ -343,7 +343,7 @@ test.describe("a test's fields, its turns, and its rows", () => {
     await page.click("#menu-turn-delete");
     await expect(page.locator("#menu-turn-delete")).toHaveText(/Click again to delete it/);
     await page.click("#menu-turn-delete");
-    await expect.poll(async () => parse(await fileText(page, SUITE)).tests[0].turns.length).toBe(1);
+    await expect.poll(async () => parse(await fileText(page, SUITE))?.tests[0].turns.length).toBe(1);
   });
 
   test("after a run, each turn and check keeps its own result when others are deleted or added", async ({ app: { page } }) => {

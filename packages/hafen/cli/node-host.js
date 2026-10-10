@@ -28,7 +28,9 @@ export function nodeHost({ root = process.cwd(), secrets = fromProcess, knownSec
     const rel = relative(dir, full);
     return rel === "" || (rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel));
   };
-  const realOr = (p) => { try { return realpathSync(p); } catch { return resolve(p); } };
+  // (the system's own realpath, as fs/promises' is: Node's other one keeps a folder as it was spelled, a
+  // short name on Windows (RUNNER~1) or another case, and its files would seem to be outside it)
+  const realOr = (p) => { try { return realpathSync.native(p); } catch { return resolve(p); } };
   const readRoots = [root, ...also].map((d) => resolve(d));
   const realRoots = readRoots.map(realOr);
   const readable = (full) => readRoots.some((d) => under(d, full)) || realRoots.some((d) => under(d, full));

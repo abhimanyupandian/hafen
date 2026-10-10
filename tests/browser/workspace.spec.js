@@ -144,7 +144,7 @@ test.describe("in the browser build", () => {
       await openYaml(page);
       await page.fill("#providerYaml", `kind: http\nurl: ${servers.mock.url}/json\nbody: { message: "{{user}}" }\nresponse: { text: $.data.reply }\n`);
       await page.locator("#providerYaml").blur();
-      await expect.poll(async () => parse(await fileText(page, "providers/mock.yml")).url).toBe(`${servers.mock.url}/json`);
+      await expect.poll(async () => parse(await fileText(page, "providers/mock.yml"))?.url).toBe(`${servers.mock.url}/json`);
       await page.click("#providerTry");
       // A conversation
       await page.fill("#input", "hello there");
@@ -312,7 +312,7 @@ test.describe("in the browser build", () => {
     await expect(page.locator("#newProviderName")).toHaveValue("acme-2");
     await expect(page.locator("#newProviderModel, #newProviderUrl")).toHaveCount(0);
     await page.click("#newProviderCreate");
-    await expect.poll(async () => parse(await fileText(page, "providers/acme-2.yml")).kind).toBe("plugin:acme");
+    await expect.poll(async () => parse(await fileText(page, "providers/acme-2.yml"))?.kind).toBe("plugin:acme");
     await expect(page.locator("#providerFacts")).toContainText("plugin:acme");
     await page.click("#settingsClose");
     await expect(page.locator("#convProvider")).toHaveValue("providers/acme-2.yml");
@@ -357,11 +357,11 @@ test.describe("in the browser build", () => {
       // first (cancel: nothing written; overwrite: written)
       await page.click("#suiteExport");
       await page.click("#exportGo");
-      await expect(page.locator("#exportDialog")).toHaveCount(0);
+      await expect(page.locator("#exportDialog")).toHaveCount(0, { timeout: 15000 });  // (each file there is read back first)
       await expect(page.locator("#question")).toHaveCount(0);
       await page.fill("#suiteName", "Orders, renamed");
       await page.press("#suiteName", "Enter");
-      await expect.poll(async () => parse(await fileText(page, "orders.hafen.yml")).name).toBe("Orders, renamed");
+      await expect.poll(async () => parse(await fileText(page, "orders.hafen.yml"))?.name).toBe("Orders, renamed");
       await page.click("#suiteExport");
       await page.click("#exportGo");
       await expect(page.locator("#questionNote")).toHaveText("1 file is in out already, and exporting writes over it:");

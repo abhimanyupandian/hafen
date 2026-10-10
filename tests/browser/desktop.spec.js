@@ -95,7 +95,12 @@ test("the desktop app edits the files in its workspace, and gets its engine back
     await page.press("#suiteFile", "Enter");
     await onDisk((d) => d.tests.length === 1, "checkout.hafen.yml");
     await expect.poll(() => readdir(folder)).not.toContain("tests.hafen.yml");
+    // (once the page has it by its new name: its panel's drawn afresh then, and a delete asked about
+    // before would be forgotten)
+    await expect(page.locator('#suiteList .list-row[data-file="checkout.hafen.yml"]')).toHaveCount(1);
+    await expect(page.locator("#suiteFile")).toHaveValue("checkout");
     await page.click("#suiteDelete");
+    await expect(page.locator("#suiteDelete")).toHaveClass(/confirm/);
     await page.click("#suiteDelete");
     await expect.poll(() => readdir(folder)).not.toContain("checkout.hafen.yml");
     // Delete the test
@@ -172,9 +177,11 @@ test("a run that ends while the window is in the background: the system's notifi
   delete env.ELECTRON_RUN_AS_NODE;
   const app = await electron.launch({ args: [ROOT], cwd: ROOT, env });
   try {
-    // The system's notifications, kept rather than shown (each one's click can then be made)
+    // The system's notifications, kept rather than shown (each one's click can then be made); on a
+    // system with no notification service (Linux in CI), as if it had one
     await app.evaluate(({ Notification }) => {
       globalThis.__notes = [];
+      Notification.isSupported = () => true;
       Notification.prototype.show = function show() { globalThis.__notes.push(this); };
     });
     const page = await app.firstWindow();
