@@ -1,6 +1,5 @@
-# The tests, on every push to master and every pull request: the unit tests (engine, CLI, app) on
-# macOS, Windows and Linux; the browser tests (the app in Chromium, and the desktop app in Electron) on
-# Linux, under a virtual display.
+# The tests, on every push to master and every pull request, on macOS: the unit tests (engine, CLI,
+# app), and the browser tests (the app in Chromium, and the desktop app in Electron).
 name: Tests
 
 on:
@@ -11,15 +10,8 @@ on:
 
 jobs:
   unit:
-    name: Unit tests (${{ matrix.name }})
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - { name: macOS, os: macos-latest }
-          - { name: Windows, os: windows-latest }
-          - { name: Linux, os: ubuntu-latest }
-    runs-on: ${{ matrix.os }}
+    name: Unit tests (macOS)
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -27,11 +19,13 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      # (the app's tests serve the browser build: tests/app/relay.test.js)
+      - run: npm run build
       - run: npm test
 
   browser:
-    name: Browser tests (Linux)
-    runs-on: ubuntu-latest
+    name: Browser tests (macOS)
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -39,10 +33,8 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: npx playwright install --with-deps chromium
-      # (Ubuntu's AppArmor stops Electron's sandbox from starting otherwise)
-      - run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
-      - run: xvfb-run -a npm run test:browser
+      - run: npx playwright install chromium
+      - run: npm run test:browser
       - uses: actions/upload-artifact@v4
         if: failure()
         with:

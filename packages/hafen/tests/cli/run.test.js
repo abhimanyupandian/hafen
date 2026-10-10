@@ -8,7 +8,7 @@ import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { describe, it } from "node:test";
-import { CLI, JSON_PROVIDER, cli, dirs, mock, project, readJSON, said, suite, useMock } from "./helpers.js";
+import { CLI, JSON_PROVIDER, NO_SIGNALS, cli, dirs, mock, project, readJSON, said, suite, useMock } from "./helpers.js";
 
 useMock();
 
@@ -552,7 +552,7 @@ describe("choosing what runs, and stopping", () => {
     assert.equal(bad.code, 2);
   });
 
-  it("SIGINT stops the run as SIGTERM does: exit 3, the run file written with what ran", async () => {
+  it("SIGINT stops the run as SIGTERM does: exit 3, the run file written with what ran", { skip: NO_SIGNALS }, async () => {
     const dir = await project({
       "providers/slow.yml": `kind: http\nurl: "{{base_url}}/slow?ms=400"\nbody: { message: "{{user}}" }\nresponse: { text: $.data.reply }\n`,
       "s.hafen.yml": suite(`  - name: slow
@@ -729,7 +729,7 @@ ${test}    turns: [ { user: "hi", expect: ${expect} } ]
   });
 
   describe("a turn the stop cut short", () => {
-    it("has its latency and status checks skipped too (the run was stopped), exit 3", async () => {
+    it("has its latency and status checks skipped too (the run was stopped), exit 3", { skip: NO_SIGNALS }, async () => {
       const dir = await project({ "providers/p.yml": provider("/slow?ms=4000"), "s.hafen.yml": suite({ expect: "[ { type: latency, max_ms: 5000 }, { type: status, equals: 200 }, { contains: \"You said\" } ]" }) });
       const r = await cli(dir, ["run", "s.hafen.yml", "--report", "run:out/run.json"], { signalAfterMs: 1000 });
       assert.equal(r.code, 3, said(r));

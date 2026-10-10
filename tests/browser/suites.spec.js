@@ -26,6 +26,7 @@ test("the Suites section shows no folder path", async ({ app: { page } }) => {
 test("+ adds a new suite each time; a suite's own + adds a test to it", async ({ app: { page } }) => {
   await page.click("#newSuite");
   await page.press("#newSuiteName", "Enter");  // (+ asks for a name: the one it offers)
+  await expect(page.locator("#newSuiteForm")).toHaveCount(0);  // (closed once the suite's loaded: + again opens it)
   await expect(page.locator('#suiteList .list-row[data-file="tests.hafen.yml"]')).toHaveCount(1);
   await page.click("#newSuite");
   await page.press("#newSuiteName", "Enter");  // (+ asks for a name: the one it offers)
@@ -132,6 +133,7 @@ test.describe("added, changed and deleted, each change in the file", () => {
   test("suites: new ones, named, renamed, pointed at a provider, and deleted", async ({ app: { page } }) => {
     await page.click("#newSuite");
     await page.press("#newSuiteName", "Enter");  // (+ asks for a name: the one it offers)
+    await expect(page.locator("#newSuiteForm")).toHaveCount(0);  // (closed once the suite's loaded: + again opens it)
     await fileSays(page, (d) => d.tests.length === 1 && d.name === "tests", "tests.hafen.yml");
     await page.click("#newSuite");
     await page.press("#newSuiteName", "Enter");  // (+ asks for a name: the one it offers)
@@ -371,6 +373,7 @@ test.describe("its results, renamed while it runs, and its problems", () => {
     // tests.hafen.yml, run, then renamed to refunds
     await page.click("#newSuite");
     await page.press("#newSuiteName", "Enter");  // (+ asks for a name: the one it offers)
+    await expect(page.locator("#newSuiteForm")).toHaveCount(0);  // (closed once the suite's loaded: + again opens it)
     await expect(page.locator('#suiteList .list-row[data-file="tests.hafen.yml"]')).toHaveCount(1);
     await page.locator('#suiteList .list-row[data-file="tests.hafen.yml"] .list-open').first().click();
     await page.click("#suiteRun");
@@ -465,7 +468,7 @@ test.describe("its results, renamed while it runs, and its problems", () => {
     await openYaml(page);
     await page.fill("#providerYaml", `${await fileText(page, "providers/mock-json.yml")}timeout_ms: 9000\n`);
     await page.locator("#providerYaml").blur();
-    await expect.poll(async () => parse(await fileText(page, "providers/mock-json.yml")).timeout_ms).toBe(9000);
+    await expect.poll(async () => parse(await fileText(page, "providers/mock-json.yml"))?.timeout_ms).toBe(9000);
     await page.click("#settingsClose");
     await page.waitForTimeout(500);
     expect(await logged()).toBe(1);
@@ -533,7 +536,7 @@ test.describe("its group", () => {
     await expect(page.locator("#testGroupHint")).toContainText("Tests in the same group run one after another; different groups run at the same time");
     await page.fill("#testGroup", "2");
     await page.press("#testGroup", "Enter");
-    await expect.poll(async () => parse(await fileText(page, SUITE)).tests[0].group).toBe(2);
+    await expect.poll(async () => parse(await fileText(page, SUITE))?.tests[0].group).toBe(2);
     // Not a whole number of 1 or more: not saved, the field shows the file's
     for (const bad of ["0", "1.5", "-3"]) {
       await page.fill("#testGroup", bad);
@@ -550,7 +553,7 @@ test.describe("its group", () => {
     await expect(page.locator("#suiteGroupHint")).toContainText("Suites in the same group run one after another");
     await page.fill("#suiteGroup", "3");
     await page.press("#suiteGroup", "Enter");
-    await expect.poll(async () => parse(await fileText(page, SUITE)).group).toBe(3);
+    await expect.poll(async () => parse(await fileText(page, SUITE))?.group).toBe(3);
     await page.fill("#suiteGroup", "");
     await page.press("#suiteGroup", "Enter");
     await expect.poll(async () => "group" in parse(await fileText(page, SUITE))).toBe(false);

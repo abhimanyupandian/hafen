@@ -87,7 +87,7 @@ test.describe("started from a row, a key or a group, and deleted", () => {
     const before = await page.locator("#runList .list-row").count();
     await editor.press("Control+Enter");
     await expect(page.locator("dialog[open]")).toHaveCount(0);
-    await expect.poll(async () => parse(await fileText(page, SUITE)).tests[0].name).toBe("saved from the editor");
+    await expect.poll(async () => parse(await fileText(page, SUITE))?.tests[0].name).toBe("saved from the editor");
     await page.waitForTimeout(300);
     expect(await page.locator("#runList .list-row").count()).toBe(before);
   });
@@ -126,7 +126,7 @@ test.describe("started from a row, a key or a group, and deleted", () => {
       await openTest(page, name);
       await page.fill("#testGroup", String(group));
       await page.press("#testGroup", "Enter");
-      await expect.poll(async () => parse(await fileText(page, SUITE)).tests.find((t) => t.name === name)?.group).toBe(group);
+      await expect.poll(async () => parse(await fileText(page, SUITE))?.tests.find((t) => t.name === name)?.group).toBe(group);
     }
     await page.click("#newSuite");
     await page.press("#newSuiteName", "Enter");  // (+ asks for a name: the one it offers)
@@ -159,7 +159,9 @@ test.describe("started from a row, a key or a group, and deleted", () => {
     expect(testSpans.some((a, i) => testSpans.some((b, j) => i !== j && a.start < b.end && b.start < a.end))).toBe(true);
     expect(smokeRun.turns.filter((t) => t.test === "t_smoke001").map((t) => t.index)).toEqual([0, 1]);
     expect(smokeRun.turns.every(Boolean)).toBe(true);
-    // Two runs at once (a test in each suite); stopping one leaves the other
+    // Two runs at once (a test in each suite); stopping one leaves the other. (Slower replies here, so
+    // both are still going when one's stopped, however slow the machine.)
+    await writeFile(page, "providers/mock-json.yml", slow.replace("ms=400", "ms=3000"));
     await openTest(page, "second");
     await page.click("#testRun");
     await openTest(page, "New test");
@@ -435,12 +437,22 @@ test.describe("run again, Runs, the status, Esc, and a run's steps on the timeli
     await openTest(page, "slow one");
     await page.click("#testRun");
     await expect(page.locator("#status")).toContainText("passed 1/1", { timeout: 6000 });
+    // (where the line's first drawn, caught in the page as it's drawn: near the chart's start, the run
+    // hardly begun. A moment later it's at the chart's end, as the chart fits the run so far, so measured
+    // from here it would be too late on a slow machine)
+    await page.evaluate(() => {
+      window.firstNowLine = null;
+      new MutationObserver((_, observer) => {
+        const line = document.querySelector(".timeline-now");
+        if (!line) return;
+        window.firstNowLine = parseFloat(line.style.left);
+        observer.disconnect();
+      }).observe(document.body, { childList: true, subtree: true });
+    });
     await page.click("#testRun");
-    const now = page.locator(".timeline-now");
-    await expect(now).toBeVisible();
-    // (shortly after it starts, the line is near the chart's start, the run hardly begun)
-    const [line, chart] = [await now.boundingBox(), await page.locator(".timeline-chart").boundingBox()];
-    expect(line.x - chart.x).toBeLessThan(chart.width * 0.5);
+    await expect.poll(() => page.evaluate(() => window.firstNowLine)).not.toBeNull();
+    const width = await page.locator(".timeline-chart").evaluate((el) => el.clientWidth);
+    expect(await page.evaluate(() => window.firstNowLine)).toBeLessThan(width * 0.5);
   });
 });
 
@@ -505,7 +517,7 @@ tests:
     if (await page.locator("#envChoose").count()) await page.click("#envChoose");
     await page.locator("#envChosen").waitFor();
     await page.click("#settingsClose");
-    await page.locator("#settingsModal[open]").waitFor({ state: "detached" }).catch(() => {});
+    await expect(page.locator("#settingsModal")).toHaveCount(0);  // (gone once it's closed: the open attribute goes a moment before)
     await page.locator("#scopeAlert").waitFor();
   }
 

@@ -47,7 +47,7 @@ response:
   usage: { input: $.usage.input_tokens, output: $.usage.output_tokens }
 `);
   await page.locator("#providerYaml").blur();
-  await expect.poll(async () => parse(await fileText(page, "providers/mock.yml")).session?.extract).toBe("$.session_id");
+  await expect.poll(async () => parse(await fileText(page, "providers/mock.yml"))?.session?.extract).toBe("$.session_id");
   // Try it: Settings closes, the message box is ready
   await page.click("#providerTry");
   await expect(page.locator("#settingsModal")).toHaveCount(0);
@@ -130,7 +130,7 @@ response:
   const yaml = await page.locator("#providerYaml").inputValue();
   await page.fill("#providerYaml", yaml.replace(`url: ${servers.mock.url}/json`, 'url: "{{env.base_url}}/json"'));
   await page.locator("#providerYaml").blur();
-  await expect.poll(async () => parse(await fileText(page, "providers/mock.yml")).url).toBe("{{env.base_url}}/json");
+  await expect.poll(async () => parse(await fileText(page, "providers/mock.yml"))?.url).toBe("{{env.base_url}}/json");
   await page.click("#settingsClose");
   await expect(page.locator("#scopeButton .scope-name")).toHaveText("local");
   await fetch(`${servers.mock.url}/_log`, { method: "DELETE" });

@@ -52,7 +52,7 @@ test.describe("Settings → Plugins", () => {
     await page.click("#palette-path");
     await page.fill("#checkYaml", "type: says-sorry\nword: sorry");
     await page.locator("#checkYaml").blur();
-    await expect.poll(async () => parse(await fileText(page, SUITE)).tests[0].turns[0].expect.at(-1)).toEqual({ type: "says-sorry", word: "sorry" });
+    await expect.poll(async () => parse(await fileText(page, SUITE))?.tests[0].turns[0].expect.at(-1)).toEqual({ type: "says-sorry", word: "sorry" });
     expect(parse(await fileText(page, SUITE)).plugins).toBeUndefined();
     await page.click("#testHeaderRun");
     await expect(page.locator("#status")).toContainText("failed 0/1");
@@ -211,7 +211,7 @@ test.describe("provider plugins, and the plugin editor", () => {
     await openYaml(page);
     await page.fill("#providerYaml", yaml);
     await page.locator("#providerYaml").blur();
-    await expect.poll(async () => parse(await fileText(page, "providers/echo.yml")).url).toBe(`${servers.mock.url}/json`);
+    await expect.poll(async () => parse(await fileText(page, "providers/echo.yml"))?.url).toBe(`${servers.mock.url}/json`);
     // Try it: a conversation through the plugin
     await page.click("#providerTry");
     await page.fill("#input", "hi plugin");
@@ -467,7 +467,7 @@ response: { text: $.data.reply }
     await expect(page.locator("#providerFixtures-beforeAll-1")).toContainText("in this list already: take it out");
     await expect(page.locator("#providerFixtures-after-0")).not.toContainText("in this list already");
     await page.click("#providerFixtures-beforeAll-1-remove");
-    await expect.poll(async () => parse(await fileText(page, "providers/twice.yml")).fixtures).toEqual({ beforeAll: ["note"], after: ["note"] });
+    await expect.poll(async () => parse(await fileText(page, "providers/twice.yml"))?.fixtures).toEqual({ beforeAll: ["note"], after: ["note"] });
     await expect(page.locator("#providerFixturesDuplicate")).toHaveCount(0);
   });
 
@@ -509,7 +509,7 @@ response: { text: $.data.reply }
     for (const phase of ["beforeAll", "before", "after", "afterAll"]) await expect(option(phase, "anywhere")).toHaveJSProperty("disabled", false);
     // Added where it runs; taken out where it can't
     await page.selectOption("#providerFixtures-beforeAll-add", "first-only");
-    await expect.poll(async () => parse(await fileText(page, "providers/gated.yml")).fixtures).toEqual({ beforeAll: ["first-only"], before: ["first-only"] });
+    await expect.poll(async () => parse(await fileText(page, "providers/gated.yml"))?.fixtures).toEqual({ beforeAll: ["first-only"], before: ["first-only"] });
     // A message to it is stopped before it's sent, by the provider, with why
     await page.click("#settingsClose");
     await page.selectOption("#convProvider", "providers/gated.yml");
@@ -520,7 +520,7 @@ response: { text: $.data.reply }
     // Taken out of the list it can't be in: it goes
     await page.click("#convFixturesFix");
     await page.click("#providerFixtures-before-0-remove");
-    await expect.poll(async () => parse(await fileText(page, "providers/gated.yml")).fixtures).toEqual({ beforeAll: ["first-only"] });
+    await expect.poll(async () => parse(await fileText(page, "providers/gated.yml"))?.fixtures).toEqual({ beforeAll: ["first-only"] });
     await page.click("#settingsClose");
     await expect(page.locator("#convFixturesProblem")).toHaveCount(0);
     await expect(page.locator("#send")).toBeEnabled();
@@ -605,7 +605,7 @@ response: { text: $.data.reply }
       await expect(page.locator("#settings-tab-providers")).toHaveAttribute("aria-selected", "true");
       await expect(page.locator("#providerName")).toHaveValue("ollama");
       await page.click("#providerFixtures-beforeAll-0-remove");
-      await expect.poll(async () => parse(await fileText(page, "providers/ollama.yml")).fixtures).toBeUndefined();
+      await expect.poll(async () => parse(await fileText(page, "providers/ollama.yml"))?.fixtures).toBeUndefined();
       await page.click("#settingsClose");
       await expect(problem).toHaveCount(0);
       await expect(page.locator("#convFixturesNone")).toBeVisible();

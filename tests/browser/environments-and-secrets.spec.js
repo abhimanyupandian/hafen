@@ -111,7 +111,7 @@ tests:
   };
   const closeSettings = async (page) => {
     await page.click("#settingsClose");
-    await page.locator("#settingsModal[open]").waitFor({ state: "detached" }).catch(() => {});
+    await expect(page.locator("#settingsModal")).toHaveCount(0);  // (gone once it's closed: the open attribute goes a moment before)
   };
   const row = (page, id) => page.locator(`[id="${id}"]`);
   const envFile = (name, text) => ({ name, mimeType: "text/plain", buffer: Buffer.from(text) });
@@ -385,6 +385,9 @@ tests:
       await key.locator("input").fill("k-stage-2");
       await key.locator("input").press("Enter");
       await expect.poll(async () => (await kept(page)).secrets.stage.API_KEY).toBe("k-stage-2");
+      // (the fields are drawn afresh once the page has caught up, the value just saved not left in it:
+      // typed in another before then, it would be lost)
+      await expect(key.locator("input")).toHaveValue("");
       await key.locator("input").focus();
       await key.locator("input").press("Tab");
       expect((await kept(page)).secrets.stage.API_KEY).toBe("k-stage-2");
