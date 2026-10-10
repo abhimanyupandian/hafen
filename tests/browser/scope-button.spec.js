@@ -1,14 +1,11 @@
 // The sidebar's head and the chat's details (contracts/ui.md, Sidebar; spec/design/components.md,
-// Additions): the scope is a button (its icon and the scope chosen) that opens Settings → Environments,
-// where it's chosen; Settings' button is a gear; a turn's checks are small cards in the colour of how
-// each went, their dot kept. (Scrollbars: scrollbars.spec.js.)
+// Additions): the scope is a button (its icon and the scope chosen; with none, its icon alone, greyed
+// out: scope-ui.spec.js) that opens Settings → Environments, where it's chosen; Settings' button is a
+// gear; a turn's checks are small cards in the colour of how each went, their dot kept. (Scrollbars:
+// scrollbars.spec.js.)
 
-import { chooseScope, expect, test } from "./fixtures.js";
+import { addScope, chooseScope, expect, newScope, test } from "./fixtures.js";
 
-const openFolder = async (page) => {
-  await page.click("#openFolder");
-  await expect(page.locator('#suiteList .list-row[data-file="smoke.hafen.yml"]')).toHaveCount(1);
-};
 // A colour token as the page computes it (rgb(…))
 const token = (page, name) => page.evaluate((name) => {
   const probe = document.createElement("span");
@@ -24,19 +21,28 @@ test.afterEach(async ({ app: { errors } }) => {
   expect(errors).toEqual([]);
 });
 
+test.describe("with no scope made yet", () => {
+test.use({ scope: null });
+
 test("the scope button names the scope chosen and opens Settings on Environments, where another is chosen", async ({ app: { page } }) => {
-  // No scope yet: the button is there all the same (to add one), and says so
+  // No scope yet: the button is there all the same (to add one), its icon alone, and its name says so
   await expect(page.locator("#scopeButton")).toBeVisible();
-  await expect(page.locator("#scopeButton .scope-name")).toHaveText("no scope");
+  await expect(page.locator("#scopeButton")).toHaveAttribute("aria-label", "No scope chosen: choose one");
+  await expect(page.locator("#scopeButton .scope-name")).toHaveCount(0);
   await expect(page.locator("#scopeButton svg.icon-scope")).toHaveCount(1);
   await expect(page.locator("#envSelect")).toHaveCount(0);
   await page.click("#scopeButton");
   await expect(page.locator("#settingsModal")).toBeVisible();
   await expect(page.locator("#settings-tab-environments")).toHaveAttribute("aria-selected", "true");
-  await expect(page.locator("#environmentsClosed")).toContainText("Open a folder first");
+  // (scopes are the app's, apart from its suites: one can be added at any time)
+  await expect(page.locator("#environmentsEmpty")).toContainText("No scopes yet");
+  await expect(page.locator("#newScopeForm")).toBeVisible();
   await page.click("#settingsClose");
-  // The folder's suite has an environment (local): chosen, the button names it
-  await openFolder(page);
+  // The suite has an environment (local): it isn't a scope, so none is chosen yet
+  await expect(page.locator('#suiteList .list-row[data-file="smoke.hafen.yml"]')).toHaveCount(1);
+  await expect(page.locator("#scopeButton")).toHaveAttribute("aria-label", "No scope chosen: choose one");
+  // Made here (local, as the suite's environment is called) and chosen: the button names it
+  await addScope(page, "local");
   await expect(page.locator("#scopeButton .scope-name")).toHaveText("local");
   await expect(page.locator("#scopeButton")).toHaveAttribute("title", /Scope: local/);
   // Opened on Environments even when Settings was last left on another pane
@@ -45,19 +51,16 @@ test("the scope button names the scope chosen and opens Settings on Environments
   await page.click("#settingsClose");
   await page.click("#scopeButton");
   await expect(page.locator("#settings-tab-environments")).toHaveAttribute("aria-selected", "true");
-  await expect(page.locator("#envScope")).toHaveValue("local");
+  await expect(page.locator("#envScope-local")).toHaveClass(/active/);
   await expect(page.locator("#envChosen")).toHaveText("chosen now");
   // A new scope, chosen there: the button follows, and keeps it after a reload
-  await page.fill("#newScopeName", "stage");
-  await page.click("#newScopeForm button[type=submit]");
-  await expect(page.locator("#envScope")).toHaveValue("stage");
+  await newScope(page, "stage");
   await page.click("#envChoose");
   await expect(page.locator("#envChosen")).toBeVisible();
   await page.click("#settingsClose");
   await expect(page.locator("#scopeButton .scope-name")).toHaveText("stage");
   await page.reload();
   await page.locator("html:not(.loading)").waitFor();
-  await openFolder(page);
   await expect(page.locator("#scopeButton .scope-name")).toHaveText("stage");
   // Back to the first, with the helper the other tests use
   await chooseScope(page, "local");
@@ -70,35 +73,17 @@ test("the scope button names the scope chosen and opens Settings on Environments
   await expect(page.locator("#settingsModal")).toBeHidden();
 });
 
-test("with no folder open, a scope that has only secrets can still be chosen from the button", async ({ app: { page } }) => {
-  await page.evaluate(() => localStorage.setItem("eval.secrets", JSON.stringify({ prod: { TOKEN: "t-123456" }, stage: { TOKEN: "t-654321" } })));
+test("with no scope chosen before, the first scope made in the app is chosen when the app starts; secrets kept for another name don't make one", async ({ app: { page } }) => {
+  await page.evaluate(() => {
+    localStorage.setItem("eval.scopes", JSON.stringify(["prod", "stage"]));
+    localStorage.setItem("eval.secrets", JSON.stringify({ ghost: { TOKEN: "t-123456" } }));
+  });
   await page.reload();
   await page.locator("html:not(.loading)").waitFor();
-  // None chosen yet (a folder's own environments would come first)
-  await expect(page.locator("#scopeButton .scope-name")).toHaveText("no scope");
+  await expect(page.locator("#scopeButton .scope-name")).toHaveText("prod");
   await page.click("#scopeButton");
-  await expect(page.locator("#envScope")).toBeVisible();
-  await expect(page.locator("#environmentsClosed")).toContainText("Open a folder to add scopes");
-  await expect(page.locator("#newScopeForm")).toHaveCount(0);
-  await page.selectOption("#envScope", "stage");
-  await page.click("#envChoose");
-  await expect(page.locator("#envChosen")).toBeVisible();
-  await page.click("#settingsClose");
-  await expect(page.locator("#scopeButton .scope-name")).toHaveText("stage");
-  // Chosen again after a reload, still with no folder open; and kept when one is opened
-  await page.reload();
-  await page.locator("html:not(.loading)").waitFor();
-  await expect(page.locator("#scopeButton .scope-name")).toHaveText("stage");
-  await openFolder(page);
-  await expect(page.locator("#scopeButton .scope-name")).toHaveText("stage");
+  await expect(page.locator("#envScopes .list-open")).toHaveText(["prod", "stage"]);
 });
-
-test("a folder's own environment comes first when no scope was chosen before, whatever scopes have secrets", async ({ app: { page } }) => {
-  await page.evaluate(() => localStorage.setItem("eval.secrets", JSON.stringify({ prod: { TOKEN: "t-123456" } })));
-  await page.reload();
-  await page.locator("html:not(.loading)").waitFor();
-  await openFolder(page);
-  await expect(page.locator("#scopeButton .scope-name")).toHaveText("local");
 });
 
 test("Settings' button is a gear (the same icon as the rail's), and opens Settings", async ({ app: { page } }) => {
@@ -113,7 +98,6 @@ test("Settings' button is a gear (the same icon as the rail's), and opens Settin
 });
 
 test("a turn's checks are small cards, tinted by how each went, their dot kept", async ({ app: { page } }) => {
-  await openFolder(page);
   await page.locator("#suiteList .list-open", { hasText: "refund for a broken item" }).first().click();
   // Not run yet: plain cards, a hollow dot
   const unrun = page.locator("#turn-0-reply .check-badge").first();

@@ -6,19 +6,23 @@
 // A modal opened from inside another (Settings → a large editor) is drawn in its own <dialog>, but in
 // React's tree it's inside the other's, and React passes a "close" up that tree: so each acts on its
 // own dialog's close only, and closing the editor goes back to Settings rather than closing both.
+//
+// beforeClose (an Addition): asked before Esc or a click on the backdrop closes it; false keeps it
+// open (Settings, with edits that would be lost: spec/design/components.md, Additions).
 
 import { useLayoutEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { Icon } from "./icons.jsx";
 
-export function Modal({ id, label, className = "", onClose, dialogRef, children }) {
+export function Modal({ id, label, className = "", onClose, beforeClose, dialogRef, children }) {
   const own = useRef(null);
   const ref = dialogRef ?? own;
   useLayoutEffect(() => { ref.current.showModal(); }, []);
   // The dialog has no padding of its own, so a click on it (not on what's inside) is on the backdrop.
   return createPortal(
     <dialog id={id} className={`modal ${className}`} aria-label={label} ref={ref}
-            onClick={(e) => { if (e.target === e.currentTarget) e.currentTarget.close(); }}
+            onClick={(e) => { if (e.target === e.currentTarget && beforeClose?.() !== false) e.currentTarget.close(); }}
+            onCancel={(e) => { if (e.target === e.currentTarget && beforeClose?.() === false) e.preventDefault(); }}
             onClose={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       {children}
     </dialog>,

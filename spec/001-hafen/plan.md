@@ -15,7 +15,7 @@ the project's own format. The UI draws what the engine reports, built from a cop
 system: the suites tree on the left, the conversation in the centre, details in the panel, the
 timeline and console at the bottom. In the desktop app the engine runs in an Electron utility
 process (Node, as in CI); in the browser build, in a Web Worker, calling endpoints directly or
-through the project's relay (`hafen serve`). Decisions and alternatives:
+through the project's relay (`npm run serve`). Decisions and alternatives:
 [research.md](research.md).
 
 ## Technical Context
@@ -27,14 +27,16 @@ tests
 9535 JSONPath library chosen by the compliance suite ([research §9](research.md#9-jsonpath)), Ajv
 (JSON Schema draft 2020-12); Playwright and electron-builder (development only)
 
-**Storage**: suite, provider and data files in the user's folder; runs in IndexedDB (`hafen`,
-store `runs`) and as run files (`.hafen/runs/`, CI report paths); secrets in Electron
+**Storage**: suite, provider, plugin and data files in the app's workspace (the desktop app's data
+folder's `workspace/`; the browser's Origin Private File System, `workspace/`), imported from and
+exported to the user's folders; runs in IndexedDB (`hafen`, store `runs`), and on the command line
+as run files (`.hafen/runs/`, CI report paths); secrets in Electron
 `safeStorage` (desktop), the environment (CLI) or localStorage (browser build); UI state in
 localStorage (`eval.*`)
 
 **Testing**: `node --test` for the engine, CLI, relay and contracts; Playwright for the same engine
 tests in a browser, the app end to end, and visual tests of the design-system gallery against
-its baseline screenshots, and a parity test against hafen's stylesheets; a local mock endpoint (`evals/tests/fixtures/mock-endpoint.mjs`) for every
+its baseline screenshots, and a parity test against hafen's stylesheets; a local mock endpoint (`evals/packages/hafen/tests/fixtures/mock-endpoint.mjs`) for every
 provider behaviour
 
 **Target Platform**: the desktop app (macOS, Windows, Linux, via Electron), CI runners (Linux, macOS,
@@ -64,7 +66,7 @@ requests; about 10 sidebar, panel and dock views; 13 user stories, P1 to P3
 |---|---|---|
 | I. UI matches the design system | The app is built from the design system copied into `evals/app/`; new parts are written into `spec/design/components.md` (Additions) first; a parity test and the gallery's baseline screenshots catch drift (T004, T005) | ✅ |
 | II. One engine | `evals/engine/` runs in a Web Worker, Electron's utility process and the CLI; the UI never parses, checks or times; platform differences enter only as a transport, a file store and a secret store | ✅ |
-| III. The file is the test | Suites are files read and written in place, comment-keeping; the app keeps no state a test needs; schema versioned | ✅ |
+| III. The app keeps the tests; Export writes the files | Suites are files in the app's workspace, read and written in place, comment-keeping; Import and Export copy them and everything they use (the engine's `dependencies`), asking before writing over a file; the CLI runs an exported folder unchanged; schema versioned | ✅ |
 | IV. Local-first and private | `${env:…}` references only; `safeStorage` in the desktop app; redaction before storing or writing; plugins get credentials by name, never values; no telemetry | ✅ |
 | V. Honest results | Five result states; errors separate from failures; no truncation of judge input; sample counts on percentiles and pass rates; repeats built in | ✅ |
 | VI. Contracts tested first | Contract tests for the schemas, providers (mock endpoint), checks, CLI exit codes and reports, run file and relay, written before the code in each phase; engine tests run in Node and a browser | ✅ |
@@ -103,7 +105,8 @@ The design system the UI follows is [spec/design/](../design/README.md).
 
 ```text
 evals/                                # the whole project; imports nothing from outside this folder
-├── package.json                      # its dependencies and scripts: dev, build, app, app:build, test, test:browser, test:visual
+├── package.json                      # the app (hafen-app, private; workspaces: packages/*), depending on hafen; scripts: dev,
+│                                     #   build, app, app:build, serve, test, test:browser, test:visual, mock
 ├── vite.config.js                    # builds app/ into app/dist
 ├── README.md                         # what it is, the app, files, CLI, providers, checks
 ├── app/                              # the UI: the browser build, and the desktop app's window
@@ -124,49 +127,59 @@ evals/                                # the whole project; imports nothing from 
 │       ├── views/                    # suites, runs, providers, palette, thread, composer, panel (its views), load, settings panes
 │       ├── state.js                  # what's open and selected; talks to the engine host
 │       └── host.js                   # starts the engine: a Web Worker (browser) or the desktop app's engine port
-├── engine/                           # THE ENGINE: no DOM; runs in a Worker, Electron's utility process, Node
-│   ├── index.js                      # run(suites, options, host) → events; explore(); validate()
-│   ├── files/                        # suite-file.js (parse, validate, save keeping comments), schema/ (the two schemas), data.js (CSV, JSON lines)
-│   ├── vars.js                       # {{…}}, ${env:…}, extraction, resolution order
-│   ├── jsonpath.js                   # RFC 9535 (the chosen library, or ours)
-│   ├── transport.js                  # the transport interface; retries; network simulation
-│   ├── stream/                       # sse.js, ndjson.js, websocket.js, think-tags.js
-│   ├── providers/                    # http.js (configuration), presets/ (openai-chat, openai-responses, anthropic-messages, gemini)
-│   ├── events.js                     # TurnEvents; merging; the assembled response
-│   ├── spans.js                      # the span recorder; metrics; percentiles; cost
-│   ├── checks/                       # path.js, text.js, status.js, latency.js, json.js, thinking.js, tools.js, sequence.js, cost.js
-│   ├── judges/                       # systemone.js (the System One API), llm.js, reference.js, index.js (named judges)
-│   ├── runner.js                     # suites → tests → repeats/rows → turns; setup, teardown; stop; budget
-│   ├── simulate.js                   # simulated users
-│   ├── load.js                       # load mode
-│   ├── compare.js                    # baselines
-│   ├── redact.js
-│   ├── plugins.js                    # loading, the worker bridge, transports by name
-│   └── reports/                      # run-file.js, junit.js, markdown.js, json.js
-├── cli/
-│   ├── hafen.js                 # run, validate, report, compare, serve; exit codes; output
-│   └── relay.js                      # serve: the browser build and the allowlisted relay
+├── packages/hafen/                   # the hafen package (npm workspace): the engine and the CLI, installed on its own
+│   ├── package.json                  # name hafen, bin hafen, exports engine/ and cli/; ajv, json-p3, yaml; rolldown optional
+│   ├── README.md                     # the CLI: install, run, validate, pack, --env and --secret
+│   ├── engine/                       # THE ENGINE: no DOM; runs in a Worker, Electron's utility process, Node
+│   │   ├── index.js                  # run(suites, options, host) → events; explore(); validate()
+│   │   ├── files/                    # suite-file.js (parse, validate, save keeping comments), schema/ (the two schemas), data.js (CSV, JSON lines)
+│   │   ├── vars.js                   # {{…}}, ${env:…}, extraction, resolution order
+│   │   ├── jsonpath.js               # RFC 9535 (the chosen library, or ours)
+│   │   ├── transport.js              # the transport interface; retries; network simulation
+│   │   ├── stream/                   # sse.js, ndjson.js, websocket.js, think-tags.js
+│   │   ├── providers/                # http.js (configuration), presets/ (openai-chat, openai-responses, anthropic-messages, gemini)
+│   │   ├── events.js                 # TurnEvents; merging; the assembled response
+│   │   ├── spans.js                  # the span recorder; metrics; percentiles; cost
+│   │   ├── checks/                   # path.js, text.js, status.js, latency.js, json.js, thinking.js, tools.js, sequence.js, cost.js
+│   │   ├── judges/                   # systemone.js (the System One API), llm.js, reference.js, index.js (named judges)
+│   │   ├── runner.js                 # suites → tests → repeats/rows → turns; setup, teardown; stop; budget
+│   │   ├── simulate.js               # simulated users
+│   │   ├── load.js                   # load mode
+│   │   ├── compare.js                # baselines
+│   │   ├── redact.js
+│   │   ├── plugins.js                # loading, the worker bridge, transports by name
+│   │   └── reports/                  # run-file.js, junit.js, markdown.js, json.js
+│   ├── cli/
+│   │   ├── hafen.js                  # the bin; commands.js: run, validate, report, compare, pack; exit codes; output
+│   │   ├── node-host.js              # the engine's host in Node (the CLI's, and the desktop app's engine process)
+│   │   └── pack.js, pack-runtime.js  # pack: suites and everything they need in one file
+│   └── tests/
+│       ├── fixtures/
+│       │   ├── mock-endpoint.mjs     # every provider behaviour, mock System One and LLM judges, an endpoint without CORS
+│       │   ├── suites/               # reference suites used by tests and the quickstart
+│       │   ├── streams/              # recorded provider streams for the presets' tests
+│       │   └── plugins/              # test plugins
+│       ├── engine/                   # node --test: contracts and units
+│       └── cli/                      # node --test: commands, exit codes, reports, pack
+├── server/                           # the browser build's server: serve.js (npm run serve) and relay.js, the allowlisted relay
 ├── desktop/                          # the Electron app
 │   ├── main.js                       # the window (no title bar), the engine's utility process, ports to the UI,
-│   │                                 #   folders (open, watch, read, write), secrets (safeStorage), notifications
-│   ├── engine-host.js                # the utility process's entry: the engine in Node, with the app's transport and files
+│   │                                 #   the workspace, the Import and Export dialogs, secrets (safeStorage), notifications
+│   ├── engine-host.js                # the utility process's entry: the engine in Node, on the workspace and the folders picked
 │   ├── preload.cjs                   # passes the engine port and the platform to the UI
 │   └── builder.json                  # electron-builder: app id, name, icons
-└── tests/
-    ├── fixtures/
-    │   ├── mock-endpoint.mjs         # every provider behaviour, mock System One and LLM judges, an endpoint without CORS
-    │   ├── suites/                   # reference suites used by tests and the quickstart
-    │   ├── streams/                  # recorded provider streams for the presets' tests
-    │   └── plugins/                  # test plugins
-    ├── engine/                       # node --test: contracts and units
-    ├── cli/                          # node --test: commands, exit codes, reports, relay
+└── tests/                            # the app's
+    ├── app/                          # node --test: the app's helpers, the page's bundle, design parity, the relay, carry-over
     ├── browser/                      # Playwright: the engine tests in a browser; the app end to end
     └── visual/                       # Playwright: the gallery against its baseline (tests/visual/snapshots/)
 ```
 
-**Structure Decision**: one folder, one package, so the project can move to its own repository
-unchanged. The engine is a plain folder of ES modules that Vite bundles for the UI and Node imports
-directly for the CLI and the desktop app's utility process. The design system is copied into
+**Structure Decision**: one folder, so the project can move to its own repository unchanged, with
+two npm workspaces: the `hafen` package (`packages/hafen/`: the engine and the CLI), which CI
+installs on its own, with no Electron, React or Playwright; and the app (the root: the UI, the
+desktop app, the browser build's server), which depends on it and imports it by name
+(`hafen/engine/…`, `hafen/cli/node-host.js`). The engine is a plain folder of ES modules that Vite
+bundles for the UI and Node imports directly for the CLI and the desktop app's utility process. The design system is copied into
 `app/css/` and `app/js/design/` ([research §26](research.md#26-the-design-system-copied-in)).
 
 ## Complexity Tracking

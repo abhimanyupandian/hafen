@@ -7,13 +7,13 @@ import { GroupBadge, RepeatBadge, Spinner } from "./design/badges.jsx";
 import { CheckBadge } from "./design/check-badge.jsx";
 import { SearchField } from "./design/search.jsx";
 import { Chart } from "./design/chart.jsx";
-import { NavSection } from "./design/collapsible.jsx";
+import { NavSection, SettingsGroup, SettingsSection } from "./design/collapsible.jsx";
 import { ConfirmButton } from "./design/confirm.jsx";
 import { Icon } from "./design/icons.jsx";
 import { IdField } from "./design/id-field.jsx";
 import { JsonTree } from "./design/json-tree.jsx";
 import { List, ListRow } from "./design/list.jsx";
-import { Select } from "./design/select.jsx";
+import { SegmentedChoice, Select } from "./design/select.jsx";
 import { TimelineDock } from "./design/timeline.jsx";
 import { renderMarkdown } from "./lib/markdown.js";
 import { CheckCard } from "./views/check-card.jsx";
@@ -43,7 +43,8 @@ function Gallery() {
           <ConfirmButton className="btn btn-ghost" label="×" question="delete" onConfirm={() => {}} />
           <button className="btn btn-icon" type="button" aria-label="Add"><Icon name="plus" /></button>
           <button className="btn btn-ghost btn-icon" type="button" aria-label="Settings"><Icon name="settings" /></button>
-          <button className="btn btn-ghost scope-button" type="button" aria-label="Scope: stage"><Icon name="scope" /><span className="scope-name">stage</span></button>
+          <button className="btn btn-ghost scope-button" type="button" aria-label="Scope: stage"><span className="scope-icon"><Icon name="scope" /></span><span className="scope-name">stage</span></button>
+          <button className="btn btn-ghost scope-button none" type="button" aria-label="No scope chosen: choose one"><span className="scope-icon"><Icon name="scope" /><span className="scope-alert" aria-hidden="true">!</span></span></button>
           <button className="btn" type="button" disabled>disabled</button>
         </div>
       </section>
@@ -118,7 +119,7 @@ function Gallery() {
             <div className="palette-item" tabIndex={0}><span className="block-label"><Icon name="check" size={16} /><span className="label">Path</span></span><span className="palette-text">A field of the response, by JSONPath, against a value</span></div>
           </div>
         </div>
-        <div className="row">{["suite", "test", "check", "provider", "timeline", "run", "plus", "copy", "maximize", "settings", "scope", "sidebar", "menu", "close", "import", "back"].map((n) => <Icon key={n} name={n} />)}</div>
+        <div className="row">{["suite", "test", "check", "fail", "provider", "timeline", "run", "plus", "copy", "maximize", "settings", "scope", "sidebar", "menu", "close", "back", "more"].map((n) => <Icon key={n} name={n} />)}</div>
       </section>
       <section id="g-check-cards">
         <h2 className="label">Check cards</h2>
@@ -132,6 +133,10 @@ function Gallery() {
       <section id="g-thread">
         <h2 className="label">Messages</h2>
         <div className="thread" style={{ padding: 0 }}>
+          <section className="run-error" data-status="error" aria-label="The run: couldn't run">
+            <div className="turn-head"><span className="label">Run</span><span className="hint turn-summary" data-status="error">couldn't run · nothing was sent · just now</span></div>
+            <div className="msg-body error">{"providers/acme.yml:2: {{env.base_url}} isn't set: no environment is chosen"}</div>
+          </section>
           <div className="turn-group selected">
           <article className="msg user"><div className="msg-body">I want a refund for order 4417</div></article>
           <article className="msg bot">
@@ -151,9 +156,109 @@ function Gallery() {
         <h2 className="label">Charts</h2>
         <Chart id="gChart" label="Pass rate" points={[0.9, 1, 0.8, 1, 0.6, 1, 1].map((v, i) => ({ value: v, failed: i === 4 }))} format={(v) => `${Math.round(v * 100)}%`} />
       </section>
+      <section id="g-scopes" style={{ gridColumn: "1 / -1" }}>
+        <h2 className="label">Scope panes</h2>
+        <div className="scope-panes" style={{ width: 620 }}>
+          <nav className="scope-list" aria-label="Environments">
+            <div className="scope-list-head"><span className="label">Globals</span></div>
+            <List aria-label="Globals"><ListRow id="g-globals" label="Globals" onOpen={() => {}} /></List>
+            <div className="scope-list-line" role="separator"></div>
+            <div className="scope-list-head"><span className="label">Scopes</span><button className="btn btn-icon" type="button" aria-label="Add a scope" aria-expanded="true"><Icon name="plus" size={14} /></button></div>
+            <form className="controls new-scope-form" onSubmit={(e) => e.preventDefault()}><input className="input grow" placeholder="stage, prod…" aria-label="A new scope's name" defaultValue="" /><button className="btn" type="submit">add</button></form>
+            <List aria-label="Scopes">
+              <ListRow id="g-scope-stage" label="stage" active extra={<span title="Chosen now"><Icon name="check" size={14} /></span>} onOpen={() => {}}
+                       actions={<button className="btn btn-icon list-more" type="button" aria-label="More for stage"><Icon name="more" size={14} /></button>} />
+              <ListRow id="g-scope-prod" label="prod" size="2 not set" data={{ status: "error" }} onOpen={() => {}}
+                       actions={<button className="btn btn-icon list-more" type="button" aria-label="More for prod"><Icon name="more" size={14} /></button>} />
+            </List>
+          </nav>
+          <section className="scope-main" aria-label="The scope stage">
+            <div className="scope-head">
+              <input className="input scope-name-field" aria-label="Scope name" defaultValue="stage" />
+              <button className="btn" type="button" disabled>chosen now</button>
+              <button className="btn btn-icon" type="button" aria-label="More for stage"><Icon name="more" size={14} /></button>
+            </div>
+            <div className="scope-tools">
+              <button className="btn" type="button">import .env</button>
+              <button className="btn" type="button">export .env</button>
+              <button className="btn" type="button">edit as .env</button>
+              <SearchField id="gVarsSearch" label="Search variables" placeholder="Search variables" value="" onChange={() => {}} />
+            </div>
+            <div className="vars" role="table" aria-label="Values of stage">
+              <div className="vars-head" role="row"><span className="label" role="columnheader">Variable</span><span role="columnheader"><span className="label">Value</span></span><span className="label" role="columnheader">Source</span></div>
+              {[["base_url", "https://stage.acme.example", "override", "overrides Globals"], ["who", "stage-team", "own", "this scope"], ["model", "", "unset", "not set"], ["region", "eu-west-1", "globals", "from Globals"]].map(([name, value, source, text]) => (
+                <div key={name} className="vars-row" role="row" data-source={source}>
+                  <span className="vars-key" role="cell"><span className="vars-name">{name}</span><span className="hint vars-use">{`{{env.${name}}}`}</span></span>
+                  <span className="vars-cell" role="cell">
+                    {source === "globals" ? <span className="vars-value">{value}</span> : <input className="input" aria-label={`Value of ${name}`} defaultValue={value} placeholder={source === "unset" ? "its value" : undefined} />}
+                    {source === "globals" ? <button className="btn" type="button">override</button> : source !== "unset" && <button className="btn btn-icon" type="button" aria-label={`Delete ${name}`}>×</button>}
+                  </span>
+                  <span className="hint vars-source" role="cell">{text}</span>
+                </div>
+              ))}
+              <form className="vars-row vars-add" role="row" onSubmit={(e) => e.preventDefault()}>
+                <span role="cell"><input className="input" placeholder="New variable" aria-label="Name" /></span>
+                <span role="cell"><input className="input" placeholder="its value, then Enter" aria-label="Value" /></span>
+                <span role="cell"></span>
+              </form>
+            </div>
+            <div className="vars" role="table" aria-label="Secrets of stage">
+              <div className="vars-head" role="row"><span className="label" role="columnheader">Name</span><span role="columnheader"><span className="label">Value</span><button className="btn" type="button">show all</button></span><span className="label" role="columnheader">Source</span></div>
+              {[["API_KEY", "", "own", "this scope", false], ["ALIAS", "a-every", "globals", "from Globals", true]].map(([name, value, source, text, shown]) => (
+                <div key={name} className="vars-row" role="row" data-source={source}>
+                  <span className="vars-key" role="cell"><span className="vars-name">{name}</span><span className="hint vars-use">{`{{secret.${name}}}`}</span></span>
+                  <span className="vars-cell" role="cell">
+                    {source === "globals" ? <span className="vars-value">{shown ? value : "••••••••"}</span> : <input className="input" type="password" aria-label={`Value of ${name}`} placeholder="••••••••" />}
+                    <button className="btn vars-reveal" type="button">{shown ? "hide" : "show"}</button>
+                    {source === "globals" ? <button className="btn" type="button">override</button> : <button className="btn" type="button">forget</button>}
+                  </span>
+                  <span className="hint vars-source" role="cell">{text}</span>
+                </div>
+              ))}
+            </div>
+            <div className="panel-foot"><button className="btn" type="button">Delete scope</button></div>
+          </section>
+        </div>
+      </section>
       <section id="g-timeline" style={{ gridColumn: "1 / -1", padding: 0 }}>
         <div className="frame" style={{ flexDirection: "column", justifyContent: "flex-end" }}>
           <TimelineDock spans={SPANS} selected="h1" />
+        </div>
+      </section>
+      <section id="g-settings" style={{ gridColumn: "1 / -1" }}>
+        <h2 className="label">Settings parts</h2>
+        <div className="row" style={{ alignItems: "flex-start" }}>
+          <div className="frame" style={{ width: 620, height: "auto" }}>
+            <div className="settings-content">
+              <div className="field-head"><span className="hint" id="gThemeLabel">Theme</span></div>
+              <div className="controls">
+                <SegmentedChoice id="gTheme" labelledBy="gThemeLabel" value="system" onChange={() => {}}
+                                 options={[["light", "Light", "Always light", "gThemeLight"], ["system", "System", "As the system's", "gThemeSystem"], ["dark", "Dark", "Always dark", "gThemeDark"]]} />
+              </div>
+              <div className="settings-sections">
+                <SettingsSection id="gSectionOpen" name="gSectionOpen" label="Fixtures" defaultOpen summary="acme-login → reset-cart">
+                  <p className="hint fixtures-hint">Plugins that run around this provider's requests, each list in its order.</p>
+                  <textarea className="textarea textarea-code" rows={2} defaultValue={"fixtures:\n  beforeAll: [acme-login]"} aria-label="Code" />
+                </SettingsSection>
+                <SettingsSection id="gSectionClosed" name="gSectionClosed" label="YAML" summary="kind: http · 12 lines">…</SettingsSection>
+                <SettingsSection id="gSectionProblem" name="gSectionProblem" label="Headers" problem summary="line 3, column 1: Missing closing }. Not saved.">…</SettingsSection>
+              </div>
+              <div className="controls"><button className="btn btn-primary" type="button">Try it</button></div>
+            </div>
+          </div>
+          <div className="frame" style={{ width: 620, height: "auto" }}>
+            <div className="settings-content">
+              <p className="hint">When a run ends, its notification shows at the top right.</p>
+              <SettingsGroup id="gGroupSound" label="Sound">
+                <label className="check"><input type="checkbox" defaultChecked /> Play a sound when a run ends</label>
+                <p className="hint">Not looking: another suite or test is open.</p>
+              </SettingsGroup>
+              <SettingsGroup id="gGroupSystem" label="System notifications" state={<span className="hint">allowed</span>}>
+                <label className="check"><input type="checkbox" /> Also show the system's notification</label>
+              </SettingsGroup>
+              <div className="settings-block"><div className="controls"><button className="btn" type="button">Try it</button></div></div>
+            </div>
+          </div>
         </div>
       </section>
     </div>

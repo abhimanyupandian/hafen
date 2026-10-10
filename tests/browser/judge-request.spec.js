@@ -2,11 +2,11 @@
 // System One check's panel show the request it sends, all of it (the address, the headers, the body:
 // the state, the model, the questions), its key hidden; while it's being asked, and after.
 
-import { expect, fileText, test } from "./fixtures.js";
+import { expect, fileText, reopen, test } from "./fixtures.js";
 
 const writeFile = (page, path, text) => page.evaluate(async ([path, text]) => {
   const parts = path.split("/");
-  let dir = await navigator.storage.getDirectory();
+  let dir = await navigator.storage.getDirectory().then((root) => root.getDirectoryHandle("workspace", { create: true }));
   for (const p of parts.slice(0, -1)) dir = await dir.getDirectoryHandle(p, { create: true });
   const w = await (await dir.getFileHandle(parts.at(-1), { create: true })).createWritable();
   await w.write(text);
@@ -38,7 +38,7 @@ test.afterEach(async ({ app: { errors } }) => {
 
 test("after a run: the judge call's step and each System One check show the request, all of it, the key hidden", async ({ app: { page, servers } }) => {
   await writeFile(page, "judged.hafen.yml", suite(servers.mock.url, "{{base_url}}/systemone"));
-  await page.click("#openFolder");
+  await reopen(page);
   await page.locator("#suiteList .list-row[id^='test-'] .list-open", { hasText: "judged" }).first().click();
   await page.click("#testRun");
   await expect(page.locator("#status")).toContainText("passed 1/1");
@@ -82,7 +82,7 @@ test("after a run: the judge call's step and each System One check show the requ
 test("during a run: the request shows as it's asked (asking…), on the check's panel and the call's step", async ({ app: { page, servers } }) => {
   // A judge that takes 2 s to answer (the mock's slow reply: not System One's, so it errors after)
   await writeFile(page, "judged.hafen.yml", suite(servers.mock.url, "{{base_url}}/slow?ms=2000&to="));
-  await page.click("#openFolder");
+  await reopen(page);
   await page.locator("#suiteList .list-row[id^='test-'] .list-open", { hasText: "judged" }).first().click();
   await page.click("#testRun");
   await page.locator("#turn-0 .turn-head .label").click();

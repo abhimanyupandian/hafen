@@ -19,10 +19,10 @@ adds it to the list.
   "ended": 1791191003120,
   "ms": 72120,
   "status": "done",                  // running | done | error | stopped | interrupted
-  "verdict": "failed",               // passed | failed | unsure | null
+  "verdict": "failed",               // passed | failed | unsure (a test passed with unsure results that warn) | null (stopped: failed if a test failed before the stop, else null)
   "where": { "app": "cli", "version": "0.2.0", "os": "linux", "node": "22.11.0" },
   "suites": [{ "file": "tests/support/refund.hafen.yml", "name": "Support bot · refunds", "sha256": "…" }],
-  "settings": { "env": "staging", "filters": { "tag": ["smoke"] }, "unsure": "warn", "network": null, "until_turn": null, "only_turn": null, "redact": ["headers", "secrets"] },
+  "settings": { "env": "staging", "filters": { "tag": ["smoke"] }, "unsure": null, "network": null, "until_turn": null, "only_turn": null, "redact": ["headers", "secrets"] },
   "spans": [ … ],
   "turns": [ … ],
   "tests": [ … ],                    // each test's result: status, passed/total, its instances
@@ -30,8 +30,9 @@ adds it to the list.
   "reviews": [],
   "baseline": null,
   "stopped": null,                   // why, when status is stopped ("the run's cost reached the limit ($2)")
-  "error": null                      // { message, file?, line?, column?, all: [every problem] } when status is error
-}
+  "error": null,                     // { message, file?, line?, column?, all: [every problem] } when status is error
+  "fixtures": []                     // each provider fixture that ran: { name, phase, provider?, test?, status, ms, provides, calls, error? }
+}                                    // (test: { name, id?, repeat, row?, row_name? }, for a before or after one)
 ```
 
 Readers ignore fields they don't know. A reader refuses a `version` higher than it knows, or a
@@ -79,13 +80,14 @@ of its whole suites (the suite's view shows its latest).
 
 Spans: a suite's has `ref: { suite }` and its status says how its tests went (`fail` if any failed or
 errored, `pass` if any passed, `skipped` when stopped); a test's has `ref: { suite, test }` (the test's
-id, or name).
+id, or name). A data row's run (`kind: "row"`) is named as the row is said, `row 3: a refund please`
+(`· run 2` when the test repeats).
 
 ## Turns
 
 ```jsonc
 {
-  "test": "t_8f2k1q9z", "repeat": 1, "row": null, "index": 0,
+  "test": "t_8f2k1q9z", "repeat": 1, "row": null, "index": 0,   // a data row's: "row": 3, "row_name": "a refund please"
   "user": "Hi, I'm Priya. I want a refund for order 4417",
   "user_template": "Hi, I'm {{customer}}. I want a refund for order 4417",
   "events": [
@@ -107,25 +109,37 @@ id, or name).
     { "check": { "type": "status", "equals": 200 }, "status": "pass", "reason": "status 200", "actual": 200, "expected": 200, "ms": 0 },
     { "check": { "type": "systemone.noul", "question": "Does the reply ask why they want a refund?", "min": 0.8 },
       "status": "pass", "reason": "0.91 ≥ 0.8", "value": 0.91, "confidence": 0.82,
-      "judge": { "kind": "systemone", "endpoint": "https://…", "model": "…", "raw": { "…": "…" } }, "usage": { "input": 180, "output": 4 }, "ms": 18 }
+      "judge": { "kind": "systemone", "endpoint": "https://…", "model": "…", "raw": { "…": "…" } }, "usage": { "input": 180, "output": 4 }, "ms": 18 },
+    { "check": { "type": "systemone.noul", "question": "Is it polite?" },
+      "status": "unsure", "reason": "0.58 within 0.5–1, but confidence 0.41 is below 0.6", "value": 0.58, "confidence": 0.41,
+      "unsure": "fail", "judge": { "…": "…" } }
   ],
   "metrics": { "…": "as the turn's span" }
 }
 ```
+
+An `unsure` result keeps how it counted, `unsure`: `fail` (as failed: its turn failed), `warn` (as
+passed, the test reported as unsure) or `pass` (as passed): `--unsure`'s, else the check's own, else
+the test's ([checks.md, Unsure](checks.md#unsure)). (A run file without it: the test's
+`settings.unsure`.)
 
 ## Tests
 
 ```jsonc
 {
   "suite": "tests/support/refund.hafen.yml", "id": "t_8f2k1q9z", "name": "refund for a broken item", "index": 0,
-  "status": "passed",                // passed | failed | error | skipped | stopped
+  "status": "passed",                // passed | failed | error | skipped | stopped (cut short by the run's stop before it had failed)
   "passed": 2, "total": 3, "accuracy": 0.667, "unsure": false,
-  "settings": { "repeat": 3, "pass_rate": 0.67, "history": "live", "on_fail": "continue", "unsure": "warn" },
+  "settings": { "repeat": 3, "pass_rate": 0.67, "history": "live", "on_fail": "continue", "unsure": "fail" },
   "instances": [{ "repeat": 1, "row": null, "status": "passed", "turns": [0, 1], "results": [ … ], "conversation_results": [ … ] }]
 }
 ```
 
-`instances[].turns` are indexes into the run's `turns`.
+`instances[].turns` are indexes into the run's `turns`. A data row's instance has its `row` (from 1)
+and, when the row has a name, `row_name` (on one line, at most 60 characters: [test-file.md, Data
+rows](test-file.md#data-rows)); its turns' records and its fixtures' `test` have the same `row_name`.
+It's redacted as the rest of the run is. A run file from before row names has none: its rows are said
+`row 3`.
 
 ## Summary
 
@@ -152,9 +166,11 @@ id, or name).
 ## Redaction
 
 Applied before a span or turn is stored or written ([research §21](../research.md#21-redaction)):
-secret headers become `"[redacted]"`; every resolved `${env:…}` value is replaced with
-`"[redacted]"` wherever it appears (request, response, events, variables, reasons); the suite's
-`redact.patterns` replace matches with `"[email]"`, `"[card]"`, `"[phone]"`. The run records which
+secret headers become `"[redacted]"`; every resolved secret's value (4 characters or more) is
+replaced with `"[redacted]"` wherever it appears (request, response, events, variables, reasons), as
+it is and JSON-escaped, URL- or form-encoded, or in base64, and in a raw stream as the text its chunks
+join into; the suite's `redact.patterns` replace matches with `"[email]"`, `"[card]"` (Luhn-valid,
+starting 2–6), `"[phone]"` (7–15 digits after `+` or in groups; never an IP, a port, a date or hex). The run records which
 rules applied (`settings.redact`).
 
 ## Reviews

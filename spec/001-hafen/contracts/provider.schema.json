@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Hafen provider",
-  "description": "How to talk to one chat endpoint (spec/001-hafen/contracts/provider.md). Unknown keys are allowed and kept.",
+  "description": "How to talk to one chat endpoint (spec/001-hafen/contracts/provider.md). Hafen's own checks go further than the schema: a key it doesn't know is a problem (keys of your own start with x-; a provider with fixtures gives them its other keys), and is kept in the file.",
   "type": "object",
   "required": [
     "kind"
@@ -9,10 +9,68 @@
   "properties": {
     "kind": {
       "type": "string",
-      "pattern": "^(http|websocket|openai-chat|openai-responses|anthropic-messages|gemini|ollama|plugin:[A-Za-z0-9@/._^~-]+)$"
+      "pattern": "^(http|websocket|openai-chat|openai-responses|anthropic-messages|gemini|ollama|a2a|plugin:[A-Za-z0-9@/._^~-]+)$"
+    },
+    "fixtures": {
+      "type": "object",
+      "description": "Fixture plugins to run around this provider's requests, each list in its order: beforeAll (once per run, before its first request), before (before each test), after (after each test), afterAll (once, when the run ends). What beforeAll's and before's give are secrets for the run (or the test): {{secret.NAME}}, in a file or in a plugin's request. A name may take a version range: acme-login@^1",
+      "additionalProperties": false,
+      "properties": {
+        "beforeAll": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[^@\\s]+(@\\S+)?$"
+          }
+        },
+        "before": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[^@\\s]+(@\\S+)?$"
+          }
+        },
+        "after": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[^@\\s]+(@\\S+)?$"
+          }
+        },
+        "afterAll": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[^@\\s]+(@\\S+)?$"
+          }
+        }
+      }
     },
     "url": {
       "type": "string"
+    },
+    "card": {
+      "type": "string",
+      "description": "A2A: where the agent card is (the agent's address, or the card's own URL); its JSON-RPC interface is used when there's no url"
+    },
+    "version": {
+      "type": [
+        "string",
+        "number"
+      ],
+      "description": "The API's version: A2A's protocol version (1.0 or 0.3), or anthropic-version for anthropic-messages"
+    },
+    "streaming": {
+      "type": "boolean",
+      "description": "A2A: SendStreamingMessage (true) or SendMessage (false); default: what the agent card says, else true"
+    },
+    "configuration": {
+      "type": "object",
+      "description": "A2A: the SendMessageConfiguration sent with each message (acceptedOutputModes, historyLength…)"
+    },
+    "metadata": {
+      "type": "object",
+      "description": "A2A: metadata sent with each message"
     },
     "method": {
       "enum": [

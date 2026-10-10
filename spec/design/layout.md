@@ -165,20 +165,27 @@ The **console** is always the last one: head `CONSOLE`, then `copy` and `clear` 
 open); body `--console-h` (200px by default), remembered (`<app>.consoleHeight`); open by default.
 See [Console](components.md#console). Other docks sit above it.
 
+(eval: the thread comes first. The console is **closed by default** (opened, it's remembered as any
+section is), and open with nothing in it, it's only as tall as its note ([Console when
+empty](components.md#console-when-empty)). The timeline's default height is a fifth of the window's,
+between 120px and 240px ([Timeline](components.md#timeline)). So the thread is at least half the
+window's height at 1440×900, and about half at 1024×768, until the docks are opened or dragged
+taller.)
+
 ## Overlays
 
 | What | Where |
 |---|---|
 | Modal | Centred `<dialog>`, at most `100vw − 32px` by `100vh − 32px`, over a 40% black backdrop |
 | Tooltip | Under its anchor, 6px below, left edges lined up, kept 8px inside the window |
-| Toasts | Top right: 12px from the top, 16px from the right, 340px wide, stacked 8px apart, above modals |
+| Toasts | Top right: 12px from the top, 16px from the right, 340px wide, stacked 8px apart, above modals. (eval: under the top bars, at the top right of the thread, 8px in, so they never cover a bar's controls, the panel or the docks: [Toasts under the top bars](components.md#toasts-under-the-top-bars)) |
 | Loader | Full screen on `--bg`, the logo mark centred, until the page has drawn (at least 1s) |
 
 ## Small screens
 
 | Width | Change |
 |---|---|
-| ≤ 860px | The sidebar becomes a drawer; the top bar shows the menu button and logo; the panel overlays the main column from the right, its full height (`min(340px, 92vw)`, z-index 21; `.main` is `position: relative`), shown when something is selected and closed with its `×` |
+| ≤ 860px | The sidebar becomes a drawer; the top bar shows the menu button and logo; the panel overlays the main column from the right, its full height (`min(340px, 92vw)`, z-index 21; `.main` is `position: relative`), shown when something is selected and closed with its `×` (eval: hidden, what's selected kept, with its own hide button: [The panel on a small screen](components.md#the-panel-on-a-small-screen)) |
 | ≤ 640px | The settings modal stacks: its options become a row of tabs above the content |
 | ≤ 560px | The title hides; the status takes the top bar |
 

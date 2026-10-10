@@ -1,10 +1,10 @@
 // The panels, the sidebar and the thread as they now look (icons, back buttons, no dividers, a check's
 // ×, no overflow), the timeline's fit and scrolling, Markdown replies and copying one raw, scopes
-// (Settings → Environments and Secrets; {{scope.NAME}} anywhere, checked under the field), and
-// Settings → Plugins.
+// (Settings → Environments and Secrets; {{env.NAME}} and {{secret.NAME}} anywhere, checked under the
+// field), and Settings → Plugins.
 
 import { parse } from "yaml";
-import { chooseScope, expect, fileText, test } from "./fixtures.js";
+import { chooseScope, expect, fileText, newScope, reopen, showEntry, test } from "./fixtures.js";
 
 const SUITE = "smoke.hafen.yml";
 const openTest = (page, name) => page.locator("#suiteList .list-open", { hasText: name }).first().click();
@@ -12,7 +12,7 @@ const openTest = (page, name) => page.locator("#suiteList .list-open", { hasText
 const row = (page, text) => (/\.hafen\.(ya?ml|json)$/.test(text) ? page.locator(`#suiteList .list-row[data-file="${text}"]`) : page.locator("#suiteList .list-row", { hasText: text })).first();
 const writeFile = (page, path, text) => page.evaluate(async ([path, text]) => {
   const parts = path.split("/");
-  let dir = await navigator.storage.getDirectory();
+  let dir = await navigator.storage.getDirectory().then((root) => root.getDirectoryHandle("workspace", { create: true }));
   for (const p of parts.slice(0, -1)) dir = await dir.getDirectoryHandle(p, { create: true });
   const w = await (await dir.getFileHandle(parts.at(-1), { create: true })).createWritable();
   await w.write(text);
@@ -21,17 +21,17 @@ const writeFile = (page, path, text) => page.evaluate(async ([path, text]) => {
 const mockLog = async (servers) => (await fetch(`${servers.mock.url}/_log`)).json();
 
 test.beforeEach(async ({ app: { page } }) => {
-  await page.click("#openFolder");
   await expect(page.locator(`#suiteList .list-row[data-file="${SUITE}"]`)).toHaveCount(1);
 });
 test.afterEach(async ({ app: { errors } }) => {
   expect(errors).toEqual([]);
 });
 
-test("the sidebar: 'open folder' is an import icon; a closed section shows its icon, an open one its arrow", async ({ app: { page } }) => {
-  await expect(page.locator("#openFolder")).toHaveAttribute("aria-label", "Open a folder");
-  await expect(page.locator("#openFolder svg")).toHaveCount(1);
-  expect((await page.locator("#openFolder").textContent()).trim()).toBe("");
+test("the sidebar: import and export all are words in Suites' head; a closed section shows its icon, an open one its arrow", async ({ app: { page } }) => {
+  await expect(page.locator("#importSuites")).toHaveText("import");
+  await expect(page.locator("#exportSuites")).toHaveText("export all");
+  await expect(page.locator("#importSuites svg, #exportSuites svg")).toHaveCount(0);
+  await expect(page.locator("#suitesMenu")).toHaveCount(0);
   // Checks starts closed: its icon; open: the arrow
   await expect(page.locator("#checksToggle .section-icon svg")).toHaveCount(1);
   await expect(page.locator("#checksToggle .chev")).toHaveCount(0);
@@ -151,45 +151,46 @@ test("replies are Markdown (safe: no raw HTML, no script links); only a long cod
   }
 });
 
-test("scopes: a scope's plain variables (environments/<scope>.yml) and secrets fill {{scope.NAME}} anywhere; fields say when one isn't there", async ({ app: { page, servers } }) => {
+test("scopes: a scope's environment values (kept by the app) and secrets fill {{env.NAME}} and {{secret.NAME}} anywhere; fields say when one isn't there", async ({ app: { page, servers } }) => {
   // A provider that takes its address and key from the scope
-  await writeFile(page, "providers/mock-json.yml", `kind: http\nurl: "{{scope.base_url}}/json"\nheaders: { Authorization: "Bearer {{scope.API_KEY}}" }\nbody: { message: "{{user}}" }\nresponse: { text: $.data.reply }\n`);
-  // Settings → Environments: a scope, its variables
+  await writeFile(page, "providers/mock-json.yml", `kind: http\nurl: "{{env.base_url}}/json"\nheaders: { Authorization: "Bearer {{secret.API_KEY}}" }\nbody: { message: "{{user}}" }\nresponse: { text: $.data.reply }\n`);
+  // Settings → Environments: a scope, its values
   await page.click("#openSettings");
   await page.click("#settings-tab-environments");
-  await page.fill("#newScopeName", "stage");
-  await page.click("#newScopeForm button[type=submit]");
-  await expect(page.locator("#envScope")).toHaveValue("stage");
+  await newScope(page, "stage");
+  await expect(page.locator("#envScope-stage")).toHaveClass(/active/);
   for (const [name, value] of [["base_url", servers.mock.url], ["who", "stage-team"]]) {
     await page.fill("#envVarName", name);
     await page.fill("#envVarValue", value);
-    await page.click("#envVarAdd button[type=submit]");
+    await page.press("#envVarValue", "Enter");
     await expect(page.locator(`#envVar-${name}`)).toBeVisible();
   }
-  await expect.poll(async () => fileText(page, "environments/stage.yml").then((t) => parse(t), () => null)).toEqual({ base_url: servers.mock.url, who: "stage-team" });
-  expect(await fileText(page, "environments/stage.yml")).toMatch(/^# The "stage" scope's variables/);
+  // (kept by the app, not in its files)
+  const stored = () => page.evaluate(() => JSON.parse(localStorage.getItem("eval.scope.stage")));
+  expect(await stored()).toEqual({ base_url: servers.mock.url, who: "stage-team" });
+  await expect.poll(() => fileText(page, "environments/stage.yml").then(() => "there", () => "none")).toBe("none");
   // A value changed in place
   await page.locator("#envVar-who input").fill("stage-crew");
   await page.locator("#envVar-who input").press("Enter");
-  await expect.poll(async () => parse(await fileText(page, "environments/stage.yml")).who).toBe("stage-crew");
+  await expect.poll(async () => (await stored()).who).toBe("stage-crew");
   // Its secret
   await page.click("#settings-tab-secrets");
-  await page.selectOption("#secretsEnv", "stage");
+  await showEntry(page, "stage", "secrets");
   await page.fill("#secretName", "API_KEY");
   await page.fill("#secretValue", "sk-stage-777");
-  await page.click("#secretAdd button[type=submit]");
+  await page.press("#secretValue", "Enter");
   await expect(page.locator("#secret-API_KEY")).toBeVisible();
   await page.click("#settingsClose");
   // Chosen with the scope button at the top of the sidebar (it opens Settings → Environments)
   await chooseScope(page, "stage");
   // The message box checks a message as it's typed
   await page.selectOption("#convProvider", "providers/mock-json.yml");
-  await page.fill("#input", "hi from {{scope.nope}}");
-  await expect(page.locator("#inputProblem")).toContainText('{{scope.nope}} isn\'t in the scope "stage"');
-  await page.fill("#input", "hi from {{scope.who}} with {{scope.API_KEY}} known");
+  await page.fill("#input", "hi from {{env.nope}}");
+  await expect(page.locator("#inputProblem")).toContainText('{{env.nope}} isn\'t in the scope "stage"');
+  await page.fill("#input", "hi from {{env.who}} with {{secret.API_KEY}} known");
   await expect(page.locator("#inputProblem")).toHaveCount(0);
   await fetch(`${servers.mock.url}/_log`, { method: "DELETE" });
-  await page.fill("#input", "hi from {{scope.who}}");
+  await page.fill("#input", "hi from {{env.who}}");
   await page.click("#send");
   await expect(page.locator("#send")).toHaveText(/send/i);
   const sent = (await mockLog(servers)).at(-1);
@@ -199,19 +200,18 @@ test("scopes: a scope's plain variables (environments/<scope>.yml) and secrets f
   // A panel's field is checked too (under it), and its value saved as typed
   await openTest(page, "refund for a broken item");
   await page.locator("#turn-0 .turn-head .label").click();
-  await page.fill("#turnUser", "{{scope.missing_one}} please");
-  await expect(page.locator("#turnUserProblem")).toContainText("{{scope.missing_one}} isn't in the scope");
-  await page.fill("#turnUser", "I'm {{scope.who}}");
+  await page.fill("#turnUser", "{{env.missing_one}} please");
+  await expect(page.locator("#turnUserProblem")).toContainText("{{env.missing_one}} isn't in the scope");
+  await page.fill("#turnUser", "I'm {{env.who}}");
   await expect(page.locator("#turnUserProblem")).toHaveCount(0);
   // With another scope, the same name may not be there
   await page.click("#openSettings");
   await page.click("#settings-tab-environments");
-  await page.fill("#newScopeName", "prod");
-  await page.click("#newScopeForm button[type=submit]");
+  await newScope(page, "prod");
   await page.click("#envChoose");
   await page.click("#settingsClose");
   await expect(page.locator("#scopeButton .scope-name")).toHaveText("prod");
-  await page.locator("#turnUser").fill("I'm {{scope.who}} again");
+  await page.locator("#turnUser").fill("I'm {{env.who}} again");
   await expect(page.locator("#turnUserProblem")).toContainText('isn\'t in the scope "prod"');
 });
 
@@ -223,15 +223,15 @@ test("Settings → Plugins: a new check plugin from its starting file, used by a
   await page.fill("#newPluginName", "says-sorry");
   await page.click("#newPluginForm button[type=submit]");
   await expect(page.locator("#plugin-says-sorry")).toContainText("says-sorry · check · 1.0.0");
-  await expect(page.locator("#plugin-says-sorry")).toContainText("Any suite in the folder can use it: { type: says-sorry }");
+  await expect(page.locator("#plugin-says-sorry")).toContainText("Any suite can use it: { type: says-sorry }");
   await expect(page.locator("#plugin-says-sorry-used")).toHaveText("Used by no suite yet");
-  // No "use it in a suite" any more: a suite uses the folder's plugins by name
+  // No "use it in a suite" any more: a suite uses the plugins by name
   await expect(page.locator("#plugin-says-sorry select, #plugin-says-sorry-use, #plugin-says-sorry .plugin-suite")).toHaveCount(0);
   expect(await fileText(page, "plugins/says-sorry.js")).toContain('kind: "check"');
   // (a check plugin isn't a provider: no provider file)
   await expect.poll(() => page.evaluate(async () => {
     try {
-      await (await (await navigator.storage.getDirectory()).getDirectoryHandle("providers")).getFileHandle("says-sorry.yml");
+      await (await (await navigator.storage.getDirectory().then((root) => root.getDirectoryHandle("workspace", { create: true }))).getDirectoryHandle("providers")).getFileHandle("says-sorry.yml");
       return true;
     } catch {
       return false;
@@ -258,4 +258,69 @@ test("Settings → Plugins: a new check plugin from its starting file, used by a
   await page.click("#plugin-says-sorry-delete");
   await page.click("#plugin-says-sorry-delete");
   await expect(page.locator("#pluginsEmpty")).toBeVisible();
+});
+
+test("Settings → Plugins: a fixture (a login) from its starting file; a provider naming one has it run before the conversation's first message, its value a secret", async ({ app: { page, servers } }) => {
+  // A new fixture from its starting file: what it gives, and how a provider uses it
+  await page.click("#openSettings");
+  await page.click("#settings-tab-plugins");
+  await page.selectOption("#newPluginKind", "fixture");
+  await page.fill("#newPluginName", "my-login");
+  await page.click("#newPluginForm button[type=submit]");
+  await expect(page.locator("#plugin-my-login")).toContainText("my-login · fixture · 1.0.0");
+  await expect(page.locator("#plugin-my-login-provides")).toHaveText("Gives EXAMPLE_COOKIE, EXAMPLE_CSRF, for the run");
+  await expect(page.locator("#plugin-my-login")).toContainText("Any provider can use it: fixtures: { beforeAll: [my-login] }");
+  expect(await fileText(page, "plugins/my-login.js")).toContain('kind: "fixture"');
+  await page.click("#settingsClose");
+  // One that logs in to the mock (a token: a browser can't send or read cookies), and a provider naming it
+  await writeFile(page, "plugins/token-login.js", `export default {
+  kind: "fixture",
+  name: "token-login",
+  version: "1.0.0",
+  hosts: ["127.0.0.1"],
+  provides: ["ACME_TOKEN"],
+  async setup({ settings, transport, signal }) {
+    const res = await transport.fetch({ url: settings.login_url, method: "POST", body: { user: "qa-bot" }, signal });
+    return { ACME_TOKEN: (await res.json()).access_token };
+  },
+};
+`);
+  await writeFile(page, "providers/behind-login.yml", `kind: http
+fixtures: { beforeAll: [token-login] }
+url: "${servers.mock.url}/json"
+login_url: "${servers.mock.url}/login"
+headers: { x-token: "{{secret.ACME_TOKEN}}" }
+body: { message: "{{user}}" }
+response: { text: $.data.reply }
+`);
+  await reopen(page);
+  await fetch(`${servers.mock.url}/_log`, { method: "DELETE" });
+  await page.selectOption("#convProvider", "providers/behind-login.yml");
+  for (const [i, message] of ["hello", "again"].entries()) {
+    await page.fill("#input", message);
+    await page.press("#input", "Enter");
+    await expect(page.locator(`#turn-${i}-reply .msg-body`)).toContainText(`You said: ${message}`);
+  }
+  const log = await mockLog(servers);
+  expect(log.filter((x) => x.path === "/login")).toHaveLength(1);
+  expect(log.filter((x) => x.path === "/json").map((x) => x.headers["x-token"])).toEqual(["tok_mock_123", "tok_mock_123"]);
+  await expect(page.locator(".timeline-bar[data-kind='fixture']")).toHaveCount(1);
+  expect(await page.content()).not.toContain("tok_mock_123");
+  // Settings → Secrets doesn't ask for what a fixture gives
+  await page.click("#openSettings");
+  await page.click("#settings-tab-secrets");
+  await expect(page.locator("#secretsFromFixtures")).toHaveText("Given by a provider's fixture when a run starts, so not set here: ACME_TOKEN");
+  await expect(page.locator("#secret-ACME_TOKEN")).toHaveCount(0);
+});
+
+test("Settings → Plugins: in the browser build a plugin that imports another file says it can't, and why", async ({ app: { page } }) => {
+  await writeFile(page, "lib/helper.js", "export const word = 'please';\n");
+  await writeFile(page, "plugins/imports.js", `import { word } from "../lib/helper.js";
+export default { kind: "check", name: "imports", version: "1.0.0", async check({ value }) { return { status: String(value).includes(word) ? "pass" : "fail", reason: word }; } };
+`);
+  await reopen(page);
+  await page.click("#openSettings");
+  await page.click("#settings-tab-plugins");
+  await expect(page.locator("#plugin-plugins-imports-js")).toContainText("it imports ../lib/helper.js, and the browser build loads a plugin as one module: use the desktop app or the CLI, or bundle it");
+  await expect(page.getByText("A plugin is an ES module, and can import any other file or package")).toBeVisible();
 });

@@ -32,8 +32,8 @@ A YAML or JSON file; see [test-file.md](contracts/test-file.md).
 | `group` | integer ≥ 1 | Suites in the same group run one after another, groups at once; none is one group ([Groups](contracts/test-file.md#groups)) |
 | `provider` | string \| Provider | A provider file's path, a preset name, a plugin name, or inline |
 | `providers` | `{ [name]: string \| Provider }` | Named providers, for judges and tests that use another |
-| `environments` | `{ [name]: { [var]: string } }` | Named variable sets; picked in the app or with `--env` |
-| `variables` | `{ [var]: string \| number \| boolean }` | Suite variables |
+| `environments` | `{ [name]: { [var]: string } }` | Named variable sets, by the chosen environment's name (the app's scope, `--env`); each is `{{env.NAME}}` where the environment's values passed don't have NAME ([Environments and secrets](contracts/test-file.md#environments-and-secrets)), and a `{{name}}` |
+| `variables` | `{ [var]: string \| number \| boolean }` | Suite variables. None (nor an environment's value, nor an extraction) is called `env`, `secret` or `secrets` |
 | `defaults` | TestSettings | Settings every test starts from |
 | `setup`, `teardown` | Step[] | Run once around the whole suite |
 | `plugins` | `string[]` | More plugin modules (paths or package names); the folder's `plugins/*.js` are used by name without them |
@@ -50,6 +50,7 @@ A YAML or JSON file; see [test-file.md](contracts/test-file.md).
 | `group` | integer ≥ 1 | Tests in the same group run one after another, groups at once; none is one group ([Groups](contracts/test-file.md#groups)) |
 | `provider` | string \| Provider | Overrides the suite's |
 | `data` | string \| `{ file, limit?, shuffle? }` | A CSV or JSON-lines file; one run per row |
+| `row_name` | string | Each row's name, a template filled in with the row (never a secret); without it, the row's first column's value ([Data file](#data-file)). Only with `data` |
 | `setup`, `teardown` | Step[] | Teardown always runs |
 | `turns` | Turn[] | At least one, unless `simulate` is set |
 | `simulate` | Simulation | A simulated user instead of (or after) scripted turns |
@@ -64,7 +65,7 @@ A YAML or JSON file; see [test-file.md](contracts/test-file.md).
 | `pass_rate` | number 0–1 | `1` |
 | `history` | `"live"` \| `"pinned"` | `"live"` |
 | `on_fail` | `"continue"` \| `"stop"` | `"continue"` |
-| `unsure` | `"pass"` \| `"warn"` \| `"fail"` | `"warn"` |
+| `unsure` | `"pass"` \| `"warn"` \| `"fail"` | `"fail"` |
 | `unsure_below` | number 0–1 | `0.6` |
 | `timeout_ms` | integer | `120000` (per turn) |
 | `retries` | integer ≥ 0 | `2` (rate limits and server errors) |
@@ -100,6 +101,8 @@ One object per check; see [checks.md](contracts/checks.md) for every type.
 | operators | see checks.md | `equals`, `not_equals`, `contains`, `not_contains`, `matches`, `exists`, `type_is`, `min_length`, `max_length`, `lt`, `lte`, `gt`, `gte`, `schema` |
 | `required` | boolean | On thinking: fail instead of skip when thinking wasn't returned |
 | `unsure_below` | number | Overrides the test's |
+| `unsure` | `"pass"` \| `"warn"` \| `"fail"` | Overrides the test's (`--unsure` overrides both) |
+| `confidence` | number 0–1 (below 1) | Judged checks: pass only with the judge's confidence above it (never unsure); not with `unsure_below` or `unsure` |
 | judge fields | see checks.md | `question`, `options`, `min`, `max`, `rubric`, `judge`, `samples`, `reference` |
 
 Rules: a check has exactly one type; unknown fields are kept and warned about; a check with no
@@ -109,7 +112,7 @@ operator and no type is a setup error.
 
 | `kind` | Fields | Answers with |
 |---|---|---|
-| `systemone` | `endpoint?` (default TypeSafe's hosted Jev), `api_key?` (default `${env:JEV_API_KEY}`), `model?` | value, probabilities, confidence |
+| `systemone` | `endpoint?` (default TypeSafe's hosted Jev), `api_key?` (default `"{{secret.JEV_API_KEY}}"`), `model?` | value, probabilities, confidence |
 | `llm` | `provider` (a named provider), `samples` (default 3), `temperature?` | verdict per criterion, reasons, agreement |
 | `plugin` | `plugin`, its own fields | value, confidence, reason |
 
@@ -123,7 +126,7 @@ See [provider.md](contracts/provider.md).
 | Field | Type | Rules |
 |---|---|---|
 | `kind` | `"http"` \| `"websocket"` \| a preset (`openai-chat`, `openai-responses`, `anthropic-messages`, `gemini`) \| `plugin:<name>` | Required |
-| `url`, `method`, `headers`, `body` | | HTTP request template; variables and `${env:…}` resolved at send time |
+| `url`, `method`, `headers`, `body` | | HTTP request template; variables, `{{env.NAME}}` and `{{secret.NAME}}` resolved at send time |
 | `history` | `"messages"` \| `"session"` \| `"none"` | How a conversation is carried |
 | `stream` | `"none"` \| `"sse"` \| `"ndjson"` | How the reply arrives |
 | `response` | ResponseMap | Paths to text, thinking, tool calls, usage, session id (per event when streaming) |
@@ -165,6 +168,12 @@ See [provider.md](contracts/provider.md).
 CSV with a header row, or JSON lines (one object per line). Each row becomes `{{row.<column>}}`.
 Rows are numbered from 1 in results. A row whose values don't parse is an error for that row only.
 
+Each row has a name, `row_name` on its instances, turn records and fixtures' `test`: the test's
+`row_name` filled in with the row, else the value of its first column (a CSV file's header order, a
+JSON line's first key); on one line, cut at 60 characters with `…`; none when empty or when it can't
+be filled in. Everything that says a row says `row 3: <its name>` (none: `row 3`)
+([test-file.md, Data rows](contracts/test-file.md#data-rows)).
+
 ## Run
 
 The record of one run; stored in the app's IndexedDB database (`hafen`, store `runs`) and
@@ -180,13 +189,12 @@ written as `<_id>.hafen-run.json`. Full format in [run-file.md](contracts/run-fi
 | `status` | RunStatus | below |
 | `verdict` | `"passed"` \| `"failed"` \| `"unsure"` \| null | Null until the run ends, and for explore runs |
 | `where` | `{ app: "desktop"\|"browser"\|"cli", version, os, node?, browser? }` | |
-| `folder` | string | The folder it's of, as the app kept it (a desktop folder's path, a browser folder's name): another folder's suites by the same names don't show its results |
 | `suites` | `{ file, name, sha256 }[]` | What ran, and the files' hashes |
 | `settings` | object | Environment name (not values), filters, profiles, overrides |
 | `spans` | Span[] | Every step |
 | `turns` | TurnRecord[] | Every turn's events, request, response and results |
 | `summary` | Metrics | |
-| `reviews` | `{ result, agree, by?, at }[]` | Human review marks |
+| `reviews` | `{ result, agree, by?, at }[]` | Human review marks (not built yet: FR-040; nothing writes it today) |
 | `baseline` | Comparison | When compared |
 
 ### RunStatus
@@ -204,7 +212,7 @@ running ───┼──────────► error        (setup or con
 |---|---|---|
 | `_id` | string | |
 | `parent` | string \| null | The span it's part of |
-| `kind` | SpanKind | `run`, `suite`, `test`, `repeat`, `row`, `turn`, `setup`, `teardown`, `request`, `first_byte`, `thinking`, `tool_call`, `tool_result`, `answer`, `check`, `judge_call`, `retry`, `error`, `user_sim` (a simulated user's message) |
+| `kind` | SpanKind | `run`, `suite`, `test`, `repeat`, `row`, `turn`, `setup`, `teardown`, `request`, `first_byte`, `thinking`, `tool_call`, `tool_result`, `answer`, `check`, `judge_call`, `retry`, `error`, `user_sim` (a simulated user's message), `fixture` (a provider's fixture running, named `<fixture> · <phase>`: beforeAll under the suite, before and after under the instance, afterAll under the run, any under the turn in a conversation; its `fixture: { name, phase, provider }`, its metrics' `provides` and `calls`, `stop: true` when it returned false (said to stop), `sets` (the environment names it set with env.set), its `error`), `call` (an HTTP call a plugin or fixture made, under what made it: its `plugin`, `request`, `response`, `error`; [provider.md](contracts/provider.md#plugins-calls)) |
 | `name` | string | What the timeline shows: `lookup_order`, `contains 4417` |
 | `start`, `end` | number | Milliseconds from the run's start, from a monotonic clock; `end` absent while running |
 | `status` | `"running"` \| `"ok"` \| `"pass"` \| `"fail"` \| `"unsure"` \| `"skipped"` \| `"error"` | Steps are `ok` or `error`; checks use check results |
@@ -241,6 +249,7 @@ event when recorded, keeping the first `t` and the last arrival as the span's en
 | Field | Type | Notes |
 |---|---|---|
 | `test`, `repeat`, `row`, `index` | | Where it is |
+| `row_name` | string? | A data row's name, when it has one ([Data file](#data-file)) |
 | `user` | string | The message as sent (variables resolved, secrets redacted) |
 | `user_template` | string \| ContentPart[] | The message as the test file had it (before variables), so a view can tell whether this record is still of the turn the file now has. Each check result likewise keeps its `check` as the file had it |
 | `events` | TurnEvent[] | In order |
@@ -271,7 +280,7 @@ event when recorded, keeping the first `t` and the last arrival as the span's en
 ```
                 ┌─► pass
 pending ─► running ─┼─► fail
-   │                ├─► unsure   (judged, confidence below unsure_below)
+   │                ├─► unsure   (judged, its value passes, confidence below unsure_below)
    │                └─► error    (couldn't be decided: unreachable judge, invalid path, not JSON)
    └──────────────────► skipped  (its turn didn't run; thinking not returned and not required)
 ```

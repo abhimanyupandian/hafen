@@ -15,12 +15,15 @@ import { panWithSpace } from "./pan.js";
 
 const ROW = 24;
 const AXIS = 24;
-const HEIGHT = 240;
+// Its height until it's dragged: a fifth of the window's, between 120px and 240px (the thread first)
+const defaultHeight = () => Math.round(Math.min(240, Math.max(120, window.innerHeight / 5)));
 const LABELS = 200;
+const TICK_GAP = 64;  // the least room between two ticks, so their labels never overlap
 const HIDDEN = new Set(["run", "suite", "first_byte"]);  // what every row would share, or too small to see
 
 const fmt = (ms) => (ms === undefined ? "" : ms < 1000 ? `${Math.round(ms)} ms` : `${(ms / 1000).toFixed(ms < 10000 ? 2 : 1)} s`);
-const tickStep = (ms) => [10, 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000, 30000, 60000, 120000, 300000].find((s) => ms / s <= 8) ?? 600000;
+// The tick step: the first that leaves TICK_GAP pixels between ticks at this many pixels per ms
+const tickStep = (pxPerMs) => [1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000, 30000, 60000, 120000, 300000].find((s) => s * pxPerMs >= TICK_GAP) ?? 600000;
 
 // Spans as rows: depth-first under their parents, groups folded on request; `show` brings back kinds
 // that are usually hidden (a suite's view shows its suite)
@@ -95,8 +98,9 @@ export function placesOf(spans) {
 const remembered = new Map();   // place → folded
 
 // show: kinds usually hidden to show (["suite"]); collapse: kinds whose rows start folded (["test"]),
-// including ones that appear while a run goes on (unless opened, in this run or an earlier one)
-export function TimelineDock({ spans = [], running = false, selected, onSelect, show = [], collapse = [], empty = "Run a test or send a message to see its steps here." }) {
+// including ones that appear while a run goes on (unless opened, in this run or an earlier one).
+// actions: more controls in its head (after fit)
+export function TimelineDock({ spans = [], running = false, selected, onSelect, show = [], collapse = [], empty = "Run a test or send a message to see its steps here.", actions = null }) {
   const sectionRef = useRef(null);
   const handleRef = useRef(null);
   const chartRef = useRef(null);
@@ -126,7 +130,7 @@ export function TimelineDock({ spans = [], running = false, selected, onSelect, 
 
   useLayoutEffect(() => {
     makeResizable(handleRef.current, {
-      key: KEYS.timelineHeight, label: "timeline", initial: HEIGHT, axis: "y", direction: -1,
+      key: KEYS.timelineHeight, label: "timeline", initial: defaultHeight(), axis: "y", direction: -1,
       min: () => 80, max: () => Math.max(80, (sectionRef.current?.parentElement?.clientHeight ?? 600) - 120),
       apply: (px) => document.documentElement.style.setProperty("--timeline-h", `${px}px`),
     });
@@ -163,7 +167,7 @@ export function TimelineDock({ spans = [], running = false, selected, onSelect, 
   const x = (ms) => (ms - origin) * px;
   // (At fit, x(end) is the width less the room, but for a hair of floating point over it, which
   // rounded up would be a pixel to scroll: the content's width rounds up only what's really more)
-  const step = tickStep(span / scale);
+  const step = tickStep(px);
   const ticks = [];
   for (let t = 0; t <= span && ticks.length < 400; t += step) ticks.push(t);
   const total = spans.find((s) => s.kind === "run" || s.kind === "turn") ? fmt(end - origin) : "";
@@ -177,6 +181,7 @@ export function TimelineDock({ spans = [], running = false, selected, onSelect, 
         </button>
         {rows.length > 0 && <span className="hint when-open" id="timelineTotal">{`${total}${total ? " · " : ""}${rows.length} steps`}</span>}
         {rows.length > 0 && <button className="btn btn-ghost when-open" id="timelineFit" type="button" onClick={() => zoom.set(1)}>fit</button>}
+        {actions}
       </div>
       <div className={`timeline-body collapsible-body${rows.length ? "" : " no-steps"}`} id="timelineBody">
         <div className="timeline-labels" aria-hidden="true"

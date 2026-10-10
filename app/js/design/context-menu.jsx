@@ -2,7 +2,9 @@
 // right-click, or under a control from the keyboard (the menu key, Shift+F10). Its items are buttons:
 // ↑/↓ move between them, Enter or a click picks one, Esc, Tab, a click elsewhere, the window resized
 // or left close it. (Not a scroll: the thread scrolls by itself while a run streams.) An item with `confirm` asks first: its first pick changes its label to the question, the
-// second does it. <ContextMenu /> is drawn once, in the page.
+// second does it. <ContextMenu /> is drawn once, in the page; opened while a modal is open (Settings),
+// it's drawn inside the modal's dialog, which is in the top layer: anywhere else, it would be under the
+// modal, and couldn't be used.
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
@@ -24,7 +26,7 @@ export function openMenu(e, { label, items }) {
     y = r.bottom;
   }
   returnFocus = document.activeElement;
-  menu.set({ open: { x, y, label, items } });
+  menu.set({ open: { x, y, label, items, inside: document.querySelector("dialog[open]:modal") ?? document.body } });
 }
 
 export const closeMenu = () => {
@@ -95,5 +97,5 @@ export function ContextMenu() {
           </button>
         )))}
     </div>,
-    document.body);
+    open.inside.isConnected ? open.inside : document.body);
 }

@@ -46,7 +46,8 @@ export function CheckCard({ id, check, result, onOpen, onToggle, onDelete }) {
   return (
     <li className={`check-card${onOpen ? " openable" : ""}`} id={id} data-status={status} onClick={open}>
       <div className="check-card-head">
-        <span className="block-label"><Icon name="check" size={16} /><span className="label">{kind.name}</span></span>
+        {/* (a tick never stands beside "fail": one that failed or errored has a cross) */}
+        <span className="block-label"><Icon name={status === "fail" || status === "error" ? "fail" : "check"} size={16} /><span className="label">{kind.name}</span></span>
         <span className="check-card-status" id={id && `${id}-status`}>{word}</span>
         {onToggle && (
           <CheckOnBox id={id && `${id}-on`} on={on} onToggle={onToggle} className="check check-card-on" title={on ? "Turn this check off: it's skipped when the test runs" : "Turn this check on"}>on</CheckOnBox>

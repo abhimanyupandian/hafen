@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Hafen suite",
-  "description": "A suite of end-to-end tests for chat endpoints (spec/001-hafen/contracts/test-file.md). Unknown keys are allowed and kept; the app and CLI warn about them.",
+  "description": "A suite of end-to-end tests for chat endpoints (spec/001-hafen/contracts/test-file.md). Hafen's own checks go further than the schema: a key it doesn't know is a problem (keys of your own start with x-), and is kept in the file.",
   "type": "object",
   "required": [
     "version",
@@ -325,6 +325,10 @@
             }
           ]
         },
+        "row_name": {
+          "type": "string",
+          "description": "Each data row's name, where the reports and the app say the row (row 3: <name>): a template filled in with the row ({{row.<column>}}), the suite's variables and {{env.NAME}}, never a secret. Without it, the row's first column's value. On one line, cut at 60 characters (contracts/test-file.md, data)"
+        },
         "setup": {
           "type": "array",
           "items": {
@@ -565,7 +569,7 @@
             },
             "api_key": {
               "type": "string",
-              "description": "Usually ${env:…}; default ${env:JEV_API_KEY}."
+              "description": "Usually {{secret.…}}; default {{secret.JEV_API_KEY}}."
             },
             "model": {
               "type": "string"
@@ -639,6 +643,20 @@
           "type": "number",
           "minimum": 0,
           "maximum": 1
+        },
+        "unsure": {
+          "enum": [
+            "pass",
+            "warn",
+            "fail"
+          ],
+          "description": "A judged check's: how its unsure result counts, over the test's unsure (default fail: counted as failed; warn: passed, with a warning; pass: passed). --unsure is over both. A check with confidence is never unsure, so it doesn't go with that."
+        },
+        "confidence": {
+          "type": "number",
+          "minimum": 0,
+          "exclusiveMaximum": 1,
+          "description": "A judged check's: it passes only when its value does and the judge's confidence is above this (0.5: above 0.5). It's never unsure, so unsure_below doesn't go with it."
         },
         "equals": {},
         "not_equals": {},

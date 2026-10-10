@@ -5,13 +5,13 @@
 // shown as its × is; no large-editor button on the message box.
 
 import { parse } from "yaml";
-import { pluginTemplate } from "../../engine/plugin-templates.js";
-import { expect, fileText, test } from "./fixtures.js";
+import { pluginTemplate } from "hafen/engine/plugin-templates.js";
+import { expect, fileText, openYaml, reopen, test } from "./fixtures.js";
 
 const SUITE = "smoke.hafen.yml";
 const writeFile = (page, path, text) => page.evaluate(async ([path, text]) => {
   const parts = path.split("/");
-  let dir = await navigator.storage.getDirectory();
+  let dir = await navigator.storage.getDirectory().then((root) => root.getDirectoryHandle("workspace", { create: true }));
   for (const p of parts.slice(0, -1)) dir = await dir.getDirectoryHandle(p, { create: true });
   const w = await (await dir.getFileHandle(parts.at(-1), { create: true })).createWritable();
   await w.write(text);
@@ -20,7 +20,7 @@ const writeFile = (page, path, text) => page.evaluate(async ([path, text]) => {
 const exists = (page, path) => page.evaluate(async (path) => {
   const parts = path.split("/");
   try {
-    let dir = await navigator.storage.getDirectory();
+    let dir = await navigator.storage.getDirectory().then((root) => root.getDirectoryHandle("workspace", { create: true }));
     for (const p of parts.slice(0, -1)) dir = await dir.getDirectoryHandle(p);
     await dir.getFileHandle(parts.at(-1));
     return true;
@@ -28,8 +28,8 @@ const exists = (page, path) => page.evaluate(async (path) => {
     return false;
   }
 }, path);
-const openFolder = async (page) => {
-  await page.click("#openFolder");
+const openApp = async (page) => {
+  await reopen(page);
   await expect(page.locator(`#suiteList .list-row[data-file="${SUITE}"]`)).toHaveCount(1);
 };
 const openTest = (page, name) => page.locator("#suiteList .list-row[id^='test-'] .list-open", { hasText: name }).first().click();
@@ -55,7 +55,7 @@ test.afterEach(async ({ app: { errors } }) => {
 });
 
 test("a test's group and a suite's group: set in their panels, written to the file, cleared; a bad one isn't saved", async ({ app: { page } }) => {
-  await openFolder(page);
+  await openApp(page);
   await openTest(page, "refund for a broken item");
   await expect(page.locator("#testGroup")).toHaveValue("");
   await expect(page.locator("#testGroupHint")).toContainText("Tests in the same group run one after another; different groups run at the same time");
@@ -88,14 +88,14 @@ test("a provider plugin made in Settings → Plugins comes with its provider fil
   // (a provider file of that name already there: kept, and the new one is acme-2)
   const theirs = "kind: http\nurl: https://acme.example/chat\nbody: { message: \"{{user}}\" }\nresponse: { text: $.reply }\n";
   await writeFile(page, "providers/acme.yml", theirs);
-  await openFolder(page);
+  await openApp(page);
   await page.click("#openSettings");
   await page.click("#settings-tab-plugins");
   await page.selectOption("#newPluginKind", "provider");
   await page.fill("#newPluginName", "acme");
   await page.click("#newPluginForm button[type=submit]");
   await expect(page.locator("#plugin-acme")).toContainText("acme · provider · 1.0.0");
-  await expect(page.locator("#plugin-acme")).toContainText("Any suite in the folder can use it: kind: plugin:acme");
+  await expect(page.locator("#plugin-acme")).toContainText("Any suite can use it: kind: plugin:acme");
   await expect.poll(() => exists(page, "providers/acme-2.yml")).toBe(true);
   expect(parse(await fileText(page, "providers/acme-2.yml"))).toEqual({ kind: "plugin:acme" });
   expect(await fileText(page, "providers/acme-2.yml")).toContain("# url: https://api.example.com/chat");
@@ -103,7 +103,7 @@ test("a provider plugin made in Settings → Plugins comes with its provider fil
   // Listed among the providers, as plugin:acme; nothing left waiting for a provider file
   await page.click("#settings-tab-providers");
   await expect(page.locator("#provider-acme-2")).toContainText("plugin:acme · providers/acme-2.yml");
-  await expect(page.locator("#provider-acme")).toContainText("json · providers/acme.yml");
+  await expect(page.locator("#provider-acme")).toContainText("http (json) · providers/acme.yml");
   await expect(page.locator("[id^='provider-plugin-']")).toHaveCount(0);
   // A check plugin isn't a provider: none made for it
   await page.click("#settings-tab-plugins");
@@ -117,7 +117,7 @@ test("a provider plugin made in Settings → Plugins comes with its provider fil
 test("a provider plugin with no provider file is offered one in Providers; then it's used in a conversation and a run, no plugins: in the suite", async ({ app: { page, servers } }) => {
   await writeFile(page, "plugins/echo.js", ECHO);
   await writeFile(page, "plug.hafen.yml", `version: 1\nname: Plug\nprovider: providers/echo.yml\ntests:\n  - name: through the plugin\n    turns:\n      - user: hello there\n        expect: [ { contains: "You said: hello there (via echo)" } ]\n`);
-  await openFolder(page);
+  await openApp(page);
   await page.click("#openSettings");
   await page.click("#settings-tab-providers");
   await expect(page.locator("#provider-plugin-echo")).toContainText("plugin:echo · plugins/echo.js · no provider file yet");
@@ -126,6 +126,7 @@ test("a provider plugin with no provider file is offered one in Providers; then 
   await expect(page.locator("#providerName")).toHaveValue("echo");
   expect(parse(await fileText(page, "providers/echo.yml"))).toEqual({ kind: "plugin:echo" });
   const yaml = (await fileText(page, "providers/echo.yml")).replace("# url: https://api.example.com/chat", `url: "${servers.mock.url}/json"`);
+  await openYaml(page);
   await page.fill("#providerYaml", yaml);
   await page.locator("#providerYaml").blur();
   await expect.poll(async () => parse(await fileText(page, "providers/echo.yml")).url).toBe(`${servers.mock.url}/json`);
@@ -153,7 +154,7 @@ test("a provider plugin with no provider file is offered one in Providers; then 
 
 test("a plugin's JavaScript: in colour as it's typed; Tab, Enter and a closing bracket keep it indented; Format; Save", async ({ app: { page } }) => {
   await writeFile(page, "plugins/polite.js", pluginTemplate("check", "polite"));
-  await openFolder(page);
+  await openApp(page);
   await page.click("#openSettings");
   await page.click("#settings-tab-plugins");
   await page.click("#plugin-polite-edit");
@@ -214,7 +215,7 @@ test("a plugin's JavaScript: in colour as it's typed; Tab, Enter and a closing b
 });
 
 test("a turn's ▷ shows as its × does: when the turn is pointed at or selected; always while it's the stop of a run", async ({ app: { page, servers } }) => {
-  await openFolder(page);
+  await openApp(page);
   // (after the folder's opened: opening it writes the fixtures' files)
   await writeFile(page, "providers/mock-json.yml", `kind: http\nurl: "${servers.mock.url}/slow?ms=1500"\nbody: { message: "{{user}}" }\nresponse: { text: $.data.reply }\n`);
   await openTest(page, "refund for a broken item");
@@ -251,7 +252,7 @@ test("a turn's ▷ shows as its × does: when the turn is pointed at or selected
 });
 
 test("the message box has no large-editor button", async ({ app: { page } }) => {
-  await openFolder(page);
+  await openApp(page);
   await expect(page.locator("#input")).toBeVisible();
   await expect(page.locator("#inputMax")).toHaveCount(0);
   await expect(page.locator(".composer .btn-max")).toHaveCount(0);

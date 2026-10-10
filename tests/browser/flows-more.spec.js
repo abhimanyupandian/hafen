@@ -3,11 +3,11 @@
 // response's JSON as JSON has it (a key with no value isn't there).
 
 import { parse } from "yaml";
-import { expect, fileText, test } from "./fixtures.js";
+import { expect, fileText, reopen, test } from "./fixtures.js";
 
 const SUITE = "smoke.hafen.yml";
-const openFolder = async (page) => {
-  await page.click("#openFolder");
+const openApp = async (page) => {
+  await reopen(page);
   await expect(page.locator(`#suiteList .list-row[data-file="${SUITE}"]`)).toHaveCount(1);
 };
 const openTest = (page, name) => page.locator("#suiteList .list-open", { hasText: name }).first().click();
@@ -31,7 +31,7 @@ async function send(page, text) {
 }
 
 test.beforeEach(async ({ app: { page } }) => {
-  await openFolder(page);
+  await expect(page.locator(`#suiteList .list-row[data-file="${SUITE}"]`)).toHaveCount(1);
 });
 test.afterEach(async ({ app: { errors } }) => {
   expect(errors).toEqual([]);
@@ -140,17 +140,17 @@ test("the response's JSON is as JSON has it: a key with no value isn't listed", 
 
 const writeFile = (page, path, text) => page.evaluate(async ([path, text]) => {
   const parts = path.split("/");
-  let dir = await navigator.storage.getDirectory();
+  let dir = await navigator.storage.getDirectory().then((root) => root.getDirectoryHandle("workspace", { create: true }));
   for (const p of parts.slice(0, -1)) dir = await dir.getDirectoryHandle(p, { create: true });
   const w = await (await dir.getFileHandle(parts.at(-1), { create: true })).createWritable();
   await w.write(text);
   await w.close();
 }, [path, text]);
-// A provider that takes `ms` to answer, and a suite of one test on it (read when the folder's opened again)
+// A provider that takes `ms` to answer, and a suite of one test on it (read when the app's loaded again)
 async function slowSuite(page, servers, ms = 2500) {
   await writeFile(page, "providers/mock-slow.yml", `kind: http\nurl: "{{base_url}}/slow?ms=${ms}"\nbody: { message: "{{user}}" }\nresponse: { text: $.data.reply }\n`);
   await writeFile(page, "slow.hafen.yml", `version: 1\nname: Slow\nprovider: providers/mock-slow.yml\nenvironments:\n  local: { base_url: "${servers.mock.url}" }\ntests:\n  - name: slow one\n    turns:\n      - user: wait for it\n        expect:\n          - { type: status, equals: 200 }\n`);
-  await page.click("#openFolder");
+  await reopen(page);
   await expect(page.locator('#suiteList .list-row[data-file="slow.hafen.yml"]')).toHaveCount(1);
 }
 const confirmDelete = async (row) => { await row.hover(); await row.locator(".list-del").first().click(); await row.locator(".list-del").first().click(); };
@@ -209,7 +209,7 @@ test("⌘↵ / Ctrl+Enter in Settings doesn't run the test that's open", async (
 
 test("the open conversation deleted while it sends: it's gone, and its reply doesn't bring it back", async ({ app: { page, servers } }) => {
   await writeFile(page, "providers/mock-slow.yml", `kind: http\nurl: "{{base_url}}/slow?ms=1500"\nbody: { message: "{{user}}" }\nresponse: { text: $.data.reply }\n`);
-  await page.click("#openFolder");
+  await reopen(page);
   await page.click("#newConversation");
   await page.selectOption("#convProvider", "providers/mock-slow.yml");
   await send(page, "slow hello");

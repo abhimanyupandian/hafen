@@ -50,3 +50,40 @@ export function NavSection({ id, name, label, bodyId, defaultOpen = false, actio
     </section>
   );
 }
+
+// A part of a Settings pane that opens and closes, as a sidebar section does (an Addition: Settings
+// sections), remembered by its id the same way. `name` names its toggle (#<name>Toggle), label, summary
+// and body (#<name>Body). While it's closed, its head says what's in it (`summary`; with `problem`,
+// in --danger). Its body stays in the page while it's closed, only not shown.
+export function SettingsSection({ id, name, label, summary, problem = false, defaultOpen = false, children }) {
+  const [open, toggle] = useCollapsible(id, defaultOpen);
+  return (
+    <section className={"settings-section collapsible" + (open ? " open" : "")} id={id} aria-labelledby={`${name}Label`}>
+      <div className="settings-section-head collapsible-head">
+        <button className="collapsible-toggle" id={`${name}Toggle`} type="button" aria-expanded={open} aria-controls={`${name}Body`} onClick={toggle}>
+          <span className="chev" aria-hidden="true"></span>
+          <span className="label" id={`${name}Label`}>{label}</span>
+          {!open && summary && <span className={`hint settings-section-summary${problem ? " error" : ""}`} id={`${name}Summary`}>{summary}</span>}
+        </button>
+      </div>
+      <div className="settings-section-body collapsible-body" id={`${name}Body`}>{children}</div>
+    </section>
+  );
+}
+
+// A group of a pane's settings under its name, a line above it (an Addition: Settings groups): the
+// part of a Settings pane that doesn't close, beside SettingsSection. `state`: what it says about them
+// all, at the right of its name
+export const SettingsGroup = ({ id, label, state, children }) => (
+  <section className="settings-block" id={id} aria-labelledby={`${id}Label`}>
+    <div className="settings-block-head"><h3 className="label" id={`${id}Label`}>{label}</h3>{state}</div>
+    {children}
+  </section>
+);
+
+// Open a section from code (`name`, as its toggle's id has it), as a click on its toggle would; nothing
+// when it's open already
+export function openSection(name) {
+  const toggle = document.getElementById(`${name}Toggle`);
+  if (toggle?.getAttribute("aria-expanded") === "false") toggle.click();
+}

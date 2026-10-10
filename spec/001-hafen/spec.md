@@ -98,27 +98,28 @@ expected.
 
 ### User Story 3 - Run the same tests in CI (Priority: P1)
 
-The tests are files in the team's repository: the file the app saves is the test. A command-line
-runner runs those files unchanged in CI, exits with a code that says whether tests failed or the
-setup was broken, and writes reports CI systems show. A failed CI run's record opens in the app,
+The app keeps the tests, as plain files; Export writes them, with everything they use, to a folder
+in the team's repository, as they are. A command-line runner runs that folder unchanged in CI, exits
+with a code that says whether tests failed or the setup was broken, and writes reports CI systems
+show. A failed CI run's record opens in the app,
 showing the same chat, checks and timeline.
 
 **Why this priority**: Tests that only run by hand don't catch regressions. Running in CI is what
 makes the tool part of a team's process.
 
-**Independent Test**: Run a suite saved by the app with the command-line runner against the mock
-endpoint; check the exit code, the JUnit report, and that the run file opens in the app with the
-same results.
+**Independent Test**: Export a suite from the app and run the folder with the command-line runner
+against the mock endpoint; check the exit code, the JUnit report, and that the run file opens in the
+app with the same results.
 
 **Acceptance Scenarios**:
 
-1. **Given** a suite file saved by the app, **When** the CI runner runs it against the same
-   responses, **Then** every rule-based check gives the same result as in the app.
+1. **Given** a suite the app exported to a folder, **When** the CI runner runs the folder against the
+   same responses, **Then** every rule-based check gives the same result as in the app.
 2. **Given** a failing check, **When** the runner finishes, **Then** it exits with the "tests
    failed" code, and the JUnit report names the test, the turn, the check and why it failed.
-3. **Given** a missing environment variable or an invalid file, **When** the runner starts, **Then**
-   it exits with the "setup error" code and names the file, the line and the variable, without
-   sending any request.
+3. **Given** a secret or an environment value that isn't set, or an invalid file, **When** the
+   runner starts, **Then** it exits with the "setup error" code and names the file, the line and the
+   variable, without sending any request.
 4. **Given** the runner's `validate` command, **When** it runs on a folder of suites, **Then** it
    checks every file against the schema and sends nothing.
 5. **Given** the run file a CI run wrote, **When** it's opened in the app, **Then** the app shows
@@ -134,7 +135,8 @@ Some checks need judgement: "does the reply ask why they want a refund?". The te
 One questions (choice, score or noul, through a System One API: TypeSafe's hosted Jev, or a
 self-hosted endpoint serving the same API), or an LLM judge with a rubric of criteria, as in ADK. Judged results show
 their value and how confident the judge was. A pass the judge wasn't sure about shows as "unsure",
-not as a plain pass.
+not as a plain pass, and counts as a failure unless the tester says otherwise; a value that misses
+its criterion fails, however unsure the judge.
 
 **Why this priority**: Rule checks can't test what a reply means. Confidence is what sets this tool
 apart from pass/fail judges.
@@ -148,9 +150,11 @@ low.
 1. **Given** a noul check "Does the reply ask why they want a refund?" with a minimum of 0.8,
    **When** the judge answers 0.91, **Then** the check passes, showing 0.91 and System One's
    confidence.
-2. **Given** a judged check whose confidence is below the test's "unsure" threshold, **When** it
-   runs, **Then** its tag shows "unsure" in the waiting colour, and CI treats it as the suite's
-   unsure policy says (a warning by default).
+2. **Given** a judged check whose value passes but whose confidence is below the test's "unsure"
+   threshold, **When** it runs, **Then** its tag shows "unsure" in the waiting colour, and CI treats
+   it as the unsure policy says (a failure by default, saying it was unsure and how to let it pass;
+   a warning or a pass when the suite, the test, the check or the command line says so). A value
+   that misses its criterion fails, whatever the confidence.
 3. **Given** an LLM judge with a rubric and 3 samples, **When** it runs, **Then** the result shows
    how many samples agreed (as confidence), the judge's reasons, and the tokens and cost it took.
 4. **Given** a judge that can't be reached or answers nonsense, **When** the check runs, **Then**
@@ -224,7 +228,8 @@ run a test with thinking checks, and see them pass, pass on the summary, and ski
 A test runs once per row of a data file (CSV or JSON lines), with the row's values in its messages
 and checks; its accuracy is the share of rows that passed. Tests can start with setup steps (a
 login that returns a token, a request that creates a session) and end with teardown steps that run
-even when the test fails. Named environments (local, staging) hold variables.
+even when the test fails. Named environments (local, staging) hold the values that change between
+places, such as an address; secrets are kept apart.
 
 **Why this priority**: QA teams expect data files and logins from their API tools; without them,
 real endpoints are hard to test. The core loop works without them.
@@ -241,7 +246,7 @@ accuracy over 5 rows.
    **Then** their requests use that token.
 3. **Given** a test that fails, **When** it ends, **Then** its teardown steps still run.
 4. **Given** two environments, **When** the tester switches from local to staging (or CI passes
-   `--env staging`), **Then** the same test runs against staging's variables.
+   `--env staging.env`), **Then** the same test runs against staging's values.
 
 ---
 
@@ -365,7 +370,7 @@ by about 300ms; run a simulated-user scenario for up to 5 turns and see checks o
 ### User Story 13 - Use it in a browser (Priority: P3)
 
 Without the desktop app, the same app works in a browser for endpoints that let a web page call
-them, or through the project's own relay (`hafen serve`), which the tester runs. When a
+them, or through the project's own relay (`npm run serve`), which the tester runs. When a
 browser blocks a call, the app says so and what to do.
 
 **Why this priority**: The desktop app and CI are the defaults; the browser is a convenience.
@@ -401,8 +406,8 @@ calls, then against one that doesn't, with and without the relay.
 - **Repeats:** some repeats error while others pass (errors count as not passing, and are reported
   separately).
 - **Files:** a suite edited outside the app while open (the app reloads it; if the app has unsaved
-  changes too, it asks which to keep); comments and unknown keys (kept, with a warning for unknown
-  keys); a file from a newer version (refused, saying so); two runs of the same file at once.
+  changes too, it asks which to keep); comments (kept) and unknown keys (kept in the file, and a problem: a
+  misspelled key would otherwise do nothing, silently; keys of the user's own start with `x-`); a file from a newer version (refused, saying so); two runs of the same file at once.
 - **Variables and secrets:** a variable used but never set (setup error before anything is sent); a
   secret value that appears in a response (redacted in saved runs and reports).
 - **Stopping:** the tester stops a run (status stopped, what ran is kept); the app closes mid-run
@@ -480,15 +485,17 @@ calls, then against one that doesn't, with and without the relay.
 - **FR-036**: The system MUST support LLM-as-judge checks with a rubric of one or more criteria,
   using any configured provider, sampling a set number of times, and report how many samples agreed
   as the confidence.
-- **FR-037**: A judged check whose confidence is below its unsure threshold MUST be "unsure", not
-  pass or fail.
+- **FR-037**: A judged check whose value passes but whose confidence is below its unsure threshold
+  MUST be "unsure", not pass; one whose value misses MUST fail, whatever the confidence. An unsure
+  result MUST count as a failure unless the unsure policy (the check's, the test's, the suite's or
+  the command line's) says warn or pass.
 - **FR-038**: A judge MUST see exactly what the check selects (the reply, a path's value, the
   thinking, or the whole conversation) and MUST NOT shorten it; input over the judge's limit is an
   error saying it's too long.
 - **FR-039**: A judge that can't be reached or gives an unusable answer MUST produce an error result,
   distinct from a failed check.
-- **FR-040**: Users MUST be able to mark a judged result as agreeing or not with their own
-  judgement, and see each judge's agreement with those marks.
+- **FR-040** (**not built yet**): Users MUST be able to mark a judged result as agreeing or not
+  with their own judgement, and see each judge's agreement with those marks.
 
 **Thinking**
 
@@ -530,10 +537,15 @@ calls, then against one that doesn't, with and without the relay.
 **Files and CI**
 
 - **FR-060**: Suites MUST be stored as YAML or JSON files following one published schema. The app
-  MUST read and write those files directly; in a browser it opens and downloads them.
+  MUST keep them itself (its workspace: the desktop app's data folder, a browser's own storage),
+  needing no folder to be picked; it MUST import suites, with everything they use, from files or a
+  folder, and export them, with everything they use, to a folder as plain files that the runner runs
+  unchanged.
 - **FR-061**: Saving from the app MUST keep a file's comments, key order and formatting.
-- **FR-062**: Suite and provider files MUST reference secrets (`${env:NAME}`) and never contain
-  them; the app keeps secret values in the system's keychain (desktop) or a git-ignored local file.
+- **FR-062**: Suite and provider files MUST reference secrets (`{{secret.NAME}}`) and never contain
+  them; the app keeps secret values for each scope, encrypted by the system's keychain (desktop) or in
+  the browser's storage (browser build), and the command line reads them from a file it's given
+  (`--secret`) or the process's environment.
 - **FR-063**: A command-line runner MUST run suites (files and folders, filtered by name or tag) and
   validate them without sending anything, with options for reports, environment, repeats,
   concurrency, unsure policy, spending limit, stopping at the first failure, and a baseline.
@@ -542,7 +554,8 @@ calls, then against one that doesn't, with and without the relay.
 - **FR-065**: The runner MUST write a JUnit XML report, a run file, a Markdown summary and a JSON
   summary, as asked.
 - **FR-066**: A run file MUST open in the app, showing the run's conversation, checks and timeline.
-- **FR-067**: The app MUST offer the command that runs the open suite or test in CI, ready to copy.
+- **FR-067**: The app MUST offer the command that runs the open suite or test in CI (the folder it was
+  exported to), ready to copy.
 - **FR-068**: Files MUST state their schema version; the runner and app MUST refuse a newer major
   version with a setup error that says so.
 - **FR-069**: When cancelled, the runner MUST write its reports for what ran, with the run marked
@@ -554,13 +567,16 @@ calls, then against one that doesn't, with and without the relay.
   values, reporting each row's result and accuracy across rows.
 - **FR-071**: Tests MUST be able to have setup and teardown steps (HTTP requests with extractions);
   teardown MUST run even when the test fails.
-- **FR-072**: Users MUST be able to define named environments of variables and pick one in the app
-  or on the command line.
+- **FR-072**: Users MUST be able to define named environments of values (`{{env.NAME}}`) and pick one
+  in the app (its scopes) or on the command line (`--env <file>`). Whoever runs the engine passes the
+  chosen environment's values; the engine doesn't read them from the files (not even an old
+  `environments/<name>.yml`). The old spellings (`${env:NAME}`, `{{scope.NAME}}`, a
+  plugin's `{ secret: "NAME" }`) MUST be problems that say what to write instead, never filled in.
 
 **Baselines and history**
 
-- **FR-075**: The system MUST keep a history of runs: in the app's storage, and as run files in a
-  folder for CI.
+- **FR-075**: The system MUST keep a history of runs: in the app's storage, and, on the command line,
+  as run files in a folder for CI.
 - **FR-076**: Users MUST be able to compare a run with a baseline (pass rate, p50 and p95 latency,
   cost, flipped checks), and CI MUST be able to fail on a regression beyond set thresholds.
 - **FR-077**: The system MUST chart pass rate, latency and cost across a suite's runs.
@@ -630,7 +646,9 @@ calls, then against one that doesn't, with and without the relay.
 - **Judge**: what answers a judged check: a System One source or an LLM with a rubric.
 - **Provider**: how to talk to one endpoint: request shape, response shape, history, thinking,
   prices.
-- **Environment**: a named set of variables; secrets are referenced, not stored.
+- **Environment**: a named set of values (`{{env.NAME}}`), given by whoever runs the engine (the
+  app's scope, the command line's `--env` file); secrets are referenced (`{{secret.NAME}}`), not
+  stored.
 - **Data file**: rows of values a test runs once per row.
 - **Run**: one execution of suites, tests or a load test: its settings, every step, every result and
   its summary.
@@ -683,8 +701,10 @@ calls, then against one that doesn't, with and without the relay.
 - System One checks need a System One API endpoint and key: TypeSafe's hosted Jev, or a
   self-hosted endpoint serving the same API. In CI, it must be reachable from the runner.
 - No judge model is bundled: LLM judges use whichever provider the suite names.
-- Suites live in the team's repository; in the desktop app the tester opens that folder.
-- "Unsure" results warn in CI by default; a suite or the command line can make them pass or fail.
+- The app keeps the tester's suites; they reach the team's repository by Export (a folder, committed),
+  and come back in by Import.
+- "Unsure" results fail in CI by default, saying so; a check, a test, a suite or the command line can
+  make them warn (pass, with a warning) or pass.
 - Prices are entered by the user; without them, cost shows as unknown.
 - Load tests are only run against endpoints the tester may load, and cost money; the tool asks
   before starting one.

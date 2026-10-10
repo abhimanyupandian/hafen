@@ -1,10 +1,10 @@
-// The app end to end in a browser (spec US1–US3, US5; quickstart §1–§3, §5): open a folder, run a test
-// through the relay, add a check by clicking the response, explore a streaming endpoint, and follow the
-// timeline. The engine runs in the page's Web Worker, as in the browser build.
+// The app end to end in a browser (spec US1–US3, US5; quickstart §1–§3, §5): its suites (kept in its
+// workspace), run a test through the relay, add a check by clicking the response, explore a streaming
+// endpoint, and follow the timeline. The engine runs in the page's Web Worker, as in the browser build.
 
 import { expect, fileText, test } from "./fixtures.js";
 
-// Settings → Providers, where the folder's providers are
+// Settings → Providers, where the providers are
 async function openProviders(page) {
   await page.click("#openSettings");
   await page.click("#settings-tab-providers");
@@ -12,7 +12,6 @@ async function openProviders(page) {
 }
 
 test("runs a test and shows each check's result under each reply", async ({ app: { page, errors } }) => {
-  await page.click("#openFolder");
   await expect(page.locator('#suiteList .list-row[data-file="smoke.hafen.yml"]')).toHaveCount(1);
   await page.locator("#suiteList .list-open", { hasText: "refund for a broken item" }).click();
   await expect(page.locator("#evalTitle")).toHaveText("refund for a broken item");
@@ -27,7 +26,6 @@ test("runs a test and shows each check's result under each reply", async ({ app:
 });
 
 test("adds a check by clicking a value of the response, as one new line of YAML", async ({ app: { page } }) => {
-  await page.click("#openFolder");
   await page.locator("#suiteList .list-open", { hasText: "refund for a broken item" }).click();
   await page.click("#testRun");
   await expect(page.locator("#status")).toContainText("failed");
@@ -48,7 +46,6 @@ test("adds a check by clicking a value of the response, as one new line of YAML"
 });
 
 test("explores a streaming endpoint: thinking, tool calls and the answer, in order, with a timeline", async ({ app: { page, errors } }) => {
-  await page.click("#openFolder");
   await openProviders(page);
   await page.click("#provider-mock-sse-open");
   await page.click("#providerTry");
@@ -68,7 +65,6 @@ test("explores a streaming endpoint: thinking, tool calls and the answer, in ord
 });
 
 test("a run opened from Runs is shown read-only, and exports as a run file", async ({ app: { page } }) => {
-  await page.click("#openFolder");
   await page.locator("#suiteList .list-open", { hasText: "refund for a broken item" }).click();
   await page.click("#testRun");
   await expect(page.locator("#status")).toContainText("failed");
@@ -84,13 +80,12 @@ test("a run opened from Runs is shown read-only, and exports as a run file", asy
 test("the theme switches to dark from Settings", async ({ app: { page } }) => {
   await page.click("#openSettings");
   await page.click("#settings-tab-appearance");
-  await page.selectOption("#themeSelect", "dark");
+  await page.click("#themeDark");
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
-  await page.selectOption("#themeSelect", "light");
+  await page.click("#themeLight");
 });
 
 test("repeats: the test panel sets them, and a picker chooses which repeat the thread shows", async ({ app: { page } }) => {
-  await page.click("#openFolder");
   await page.locator("#suiteList .list-open", { hasText: "refund for a broken item" }).click();
   await page.fill("#testRepeat", "3");
   await page.locator("#testRepeat").blur();
@@ -102,10 +97,10 @@ test("repeats: the test panel sets them, and a picker chooses which repeat the t
   await expect(page.locator("#turn-0 .turn-head .label")).toContainText("run 2");
 });
 
-test("deletes a provider in Settings and a suite from its panel, in the folder", async ({ app: { page } }) => {
+test("deletes a provider in Settings and a suite from its panel, in the workspace", async ({ app: { page } }) => {
   const exists = (path) => page.evaluate(async (path) => {
     const parts = path.split("/");
-    let dir = await navigator.storage.getDirectory();
+    let dir = await navigator.storage.getDirectory().then((root) => root.getDirectoryHandle("workspace", { create: true }));
     try {
       for (const p of parts.slice(0, -1)) dir = await dir.getDirectoryHandle(p);
       await dir.getFileHandle(parts.at(-1));
@@ -114,7 +109,6 @@ test("deletes a provider in Settings and a suite from its panel, in the folder",
       return false;
     }
   }, path);
-  await page.click("#openFolder");
   await expect(page.locator("#providersSection")).toHaveCount(0);
   await openProviders(page);
   const row = page.locator("#provider-mock-sse");
@@ -136,7 +130,6 @@ test("deletes a provider in Settings and a suite from its panel, in the folder",
 });
 
 test("renames a provider in Settings: the file is renamed, and the suite that uses it follows", async ({ app: { page } }) => {
-  await page.click("#openFolder");
   await openProviders(page);
   await page.click("#provider-mock-json-open");
   await expect(page.locator("#providerReload")).toHaveCount(0);
@@ -162,16 +155,19 @@ test("Secrets keeps any number of values under names of your own", async ({ app:
   for (const name of ["SHOP_TOKEN", "search_key"]) {
     await page.fill("#secretName", name);
     await page.fill("#secretValue", "s3cret");
-    await page.click("#secretAdd button[type=submit]");
-    await expect(page.locator(`#secret-${name}`)).toContainText("set · not used by the open files");
+    await page.press("#secretValue", "Enter");
+    await expect(page.locator(`#secret-${name} .vars-use`)).toHaveText(`{{secret.${name}}} · not used by the open files`);
     await expect(page.locator("#secretName")).toHaveValue("");
   }
-  await expect(page.locator("#secretsList .settings-row")).toHaveCount(2);
+  await expect(page.locator("#secretsList .vars-row:not(.vars-add)")).toHaveCount(2);
   await page.fill("#secretName", "2FA");
   await page.fill("#secretValue", "x");
-  await page.click("#secretAdd button[type=submit]");
-  await expect(page.locator("#secretsError")).toContainText("doesn't start with a digit");
-  await page.locator("#secret-SHOP_TOKEN button", { hasText: "forget" }).click();
+  await page.press("#secretValue", "Enter");
+  await expect(page.locator("#secretsError")).toContainText("not starting with a digit");
+  // (forgetting asks first)
+  await page.click("#secret-SHOP_TOKEN-forget");
+  await expect(page.locator("#secret-SHOP_TOKEN")).toHaveCount(1);
+  await page.click("#secret-SHOP_TOKEN-forget");
   await expect(page.locator("#secret-SHOP_TOKEN")).toHaveCount(0);
 });
 
@@ -186,12 +182,11 @@ test("with no steps, the timeline's note sits in the middle of the dock, which i
 });
 
 test("a new provider in Settings lists every kind; Ollama starts as a working file, chosen for the conversation", async ({ app: { page } }) => {
-  await page.click("#openFolder");
   await openProviders(page);
   await page.click("#newProvider");
   await expect(page.locator("#newProviderForm")).toBeVisible();
   const kinds = await page.locator("#newProviderKind option").allTextContents();
-  expect(kinds).toEqual(["Ollama", "OpenAI chat completions", "OpenAI responses", "Anthropic messages", "Gemini", "HTTP endpoint · one JSON reply", "HTTP endpoint · streamed (SSE)", "HTTP endpoint · streamed (JSON lines)", "WebSocket"]);
+  expect(kinds).toEqual(["Ollama", "OpenAI chat completions", "OpenAI responses", "Anthropic messages", "Gemini", "HTTP endpoint · one JSON reply", "HTTP endpoint · streamed (SSE)", "HTTP endpoint · streamed (JSON lines)", "WebSocket", "A2A agent"]);
   await expect(page.locator("#newProviderName")).toHaveValue("ollama");
   await expect(page.locator("#newProviderModel")).toHaveAttribute("placeholder", "gemma4");
   await page.selectOption("#newProviderKind", "anthropic-messages");
@@ -221,7 +216,6 @@ test("the timeline scrolls without scrollbars", async ({ app: { page } }) => {
 });
 
 test("the test's header has a play button that runs it", async ({ app: { page } }) => {
-  await page.click("#openFolder");
   await expect(page.locator("#testHeaderRun")).toHaveCount(0);
   await page.locator("#suiteList .list-open", { hasText: "refund for a broken item" }).click();
   const play = page.locator("#testHeaderRun");
@@ -234,7 +228,6 @@ test("the test's header has a play button that runs it", async ({ app: { page } 
 });
 
 test("the top bar has no provider in it; the test panel's Provider opens it in Settings", async ({ app: { page } }) => {
-  await page.click("#openFolder");
   await page.locator("#suiteList .list-open", { hasText: "refund for a broken item" }).click();
   await expect(page.locator("#topbar .badge")).toHaveCount(0);
   await expect(page.locator("#currentProvider")).toHaveCount(0);
@@ -243,7 +236,6 @@ test("the top bar has no provider in it; the test panel's Provider opens it in S
 });
 
 test("Connection → System One keeps JEV_API_KEY, for every environment", async ({ app: { page } }) => {
-  await page.click("#openFolder");
   await page.click("#openSettings");
   const tabs = await page.locator("[aria-label=Connection] .settings-tab").allTextContents();
   expect(tabs).toEqual(["Providers", "System One", "Relay"]);
@@ -260,16 +252,18 @@ test("Connection → System One keeps JEV_API_KEY, for every environment", async
   await expect(page.locator("#secret-JEV_API_KEY")).toHaveCount(0);
   await page.fill("#secretName", "JEV_API_KEY");
   await page.fill("#secretValue", "x");
-  await page.click("#secretAdd button[type=submit]");
+  await page.press("#secretValue", "Enter");
   await expect(page.locator("#secretsError")).toContainText("System One");
   expect(await page.evaluate(() => JSON.parse(localStorage.getItem("eval.secrets"))[""].JEV_API_KEY)).toBe("jev-test-key");
   await page.click("#settings-tab-systemone");
+  // (forgetting asks first)
+  await page.click("#systemoneForget");
+  await expect(page.locator("#systemoneKeyState")).toHaveText("set");
   await page.click("#systemoneForget");
   await expect(page.locator("#systemoneKeyState")).toHaveText("not set");
 });
 
 test("the Suites section shows no folder path", async ({ app: { page } }) => {
-  await page.click("#openFolder");
   await expect(page.locator('#suiteList .list-row[data-file="smoke.hafen.yml"]')).toHaveCount(1);
   await expect(page.locator("#suitesFolder")).toHaveCount(0);
 });
@@ -289,10 +283,11 @@ test("collapsed, the sidebar shows its sections as icons; one opens it on that s
 });
 
 test("+ adds a new suite each time; a suite's own + adds a test to it", async ({ app: { page } }) => {
-  await page.click("#openFolder");
   await page.click("#newSuite");
+  await page.press("#newSuiteName", "Enter");  // (+ asks for a name: the one it offers)
   await expect(page.locator('#suiteList .list-row[data-file="tests.hafen.yml"]')).toHaveCount(1);
   await page.click("#newSuite");
+  await page.press("#newSuiteName", "Enter");  // (+ asks for a name: the one it offers)
   await expect(page.locator('#suiteList .list-row[data-file="tests-2.hafen.yml"]')).toHaveCount(1);
   expect(await fileText(page, "tests-2.hafen.yml")).toContain("name: New test");
   await expect(page.locator("#evalTitle")).toHaveText("New test");
@@ -310,7 +305,6 @@ test("+ adds a new suite each time; a suite's own + adds a test to it", async ({
 });
 
 test("a suite's name (for reports) and its file are edited in its panel; its last results follow the file", async ({ app: { page } }) => {
-  await page.click("#openFolder");
   await page.locator("#suiteList .list-open", { hasText: "refund for a broken item" }).click();
   await page.click("#testHeaderRun");
   await expect(page.locator("#status")).toContainText("failed 0/1");
@@ -332,7 +326,6 @@ test("a suite's name (for reports) and its file are edited in its panel; its las
 });
 
 test("deleting a test or suite clears what the thread and timeline showed of it", async ({ app: { page } }) => {
-  await page.click("#openFolder");
   // A conversation, saved as a test in the smoke suite
   await page.click("#openSettings");
   await page.click("#settings-tab-providers");
@@ -362,7 +355,6 @@ test("deleting a test or suite clears what the thread and timeline showed of it"
 });
 
 test("a suite's provider, and a test's own, are chosen in their panels; a missing one shows as missing", async ({ app: { page } }) => {
-  await page.click("#openFolder");
   // The suite's provider file is deleted: the suite still names it
   await openProviders(page);
   await page.click("#provider-mock-json-delete");

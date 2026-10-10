@@ -1,6 +1,7 @@
 // An app-wide event bus, so views react to each other without importing each other.
 //
 //   suites:changed   suites or providers were read again, or one was edited
+//   suites:new       a new suite was asked for (the thread's first steps): the Suites section opens its form
 //   runs:changed     a run was saved or deleted
 //   run:changed      a run started, went on, or ended (the live one)
 //   select:changed   what's selected changed (a test, turn, check, step, run or provider)

@@ -1,5 +1,8 @@
-// Builds the app (app/) into app/dist: the browser build, which `hafen serve` serves, and the
-// desktop app's window (desktop/main.js loads it). `npm run dev` serves it from source.
+// Builds the app (app/) into app/dist: the browser build, which `npm run serve` (server/serve.js)
+// serves, and the desktop app's window (desktop/main.js loads it). `npm run dev` serves it from source.
+// The engine is the hafen package (hafen/engine/…): the workspace's packages/hafen, linked as
+// node_modules/hafen, which Vite follows to its real path (in the project, so fs.allow takes it) and
+// bundles as source, for the page, the engine's worker and the plugin worker alike.
 
 import { resolve } from "node:path";
 import react from "@vitejs/plugin-react";

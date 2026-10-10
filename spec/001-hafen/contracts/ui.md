@@ -17,7 +17,77 @@ browser build.
 A part of the app that can't be drawn (a file written in a way nothing foresaw, say) says so in its
 own place, `<what> couldn't be shown: <why>` with `try again`, rather than leaving the window blank:
 each sidebar section, the thread (`#threadCrash`), the panel (`#panelCrash`) and the timeline on their
-own. It's tried again when what's selected, or the folder's files, change.
+own. It's tried again when what's selected, or the files, change.
+
+## The workspace
+
+The app keeps its own work; the user never picks a folder to work in. Its suites (`*.hafen.yml`),
+providers (`providers/*.yml`), plugins (`plugins/*.js`) and data files are plain files, laid out as
+the engine reads a folder, in the app's **workspace**, opened by itself as the app starts: in the
+desktop app `<the data folder>/workspace/` (`HAFEN_LAB_DATA` names another data folder), the engine's
+host rooted there (`desktop/engine-host.js`: the main process hands it the path with each port); in
+the browser build the Origin Private File System's `workspace/` folder (`navigator.storage
+.getDirectory()`), in the engine's worker (`worker.js`; a browser that can't keep one has it in memory,
+and says so). Nothing shows its path as a folder of the user's: the app says it keeps them.
+Conversations and runs are kept in IndexedDB, as before; a run isn't also written beside the suites.
+
+- **First start:** an empty workspace. The thread offers the first steps (`Add a provider`, `New
+  conversation`, `New suite`: [The thread's first steps](../../design/components.md#the-threads-first-steps));
+  everything (a provider, a conversation, a suite, a plugin, a scope) can be added at once.
+- **Import** (the Suites section's head, [`import`](../../design/components.md#suites-import-and-export),
+  `#importSuites`: `Import suite files…`, `Import a folder…`; and its empty note's `import some`,
+  `#suitesImport`, the same two): files or a folder picked with the system's picker (the desktop
+  app's open dialog, in its main process: `import_pick`; a browser's `showOpenFilePicker` or
+  `showDirectoryPicker`, read only, or a file input where there's none). The engine lists the
+  folder's suites (`suites { from }`) and what they use (`dependencies { files, from }`: each suite,
+  its provider files, data files, prices file, JSON Schemas, and its plugins: the entries it names,
+  and the folder's `plugins/*.js` it uses by name, each with the files it imports by a relative path;
+  never a secret), and copies them into the workspace at the same paths (`copyPlan`, then `copy`).
+  Files picked in a browser come without their folders: each is found by the path a suite names it by
+  (a script picked is a plugin, in `plugins/`).
+  A file here with the same text is left as it is. Files here with another text are asked about once
+  ([question dialog](../../design/components.md#question-dialog), `#question`, listing them): `Replace`,
+  `Keep both` (theirs written as `name-2.yml` and the suites imported pointed at them, comments kept; a
+  plugin is used by its name, so yours stays), `Skip`, or `Cancel` (closing it the same). A toast says
+  what came in (`Imported 2 suites from repo`), the console lists each file, each problem (a file a
+  suite names that isn't there, an import outside the folder) and each plugin package (not a file),
+  and the first suite imported opens.
+- **Export** (a suite's panel, `Export…`, `#suiteExport`; the Suites head's `export all`; Copy CI
+  command before the suite was exported): the [Export dialog](../../design/components.md#export-dialog)
+  (`#exportDialog`) lists what goes (`dependencies { files }`: the suites and everything they use) and,
+  when Globals or the scope chosen has values, `Also write globals.env and <scope>.env` (`#exportEnv`,
+  on: each one's own values, as Settings → Environments' Export writes them; only the files that have
+  any). `Export` (`#exportGo`) and `Export with secrets` (`#exportWithSecrets`, a ConfirmButton asking
+  `write them in plain text?`: also `globals.secret.env` and `<scope>.secret.env`, each one's own
+  secrets, only the ones that have any; written by the desktop app's main process into the folder,
+  never through the page) ask for a folder (the desktop app's dialog, `export_pick`; a browser's
+  `showDirectoryPicker`, read and write) and write the files there with the same paths, so `npx hafen
+  run <folder> --env <folder>/globals.env --env <folder>/<scope>.env --secret
+  <folder>/globals.secret.env --secret <folder>/<scope>.secret.env` runs them as they are (a later
+  `--env` or `--secret` file's names over an earlier one's: the scope's over Globals', as in the app).
+  Files there with another text (or a secrets file there) are listed first ([question
+  dialog](../../design/components.md#question-dialog): `Cancel`, `Overwrite`); files there with the
+  same text aren't written again. Where each suite went is remembered (`eval.exports`: its path, its
+  name, its path as CI runs it, the scope it was for, the `.env` files and the secrets files written,
+  in order, when), following a rename, forgotten on delete. A toast says where (`Exported
+  smoke.hafen.yml to hafen-tests`), the console lists each file.
+- **Copy CI command** (`#suiteCopyCi`, `#testCopyCi`) copies the command that runs the folder the suite
+  was last exported to: `npx hafen run "<its path as CI runs it>" [--env …] [--secret …] [--test
+  "<name>"] --report junit:results/junit.xml --report run:results/run.hafen-run.json`. Its path: in the
+  desktop app, from the top of the git repository it's in, else the whole path; in a browser, its
+  name. It names exactly the files that export wrote, inside that folder, in the order they're read:
+  `--env <path>/globals.env --env <path>/<scope>.env --secret <path>/globals.secret.env --secret
+  <path>/<scope>.secret.env`, each only when it was written; never a file that wasn't. Under it,
+  `#suiteCiHint` (`#testCiHint`) says where it went and when, with which files, and when no `.env` file
+  went with it though there are values now, that CI would run without them. Not exported yet: the
+  hint says so, with `Export it` (`#suiteCiHintExport`), and the button opens the Export dialog instead
+  of copying.
+- **The folder the desktop app opened before** (`eval.root`, from when it worked on a folder of the
+  user's): on the first start of this version it's offered once, before anything else ([question
+  dialog](../../design/components.md#question-dialog), `Your suites`: `Import the suites from <name>?`,
+  `Not now` / `Import`); `Import` imports its suites as Import a folder does (the main process opens
+  it, once: `import_legacy`). Either way `eval.root` is forgotten. (The browser build never remembered
+  a folder.)
 
 ```
 ┌─ sidebar ─────────────┬─ main ───────────────────────────────────────────────────────────────────┐
@@ -66,14 +136,56 @@ that section if it's closed, scrolls to it and focuses its toggle.
 ### Head
 
 The logo at the left. At the right (`.nav-actions`), the **scope button** (`#scopeButton`, the
-`scope` icon and the scope chosen, or "no scope": [Scope button](../../design/components.md#scope-button)).
-A click opens Settings on Environments, where the scope is chosen (`Scope`, `.select#envScope`, then
-`choose it`) among every scope there is: the folder's scope files (`environments/<scope>.yml`), the
-open suites' environments, and the scopes that have secrets (known before a folder is open, so one of
-those can be chosen with none open). The chosen one fills `{{scope.NAME}}` (its plain variables, then
-its secrets) and picks the suites' environment of that name; it applies to runs and the message box
-(as `--env` does in CI). The one chosen last is chosen again (after a reload, before a folder is
-open); when none was, a folder's first environment is.
+`scope` icon and the scope chosen; `data-scope` its name, "" for none. With none chosen, no words: the
+icon alone, greyed out as a disabled field is (opacity .5; still a button), with a small `!` badge over
+its top right corner (`.scope-alert`), its `title` and `aria-label` `No scope chosen: choose one`:
+[Scope button](../../design/components.md#scope-button)).
+A click opens Settings on Environments, where the scope is chosen (a scope's row, then `choose it`;
+or Globals, then `choose no scope`) among the scopes made in the app (Settings → Environments), and
+only those. A suite's `environments:` block gives a scope of the same name values too, but doesn't make
+one, and neither do secrets. A scope is a name, its environment values and its secrets, as the command
+line's `--env` and `--secret` files are: the app keeps any number, so one is swapped for another here.
+
+**Globals** are values and secrets for every scope, kept as a scope's are but in no scope (they can't
+be renamed or deleted, and aren't in the scope button's list); `globals`, `global` and `every-scope`
+are no scope's names, nor is one ending `.secret` (their files would meet Globals' or another
+scope's). A name both have is the scope's (it **overrides** Globals); one only Globals has is
+Globals'; one only the scope has, the scope's. With no scope chosen, Globals' are all there is. So the
+chosen one fills `{{env.NAME}}` (its values over Globals', then the suites' environment of its name)
+and `{{secret.NAME}}` / `{{secrets.NAME}}` (its secrets, then Globals', then, in the desktop app, the
+environment variable it was started with). The old ways, `{{scope.NAME}}` and `${env:NAME}`, fill
+nothing: a field that has one says what to write instead, as the engine does. It applies to runs, the
+message box and a suite's check before it's run: every engine call that runs or checks something
+(`preflight`, `run`, `send`) passes `environment: { name, values }`, always: for a scope, `{ name:
+<scope>, values: <its values over Globals'> }` (with `env: <scope>`); with none chosen, `{ name: "",
+values: <Globals' values> }`; so the engine never reads an environment from the files, nor takes a
+suite's first. A suite's check before it's run is the engine's `preflight` (`{ files, env,
+environment }` → for each suite, `{ file, problems, warnings }`: what `hafen validate` lists, secrets
+taken as set). A switch applies to a conversation's next message; a run or a message takes the
+secrets as they are when it starts. The one chosen last is chosen again (after a reload), if it's
+still one of the app's; `no scope`, chosen, stays chosen; when none ever was, the first scope there is
+is, as the app starts.
+
+**Where they're kept.** Environment values: localStorage, in both builds (`eval.scopes`, the names in
+the order they were made; `eval.scope.<name>`, a scope's values, one key a scope; `eval.globals`,
+Globals'). Secrets: in the desktop app, the main process's `secrets.json` in the app's data folder,
+keyed by scope (`""`: Globals'; a scope with no secrets left isn't in the file), each value with
+whether it's encrypted (`{ "encrypted": true, "value": <base64> }`, with the system's keychain through
+safeStorage, whenever the system offers it; `{ "encrypted": false, "value": <text> }` when it doesn't,
+which Settings → Secrets says), handed to the engine's process as they change, and to the page only
+when shown (`show`, `edit as .env`); in the browser build, `eval.secrets` (unencrypted, as Settings →
+Secrets says), given to the engine's worker (`configure`) as they change. Other tabs and windows
+follow a change to either (`storage` events). The engine's hosts look a secret up by its own name only
+(nothing an object inherits, such as `constructor`), and tell the engine every secret value the scope
+and Globals hold (`knownSecrets(scope)`), so run files hide each one, used or not.
+
+**Deleting a scope** (Settings → Environments or Secrets: `Delete scope`, or a scope's menu, asking
+first) deletes all of it at once:
+its secrets (the keystore's or the browser's storage), then its entry and its values (`eval.scopes`,
+`eval.scope.<name>`); it's gone from the scope button's list, Environments and Secrets, and, if it was
+the one chosen, no scope is chosen after it. Nothing brings it back: not a reload, a restart of the
+desktop app, a suite's environment of its name, nor a file. (An `environments/<scope>.yml` file, the
+old way, isn't read by the app at all.)
 In the desktop window the logo is hidden and the button stays at the right, as the design system
 says.
 
@@ -81,11 +193,13 @@ says.
 
 `NavSection id="suitesSection" name="suites" label="Suites" bodyId="suitesBody" defaultOpen`.
 
-- **Head actions:** `+` (`#newSuite`, ghost icon, "New suite": a new suite file each time,
-  `tests.hafen.yml`, then `tests-2.hafen.yml`, …, with one test, using the first provider; the test
-  opens); `open a folder` (`#openFolder`, a ghost icon button: the `import` icon, a folder with an
-  arrow into it) or `open files` (`#openFile`, the same icon, browser build), shown only while the
-  section is open.
+- **Head actions:** `+` (`#newSuite`, ghost icon, "New suite": the [new suite
+  form](../../design/components.md#new-suite-form), named first: `tests.hafen.yml`, then
+  `tests-2.hafen.yml`, …, with one test, using the provider in use; the test opens); then, as Runs'
+  `open` and `clear all` are, ghost text actions shown only while the section is open
+  ([Suites import and export](../../design/components.md#suites-import-and-export), [The
+  workspace](#the-workspace)): `import` (`#importSuites`: a menu under it, Import suite files…, Import a
+  folder…) and `export all` (`#exportSuites`: the Export dialog for every suite; only with a suite).
 - **Body**, padded as list sections (`0 8px 12px`):
   - With any suites, a [search field](../../design/components.md#search-field) (`#suitesSearch`,
     "Search by name or last run", staying at the top as the list scrolls): every word typed must be
@@ -98,9 +212,9 @@ says.
 
 | Row | id | Label | Size (coloured by `data-status`) | Click | × asks |
 |---|---|---|---|---|---|
-| Suite | `suite-<n>` (`data-file`: its file) | Its `name`, if the file gives one, else the file name; then its [group badge](../../design/components.md#group-badge) (`G2`) when it has a `group`. Its tooltip: the name, the file, and when it last ran (`last run 2 mins ago`, or `not run yet`) | its tests' results: `3 tests · 1 failed`, or its problems; then `▷` (`#suite-<n>-run`, "Run the suite": the whole suite, shown in the suite's view) and `+` (`#suite-<n>-add`, "New test": a test at the end of this suite, opened), shown on hover as × is | Expands it; the panel shows the suite (and its problems) | `delete file?`, then deletes the file from the opened folder (in the browser build with files opened one by one, it's only closed) |
-| Test | `test-<id>` | The test's name; then its group badge (`G1`, `#test-<id>-group`) and, when it repeats, its [repeat badge](../../design/components.md#repeat-badge) (`×3`, `#test-<id>-repeat`: its `repeat`, or its suite's default). Its tooltip: the name, `runs 3 times`, when it last ran | its last result: `passed 3/3`, `failed 2/3`, `unsure`, `running…`, `—`; then `▷` (`#test-<id>-run`, "Run <name>": runs the test, and opens it), shown on hover as × is, off while the test runs (alone or in its suite's run) | Opens the test in the thread; the panel shows the test | `delete` |
-| Turn | `turn-<id>-<i>` | Its icon (`.turn-icon`: the `test` icon, a box with a tick, 14px), coloured by how the turn last went: `--ok` passed, `--danger` failed or error, `--wait` unsure, and `--wait` too for a turn with no checks (or every one turned off), run or not, as nothing says it's right; `--muted` not run; while it runs, a [spinner](../../design/components.md#spinner) in `--run` instead; then the message, one line. (Its button is named `turn <i>: <message>`.) | its checks, a check turned off not counted: `6/6`, or `6 checks` before it runs; `0 checks` in `--wait` | Scrolls to the turn; the panel shows it | `delete` |
+| Suite | `suite-<n>` (`data-file`: its file) | Its `name`, if the file gives one, else the file name; then its [group badge](../../design/components.md#group-badge) (`G2`) when it has a `group`. Its tooltip: the name, the file, and when it last ran (`last run 2 mins ago`, or `not run yet`) | its tests' last tries, each counted in its own word: `3 tests · 1 failed · 1 error · 1 couldn't run` (stopped ones aren't counted), or its problems; then `▷` (`#suite-<n>-run`, "Run the suite": the whole suite, shown in the suite's view) and `+` (`#suite-<n>-add`, "New test": a test at the end of this suite, opened), shown on hover as × is | Expands it; the panel shows the suite (and its problems) | `delete file?`, then deletes the suite (its file, from the workspace) |
+| Test | `test-<id>` | The test's name; then its group badge (`G1`, `#test-<id>-group`) and, when it repeats, its [repeat badge](../../design/components.md#repeat-badge) (`×3`, `#test-<id>-repeat`: its `repeat`, or its suite's default). Its tooltip: the name, `runs 3 times`, when it last ran | its last try (a run of it, or of its suite, that broke off before it counts: [Statuses](#statuses)): `passed 3/3`, `failed 2/3`, `unsure 2/3`, `error`, `couldn't run`, `stopped`, `running…`, `—`, its tooltip saying why for an error or couldn't run; then `▷` (`#test-<id>-run`, "Run <name>": runs the test, and opens it), shown on hover as × is, off while the test runs (alone or in its suite's run) | Opens the test in the thread; the panel shows the test | `delete` |
+| Turn | `turn-<id>-<i>` | Its icon (`.turn-icon`: the `test` icon, a box with a tick, 14px), coloured by how the turn last went: `--ok` passed, `--danger` failed or error, `--wait` unsure, and `--wait` too for a turn with no checks (or every one turned off), run or not, as nothing says it's right; `--muted` not run, skipped or stopped; while it runs, a [spinner](../../design/components.md#spinner) in `--run` instead; then the message, one line. (Its button is named `turn <i>: <message>`.) | its checks, a check turned off not counted: `6/6`, or `6 checks` before it runs; `0 checks` in `--wait`; `stopped` or `skipped` (in `--muted`) for a turn that ran none of them | Scrolls to the turn; the panel shows it | `delete` |
 
   **Right-click** on a suite's or a test's row opens a [context menu](../../design/components.md#context-menu):
   `Expand all` (`#menu-expand-all`) and `Collapse all` (`#menu-collapse-all`), each just its name: on a suite, the suite
@@ -115,14 +229,15 @@ says.
 
   Every edit says which test it's about (by id, or name) and what it deletes; if the file says
   otherwise (it was changed by something else), the edit is refused with a toast, nothing is
-  written, and the folder is read again, so the app shows the file as it is. Edits are made one
+  written, and the files are read again, so the app shows the file as it is. Edits are made one
   after another, so edits sent together all land.
 
   Statuses colour as everywhere ([patterns](../../design/patterns.md#status)): `passed` `--ok`,
-  `failed` and `error` `--danger`, `unsure` `--wait`, `running` `--run`.
-- **Empty:** `.note.placeholder` (`#suitesEmpty`), in the middle of the section: "Open a folder
-  with your suites (`*.hafen.yml`), or press + to start one." (browser build: "Open a suite file,
-  or press + to start one.")
+  `failed`, `error` and `couldn't run` `--danger`, `unsure` `--wait`, `running` `--run`, `stopped`
+  and `skipped` `--muted`.
+- **Empty:** `.note.placeholder` (`#suitesEmpty`), in the middle of the section: "No suites yet:
+  press + to start one, or import some from files or a folder." (`import some`, `#suitesImport`, an
+  `.inline-link` opening the Import items under it, as the head's `import` does)
 
 Every placeholder (what an empty container says) sits in the middle of what holds it, its text
 centred (`.placeholder`): an open sidebar section's, in the middle of the room it has (a section
@@ -164,8 +279,10 @@ refund test that ran in October 2026.
 ghost, `.when-open`: open a run file) and `clear all` (`#clearRuns`, asking `delete every run?`).
 Two-line rows (`run-<_id>`): the test or suite name (` ×3` after a test's that repeats; ` · explore` or
 ` · load` after it for those modes) over how long ago it started and how long it took (`2 mins ago ·
-4.1 s`; the time and date in its tooltip); size: the verdict or status (`passed`, `failed`, `unsure`,
-`running…`, `stopped`, `interrupted`), coloured. Click opens the run (read-only). Empty (a
+4.1 s`; the time and date in its tooltip); size: how it went, in the [same words](#statuses) as the
+Suites tree and the top bar (`passed`, `failed`, `error`, `couldn't run`, `stopped`, `unsure`,
+`running…`; a run of one test: the test's), coloured, its tooltip saying why for an error. A run of one
+test that broke off before it is named for that test, as any run of one test is. Click opens the run (read-only). Empty (a
 placeholder, `#runsEmpty`): "No runs yet. Each run is recorded here."
 
 Runs go on at once: each run going on is a row at the top (`run-live-<token>`: the test's or the
@@ -192,6 +309,29 @@ Clicking one (or Enter) adds it to the selected turn and opens it in the panel. 
 dragged (the cursor is a pointer; nothing is dropped on a turn). With no turn selected, the note
 above them reads "Select a turn, then click a check to add it."
 
+## Statuses
+
+How a run, a test and a turn went is said in one set of words everywhere (the top bar, the Suites
+tree and a suite's count, a suite's view, Runs, the panel, a toast), the engine's: `passed`
+(`unsure` when the judges weren't sure), `failed`, `error` (the endpoint, a judge, a fixture or a
+setup step broke: not a failure of what's tested), `stopped`, `skipped`; and `couldn't run` for a run
+the engine refused before sending anything (what `hafen validate` would list: a value the scope hasn't
+got, a missing secret, a check type that isn't one). A run of one test says the test's word; a run of
+several says `failed` if any failed, else `error` if any erred, else `stopped`, `unsure` or `passed`.
+A check's unsure result shows as it counted (its `unsure` setting, kept on the result): `fail` under
+`fail`, its reason `unsure: <why> (unsure counts as failed)`; `pass` under `pass`; `unsure` only
+under `warn` (and in a run from before the setting was kept), so a result that failed its test never
+looks like a pass, in the check's badge and card, its turn's colour or its turn's count.
+
+A test's status is its **last try**: its latest run, or a later run of its suite, even one that broke
+off before it reached the test (`error`, or `couldn't run`), which has no result for it but is how it
+last went; nothing ran, so it isn't shown as a result (no counts), and the run before it isn't shown
+in its place. Why is always a click or a point away: the top bar's `title`, the test's row's tooltip,
+the thread ([Run error](../../design/components.md#run-error)) and the panel's `Last run`.
+
+`failed`, `error` and `couldn't run` are `--danger`; `stopped` and `skipped` `--muted` (a stopped test
+or message is never coloured as a failure).
+
 ## Top bar
 
 `header.topbar` ([layout](../../design/layout.md#top-bar)), in the work column:
@@ -200,10 +340,10 @@ above them reads "Select a turn, then click a check to add it."
 |---|---|
 | `#menu`, `.topbar-brand` | The drawer's button and the logo, small screens only |
 | `#evalIcon` | Before the title, 16px `--muted`: what's open: `chat` (a conversation), `suite`, `test`, `runs` (a run); while the open test or suite runs, a [spinner](../../design/components.md#spinner) in `--run` (`data-running`) |
-| `h1.title#evalTitle` | The open test's name, the suite's, the run's (`refund for a broken item · run`), or "New conversation" |
+| `h1.title#evalTitle` | The open test's name, the suite's, the run's (`refund for a broken item · run`: its one test's, also when it broke off before it; else its suites'), or "New conversation" |
 | `.topbar-badges` | After the title, for a test or a suite: its group badge (`#evalGroup`) and, for a test that repeats, its repeat badge (`#evalRepeat`, `×3`) |
 | `#testHeaderRun` | With a test or a suite open: a ghost icon button (16px `run` icon, "Run this test" / "Run this suite", its `title` naming the shortcut: `⌘↵` on macOS, `Ctrl+Enter` elsewhere), before the badge; while it runs, the `stop` icon in `--run` ("Stop the run") |
-| `#status` | One line (`role="status"`): `passed 5/6 · 4.1 s · 2 mins ago` (how long ago the shown run started, kept up to date every 30 s), `running…`, `not run yet`, `sending…`, or an error in `--danger` |
+| `#status` | One line (`role="status"`, `data-status` the [status](#statuses)): how the test's, the suite's or the run's last try went, `passed 5/6 · 4.1 s · 2 mins ago` (how long ago it started, kept up to date every 30 s); `error · 0.04 s · just now` (its `title` saying why in full); `couldn't run: <the first problem>` (its `title`: every one); `stopped · 1.2 s · just now` in `--muted`; `running…`, `not run yet`, `sending…`; an error or a failure in `--danger` |
 
 ## Thread
 
@@ -213,13 +353,14 @@ above them reads "Select a turn, then click a check to add it."
 |---|---|---|
 | Explore | No test, suite or run open | The conversation so far; the message box sends |
 | Suite | A suite selected (its row, or a bar of its timeline) | Each test a group (`section.turn-group.suite-test#suiteTest-<i>`): its head (the name, `.suite-test-name`, opening the test; its group badge, `#suiteTest-<i>-group`, and repeat badge, `#suiteTest-<i>-repeat`; its last result, coloured, and how long ago it ran: `passed 3/3 · 2 mins ago`; `▷` running that test, shown as a turn's is), then its turns, one line each (`.suite-turn#suiteTest-<i>-turn-<j>`, named `turn <j>: <message>`: the turn's icon, coloured as in the sidebar, the message, its checks `4/5`), each opening that turn. The title is the suite's name; the message box is hidden. Empty: "This suite has no tests yet: press + on it under Suites, or Add test in its panel." |
-| Test | A test open | The test's turns as the file has them now, each with its checks as badges. After a run, a turn shows the run's reply only if it was of that turn's message as the file has it now (its `user_template`), and a check shows a result only if it was of that check as it is now; a turn or check added, deleted, moved or changed since shows "Not run yet." / a badge with no result, never another's (the latest repeat) |
-| Run | A run open | That run's conversation and results as it recorded them, read-only; the message box is hidden |
+| Test | A test open | The test's turns as the file has them now, each with its checks as badges. After a run, a turn shows the run's reply only if it was of that turn's message as the file has it now (its `user_template`), and a check shows a result only if it was of that check as it is now; a turn or check added, deleted, moved or changed since shows "Not run yet." / a badge with no result, never another's (the latest repeat). Its last try broke off before it (an error, or couldn't run): a [run error](../../design/components.md#run-error) (`#runError`) above its turns says why, and the turns are as never run by it |
+| Run | A run open | That run's conversation and results as it recorded them, read-only; the message box is hidden. One that broke off before its tests shows its [run error](../../design/components.md#run-error) (`#runError`: `couldn't run` and each problem, or `error` and why) where the conversation would be, never "This test isn't in your suites." |
 
 Each turn is a group (`section.turn-group#turn-<i>`, no rule between groups: 6px between them, 14px
-above and 18px below inside one): a head (`.turn-head`: `TURN 2` as a `.label` in `--fg`, with `· row 3` / `· run 2` for
-an instance (`· run 2 of 3`: a test that repeats shows its latest run unless another is picked in the panel's `Showing`); then a `.hint` saying how it went, coloured by status: `4/5 checks · 1.2 s`, `not run
-yet · 3 checks`, `running…`, `error · 0.4 s`; a test's turn with no checks (or every one turned off), in `--wait`: `not run yet · 0 checks`, `0 checks · 1.2 s` (a conversation's turns have no checks to have, and don't say so); and, in a test, `▷` at the right, `#turn-<i>-run`,
+above and 18px below inside one): a head (`.turn-head`: `TURN 2` as a `.label` in `--fg`, with `· row 3: a refund please` (a data row by its
+number and name, as the reports say it: [test-file.md, Data rows](test-file.md#data-rows); `· row 3` for one with no name) / `· run 2` for
+an instance (`· run 2 of 3`: a test that repeats shows its latest run unless another is picked in the panel's `Showing`), cut with an ellipsis when it's too long for the head; then a `.hint` saying how it went, coloured by status: `4/5 checks · 1.2 s`, `not run
+yet · 3 checks`, `running…`, `error · 0.4 s`, `stopped · 0.5 s` (in `--muted`: stopped on purpose isn't an error); a test's turn with no checks (or every one turned off), in `--wait`: `not run yet · 0 checks`, `0 checks · 1.2 s` (a conversation's turns have no checks to have, and don't say so); and, in a test, `▷` at the right, `#turn-<i>-run`,
 running the test up to this turn, and then `×`, `#turn-<i>-delete`: both shown on hover, on the
 selected turn, when focused and on touch screens (`▷` always while it's the stop of a run going on);
 `×` asking `delete`: in a test it deletes the turn from the file; in a
@@ -272,13 +413,18 @@ Each turn is a pair of [messages](../../design/components.md#message-and-thread)
   badges](../../design/components.md#check-badge) (`.msg-checks`; a check turned off is a badge
   with status `off`, grey, its name struck through).
 - **An error turn:** the reply's text is the error, in `--danger`, with `show the response` (a
-  `.panel-template`-style disclosure) under it.
+  `.panel-template`-style disclosure) under it. A turn stopped on purpose isn't one: what came, ending
+  `…`, then `stopped` in `--muted` (`#turn-<i>-cut`); none came, `Stopped before any reply came.`
 - **Selected:** the turn, check or step selected anywhere (the tree, the timeline, the panel) gets
   the [selected-message marker](../../design/components.md#selected-message) and is scrolled into
   view.
-- **Empty (explore):** `.empty` (a placeholder, in the middle of the conversation's space): "Choose a
-  provider, then send a message. Save the conversation as a test when it's worth keeping." With no
-  providers: "Add a provider under Providers to start."
+- **Empty (explore):** `.empty#threadEmpty` (a placeholder, in the middle of the conversation's
+  space): "Choose a provider, then send a message. Save the conversation as a test when it's worth
+  keeping." With no providers: "Add a provider (an endpoint to talk to) to start: then talk to it, and
+  save what's worth keeping as a test." Under it, the first steps as buttons ([The thread's first
+  steps](../../design/components.md#the-threads-first-steps)): `Add a provider` (`#threadAddProvider`,
+  the primary with no providers), `New conversation` (`#threadNewConversation`), `New suite`
+  (`#threadNewSuite`).
 
 Clicking a reply selects its turn (the panel shows it); a badge selects its check; thinking or a
 tool line selects that step.
@@ -296,6 +442,12 @@ button (no large-editor button: the box grows with what's typed, up to 200px, th
 
 Enter sends or adds; Shift+Enter is a new line; Esc stops. With a test open, `⌘↵` / `Ctrl+Enter`
 runs (see [Keyboard](#keyboard)) and adds nothing; exploring, it sends, as Enter does.
+
+A message the engine refused before sending it comes back in the box, the reason under it
+(`.hint.error#sendProblem`). A problem the provider is known to have before anything is sent (a
+fixture the app hasn't got, say) is said only in the panel, by the provider (Conversation's
+`#convFixturesProblem`), not under the box nor in the top bar; Send is off meanwhile, its `title`
+`Can't send: …` ([Message box problems](../../design/components.md#message-box-problems)).
 
 ## Panel
 
@@ -316,11 +468,18 @@ test (in an open run: the run), a test's to its suite. A row of buttons in the b
 run out of the panel (they share the width; a label that doesn't fit is cut with an ellipsis), and
 the body never scrolls sideways.
 
-Every text field in the panel and in Settings, and the message box, checks the `{{scope.NAME}}`s in
-it as it's typed, for the scope chosen now: one its variables and its secrets (or every scope's)
-don't have, or none chosen, shows under the field (`.hint.error#<field>Problem`): `{{scope.nope}}
-isn't in the scope "stage": add it in Settings → Environments (or Secrets)`. The field still saves
-what's typed (a run with it would stop with a setup error).
+Every text field in the panel and in Settings, and the message box, checks what it takes from the
+scope as it's typed, for the scope chosen now: an `{{env.NAME}}` its values, Globals' (or an open
+suite's environment of its name) haven't got; a `{{secret.NAME}}` (`{{secrets.NAME}}`) it and Globals
+have no secret for (nor a fixture gives); an old way to write one (`${env:NAME}`, `{{scope.NAME}}`),
+which fills nothing, said with what to write instead, as the engine says it (`${env:API_KEY} is the
+old way to write a secret: write {{secret.API_KEY}}`). It shows under the field
+(`.hint.error#<field>Problem`): `{{env.nope}} isn't in the scope "stage" or in Globals: add it in
+Settings → Environments`; `{{secret.KEY}} isn't a secret of the scope "stage" or of Globals: add it in
+Settings → Secrets`; with no scope chosen, `{{env.nope}} isn't in Globals, and no scope is chosen: add
+it in Settings → Environments`. The field still saves what's typed (a run with it would stop with a setup error,
+said in its toast and the console; a message, in its turn, and nothing is sent). Every such field takes
+a template: none is a `type="url"` field the browser would refuse one in.
 
 The views:
 
@@ -328,15 +487,30 @@ The views:
 
 Head: `provider` icon, `CONVERSATION`.
 
-- `Provider` (`.select#convProvider`, with `manage` / `add one`): with turns already, another one
+- `Provider` (`.select#convProvider`, with `manage` / `add one`): the providers kept, less a
+  provider file whose kind names a plugin that isn't a provider (a fixture's, a check's: from the
+  engine's list of the plugins kept, `open`/`load`'s `plugins`, each loaded once per text). With
+  turns already, another one
   carries the conversation on (its turns so far are the history), as a `.hint` under it says. It's off
   while a message is on its way (its reply would be lost). Opening another conversation, or starting
   a new one, stops a message on its way.
+- `Fixtures` (the chosen provider's): a field head with `edit` (`#convFixturesEdit`, ghost: Settings →
+  Providers, that provider), then what it runs, in order, as facts (`#convFixtures`: `once, before the
+  run` → `acme-login → warm`, one per list that has any; a name the plugins kept haven't, with
+  `(missing)`), or `#convFixturesNone` ("None yet: edit adds some…"; "Choose a provider file…" with
+  none chosen). The suite's and the test's provider pickers have the same (`#suiteProviderFixtures…`,
+  `#testProviderFixtures…`: the provider the test runs with, its own or the suite's), and the same
+  filter (only providers to pick). Under the conversation's, when the provider a message goes to has a
+  problem the app can see before sending (its fixtures can't be read or name one twice, a fixture or a
+  provider plugin the app and the suite haven't got): `#convFixturesProblem` (`.hint.error`,
+  `role="alert"`: `ollama: the fixture "login" (fixtures.beforeAll) isn't in the folder's plugins/ or
+  the suite's plugins`) with `edit the provider` (`#convFixturesFix`: Settings → Providers, that
+  provider), in place of the fixtures' own line for the same thing. It's said here only; Send is off.
 - `Name` (`.input#convTitle`, once it has turns): its title, saved on blur or Enter; empty, its first
   message stands for it.
 - Facts (`dl.trace-facts`): turns, tokens, cost, p50, from the turns it has now.
 - (No button for a new conversation here: the sidebar's `+` starts one.)
-- `Save as test`: `Suite` (`.select#saveSuite`: the open folder's suites, and "New suite…"),
+- `Save as test`: `Suite` (`.select#saveSuite`: the suites kept, and "New suite…"),
   `Name` (`.input#saveName`), and `SAVE AS TEST` (`.btn-primary#saveTest`). The test gets the
   conversation's messages as turns, and the replies' current values as suggested checks to accept
   or drop (status, and each path the reply text came from).
@@ -352,10 +526,10 @@ Head: `suite` icon, `SUITE`.
   in its folder (a name that's taken, or with characters other than letters, digits, `.`, `-` and
   `_`, is refused with a toast and put back; so is a rename while the suite runs). Its tests' last
   results follow it (a new suite given its old name doesn't take them; the results a run had are
-  shown under its suites' names as renamed since, and not if what they're of was deleted since, in
-  this folder: runs are kept with the folder they're of). A `.hint` shows the path.
+  shown under its suites' names as renamed since, and not if what they're of was deleted since), and
+  so does where it was last exported to. A `.hint` shows the path.
 - `Provider` (`.select#suiteProvider`, with `manage` in its head, which opens Settings → Providers):
-  the folder's providers by name; choosing one writes the suite's `provider` as a path relative to
+  the providers kept, by name; choosing one writes the suite's `provider` as a path relative to
   it. A reference that isn't one of them shows as it is (`ollama2 (missing)`, a preset's name,
   `inline`), with the suite's problem below.
 - `Group` (`.input#suiteGroup`, a whole number of 1 or more; empty removes it; another value isn't
@@ -365,34 +539,51 @@ Head: `suite` icon, `SUITE`.
 - Facts: tests, environments (names; secret values are kept in Settings → Secrets), judges, defaults
   (repeat, pass rate, history, on failure, unsure), plugins, last run (`14:02:11 · 2 mins ago`: the
   latest of its tests').
+- Its problems (an old way its files, or its plugins, write a secret or an environment's value is one,
+  saying the new way: `${env:API_KEY} is the old way to write a secret: write {{secret.API_KEY}}`),
+  then its warnings as the file was read (`.hint.panel-note`, joined by ` · `): a test with no checks,
+  what isn't built yet.
 - `RUN SUITE` (`.btn-primary#suiteRun`; `STOP` while it runs; off while one of its tests runs on its
-  own), `Add test` (`.btn#suiteAddTest`), `Copy CI command` (`.btn#suiteCopyCi`); then `Edit the file
-  as YAML` (`.btn#suiteYamlEdit`): it reads the file as it is when pressed and opens it in the large
-  editor (code style); Save validates and writes. Foot: the file path
-(`.hint`), `Delete suite file` (`#suiteDelete`, asking `delete this file?`), which deletes the file
-from the opened folder.
+  own) and `Add test` (`.btn#suiteAddTest`); a row of `Export…` (`.btn#suiteExport`: the [Export
+  dialog](../../design/components.md#export-dialog), [The workspace](#the-workspace)) and `Copy CI
+  command` (`.btn#suiteCopyCi`: the command that runs the folder it was last exported to, `npx hafen
+  run "<folder>" --env … --secret … --report junit:… --report run:…`; not exported yet, it opens the
+  Export dialog); under them, `.hint#suiteCiHint` (where it went and when, with which files; not
+  exported yet, that it isn't, with `Export it`); then `Edit the file as YAML` (`.btn#suiteYamlEdit`): it reads the file as it is when
+  pressed and opens it in the large editor (code style); Save validates and writes. Foot: the file
+  path (`.hint`), `Delete suite file` (`#suiteDelete`, asking `delete this file?`), which deletes the
+  suite (its file, from the workspace).
 
 ### Test
 
 Head: `test` icon, `TEST`.
 
 - `Name` (`.input#testName`), `Provider` (`.select#testProvider`: "the suite's (<name>)", then the
-  folder's providers; choosing one writes the test's own `provider`, the suite's removes it),
+  providers kept; choosing one writes the test's own `provider`, the suite's removes it),
   `Tags` (`.input#testTags`, comma-separated).
 - `Runs`: a `.controls` row of `Repeat` (`.input#testRepeat`, number), `Pass rate`
   (`.input#testPassRate`) and `Group` (`.input#testGroup`, a whole number of 1 or more; empty removes
   it; another value isn't saved), with a `.hint#testGroupHint`: "Tests in the same group run one after
   another; different groups run at the same time. Tests with no group are one group."
   ([Groups](test-file.md#groups)); then `History`, `On failure`, `Unsure` (`.select`s); `Data`
-  (`.input#testData`, a file path, with the row count as a `.hint`).
+  (`.input#testData`, a file path, with the row count as a `.hint`); with a data file (or a
+  `row_name` in the file), `Row names` (`.input#testRowName`, placeholder `first column`): the
+  test's `row_name`, each row's name ([Data rows](test-file.md#data-rows)); empty removes it; with a
+  `.hint#testRowNameHint`: "Each row's name in the reports and the thread (row 3: …): its first
+  column's value, or a template such as {{row.question}} ({{row.order}}). Cut at 60 characters;
+  never a secret."
 - `Setup` and `Teardown`: one line each per step (`.hint`), edited as YAML.
 - `.controls`: `RUN` (`.btn-primary#testRun`, `STOP` while running) and `Copy CI command`
-  (`.btn#testCopyCi`, which says `copied` for 1.5s).
+  (`.btn#testCopyCi`, which says `copied` for 1.5s: the suite's, with `--test "<name>"`; its hint
+  `.hint#testCiHint`).
 - `Showing` (`.select#testInstance`, a test that ran more than once, by repeat or data row): which
-  run the thread shows, `run 3 of 3 · passed`, failed ones first in the list; with none picked, the
-  latest (the one going on, while it runs).
+  run the thread shows, `run 3 of 3 · passed`, a row by its name, `row 2: a refund please · failed`
+  (`· run 2` when it repeats), failed ones first in the list; with none picked, the latest (the one
+  going on, while it runs).
 - `Last run` facts: status, passed (`2/3`), checks (`17/18`), accuracy, p50 and p95, tokens, cost,
-  took, when (`14:02:11 · 2 mins ago`). With a history of 2 or more runs: `History`, three [small charts](../../design/components.md#small-charts)
+  took, when (`14:02:11 · 2 mins ago`). A last try that broke off before it: its status (`error` or
+  `couldn't run`, `#testLastStatus`, in `--danger`) and when, then why (`ul.problems#testRunError`: the
+  error, or each problem the run's check found), and nothing to count. With a history of 2 or more runs: `History`, three [small charts](../../design/components.md#small-charts)
   (pass rate, p95, cost over the last 20 runs).
 - A `.hint`: "Click a turn for its checks and response."
 - `Edit the suite as YAML` (`.btn#testYamlEdit`): the suite's file, as it is when pressed, in the
@@ -449,8 +640,9 @@ Head: `check` icon, `CHECK · <TYPE>`.
   controls; a check turned off shows `off`), then facts: status, value, confidence, expected, actual,
   reason, judge (kind and model), tokens, cost, took; the judge's full answer (`.panel-output`).
   Not run as it is now: a placeholder, "Not run yet."
-- `Review` (judged checks): `Agree` and `Disagree` (`.btn`s, sharing the row), and a note
-  (`.input`); the judge's agreement so far as a `.hint` (`agrees with you 41 of 50 times`).
+- `Review` (judged checks): **not built yet** (FR-040). Planned: `Agree` and `Disagree` (`.btn`s,
+  sharing the row), and a note (`.input`); the judge's agreement so far as a `.hint` (`agrees with
+  you 41 of 50 times`). Nothing in the app shows it today.
 - Foot: `Delete check`.
 
 ### Step
@@ -458,6 +650,15 @@ Head: `check` icon, `CHECK · <TYPE>`.
 Head: `timeline` icon, `STEP · <KIND>`. Facts: kind, name, start, duration, status, its metrics;
 then its content: the thinking text, a tool call's arguments and result (JSON trees), a request and
 response, a judge's question and answer, a retry's reason.
+
+A fixture (`fixture`) shows facts (`#stepFixture`): fixture, when (its phase), provider, gave (the
+names, never values), set (the environment's names it set with `env.set`, never values), stop (`said to
+stop`, when its `run()` returned false), calls, error. A plugin's or fixture's call (`call`) shows `Request`, its plugin
+in its head (`#stepCallPlugin`, `fixture acme-login`), `METHOD url` (`#stepCallUrl`), its headers as
+facts (`#stepCallHeaders`), its body (`#stepCallBody`, pretty JSON when it's JSON); then `Response`,
+its status in its head (`#stepCallStatus`; `waiting…` while it's going, `no response` when it failed
+first), its error (`#stepCallError`), its headers (`#stepCallResponseHeaders`) and the start of its
+body (`#stepCallResponseBody`). Secrets show as `[redacted]`.
 
 A System One call (`judge_call`) shows `Request to System One` (`#stepJudgeRequest`): the request it
 sent, all of it, as soon as it's sent (while the run goes on, and the call's still being answered:
@@ -474,16 +675,18 @@ Head: `run` icon, `RUN`.
 - Facts: status, verdict, mode, where (desktop, browser or CI, and version), environment, started,
   took, tests, checks, latency p50/p95/p99 (with `n`), tokens, cost.
 - `Showing` (`.select#runInstance`, for the test the thread shows, when it has more than one): each
-  repeat and data row (`run 2 of 3`, `row 17 of 20 · failed`), failed ones first.
+  repeat and data row (`run 2 of 3`, `row 17: where is order 4431 · failed`), failed ones first.
 - `Tests`: a `List` of the run's tests, status-coloured; clicking one shows it in the thread (the run's
-  first until one's picked). A test the open folder hasn't got (a CI run's, or a suite renamed since)
-  shows as the run recorded it; its turns and checks open in the panel as the run recorded them too
-  (read-only: `#turnFromRun` says so), and Back goes to the run, the same test still showing.
+  first until one's picked). None (it broke off before its tests): a placeholder, `#runTestsNone`, "None
+  ran: it broke off before its tests." or "None ran: it was refused before anything was sent." A test
+  the app hasn't got (a CI run's, or a suite renamed since) shows as the run recorded it; its
+  turns and checks open in the panel as the run recorded them too (read-only: `#turnFromRun` says so),
+  and Back goes to the run, the same test still showing.
 - `Compare with` (`.select#runBaseline`: earlier runs of the same suites, or a file): pass rate,
   p50, p95, cost, each `run · baseline · change`, and the checks that flipped.
 - `.controls`: `export JSON` (`.btn#exportRun`), `run again` (`.btn#runAgain`: what ran, as it ran: its
   one test, up to its turn or only its turn as it was; or each of its suites whole. One whose test the
-  folder hasn't got any more says so in a toast, and runs nothing).
+  app hasn't got any more says so in a toast, and runs nothing).
 - Foot: `IdField` "Run _id", `Delete run`.
 
 ## Timeline dock
@@ -495,7 +698,12 @@ area and above the console, spanning the full width, open by default (`eval.sect
 - Shows the open run (or the explore conversation, or the open test's last run), for the repeat
   and row the panel shows.
 - Head: `TIMELINE`, then `fit` (`#timelineFit`, ghost: fit the run to the width; with steps only)
-  and a `.hint` with the total (`4.1 s · 37 steps`).
+  and a `.hint` with the total (`4.1 s · 37 steps`); when what it shows has fixtures,
+  `hide fixtures` / `show fixtures` (`#timelineFixtures`, ghost, `aria-pressed` when hidden): the
+  fixtures' steps (and the calls under them) left out, or shown again. One choice with the console's,
+  remembered (`eval.fixtures`: `hidden` or `shown`).
+- A provider's fixtures are steps (`fixture`, named `<fixture> · <phase>`), each plugin's or
+  fixture's HTTP call too (`call`, under what made it).
 - Rows: one group per turn (`TURN 1`), and setup and teardown groups; load runs show one row per
   concurrent slot.
 - Empty (`.no-steps` on the dock and its body): `.note.timeline-empty#timelineEmpty` "Run a test or
@@ -534,8 +742,10 @@ chart, and one sample request as a conversation under it.
 
 ## Notifications
 
-When a run ends, a toast says how it went (`Passed: <test or suite>`, `Failed: …`, `Couldn't run`,
-`Stopped`; `<checks> · <took>`), and, as Settings → Notifications says:
+When a run ends, a toast says how it went, in the [same words](#statuses) (`Passed: <test or suite>`,
+`Passed, unsure: …`, `Failed: …`, `Error: …`, `Couldn't run: …`, `Stopped: …`; `<checks> · <took>`, or
+why it broke off), its accent `--danger` for a failure or an error, `--ok` for a pass, `--muted` when
+stopped; and, as Settings → Notifications says (error and couldn't run as failed runs):
 
 - **A sound**, unless you're looking at what ran: a suite's run, its view or one of its tests open; a
   test's run, it (a turn or a check of it) or its suite's view open; and the window in front. (`When
@@ -560,14 +770,21 @@ or reply's body, a header, or a secret's value.
 | Name | When | Attributes |
 |---|---|---|
 | `engine.<command>` | Each engine command, when it's answered (`open`, `load`, `edit`, `create`, `write`, `read`, `remove`, `rename`, `run`, `send`, `saveConversation`, `configure`, …) | What it was about: the file, the edit (`op=set:tests.0.name`), what it found (`found="2 suites, 2 providers"`), a run's result (`result="failed 0/1"`), `concurrency`; then `ok` or `error: …`, and its time |
-| `http.request` | Each HTTP call the engine makes (a run's, a conversation's, a judge's, a setup step's) | `method`, `url` (no user or password; query values whose names look like keys, tokens or secrets as `***`); then its status, its time to the end of its body, its size |
+| `http.request` | Each HTTP call the engine makes (a run's, a conversation's, a judge's, a setup step's, a plugin's, a fixture's) | `method`, `url` (no user or password; query values whose names look like keys, tokens or secrets as `***`), `via` (the plugin or fixture that made it: `fixture:acme-login`, `provider:acme`); then its status, its time to the end of its body, its size |
+| `run.fixture`, `conversation.fixture` | Each provider fixture, as it ends | `name`, `phase`, `provider`, `test`, `calls`; `ok · gave NAMES` (never values) or `error: …` |
 | `run.start`, `run.turn`, `run.test` | A run starting; each turn and test as it ends | The file, the test, `until_turn` / `only_turn`, `at_once`; a turn's checks (`4/5`); a test's status |
 | `conversation.turn`, `conversation.open`, `conversation.delete`, `conversation.turn.delete`, `conversation.clear` | A conversation's events | Its turn, its name |
 | `run.delete`, `run.clear`, `run.import` | Runs kept here | The run |
-| `config.env`, `config.provider`, `config.secret`, `config.relay`, `config.theme` | A setting changed | Its new value; a secret's name and environment, and `set` or `forget` |
+| `config.scope`, `config.provider`, `config.secret`, `config.relay`, `config.theme` | A setting changed | Its new value (the scope chosen, `none`); a secret's name and scope (`globals` for Globals'), and `set`, `forget`, `import` or `show` (shown in Settings) |
+| `scope.create`, `scope.duplicate`, `scope.value`, `scope.rename`, `scope.delete`, `scope.import`, `scope.export`, `scope.export.secrets` | A scope made (or duplicated: `from`), renamed or deleted; a value set or deleted; values imported (from a `.env` file) or exported | The scope (`globals` for Globals); a value's name (never a secret's value), how many were imported, the file |
 
 Errors (a failed command, an HTTP status of 400 or more, a call that didn't get an answer) are
-`--danger`. The console keeps the last 3000 lines; `copy` puts them all on the clipboard.
+`--danger`. The console keeps the last 3000 lines; `copy` puts what it shows on the clipboard.
+
+Lines about a provider's fixtures (`*.fixture`, and `http.request` with `via=fixture:…`) are tagged
+(`data-tag="fixture"`): `hide fixtures` / `show fixtures` in the console's head (`#consoleFixtures`,
+once the providers have fixtures, or while they're hidden) leaves them out. One choice with
+the timeline's.
 
 ## Settings
 
@@ -578,7 +795,7 @@ foot (`#settingsUsage`) says the storage used: `Storage used` over the size (`#s
 `2.7 MB`, in `--fg`), the runs and conversations kept, and the browser's or the app's storage in
 all, on hover.
 
-A large editor opened from a pane (Edit the scope as YAML, a plugin's `edit`, a field's max button)
+A large editor opened from a pane (Environments' `Edit as .env`, a plugin's `edit`, a field's max button)
 goes back to Settings when it closes: Cancel, Esc, a click outside it and Save close the editor only
 (each modal acts on its own dialog's close; the editor is drawn inside Settings' React tree, which
 would otherwise pass its close up to Settings).
@@ -587,49 +804,81 @@ would otherwise pass its close up to Settings).
 |---|---|---|
 | Storage | Runs | Runs kept by the app, with sizes; delete one or clear all |
 | Storage | Conversations | Conversations kept by the app (as Conversations lists them), with sizes; delete one or clear all |
-| Connection | Providers | The open folder's providers ([below](#providers-settings)) |
-| Connection | System One | System One's key, `JEV_API_KEY` (`.input#systemoneKey`, password; `save` `#systemoneSave`, `forget` `#systemoneForget`; `#systemoneKeyState` says `set` or `not set`), kept as a secret for every environment; a `.hint` says which checks use it, the endpoint and model they call unless a judge says otherwise, and how CI sets it; a link to System One's documentation |
+| Connection | Providers | The providers kept ([below](#providers-settings)) |
+| Connection | System One | System One's key, `JEV_API_KEY` (`.input#systemoneKey`, password; `save` `#systemoneSave`, `forget` `#systemoneForget`, a ConfirmButton asking `forget it?`; `#systemoneKeyState` says `set` or `not set`), kept as a secret in Globals; a `.hint` says which checks use it, the endpoint and model they call unless a judge says otherwise, and how CI sets it; a link to System One's documentation |
 | Connection | Relay (browser build) | The relay's address (default: where the app was served from) and whether it answers |
-| Configurations | Environments | Each scope's plain variables ([Scopes](test-file.md#scopes)): `Scope` (`.select#envScope`, with `choose it` (`#envChoose`) to make it the one chosen); `add scope` (`#newScopeForm`: `.input#newScopeName`) makes `environments/<scope>.yml`; the scope's variables as rows (`envVar-<name>`: the name over `{{scope.<name>}}`, its value in a plain `.input` saved on blur or Enter, `×` deleting it); `add` (`#envVarAdd`: `.input#envVarName`, `.input#envVarValue`); `Edit the scope as YAML` (`#envYaml`); `Delete scope` (`#envDelete`, asking `delete its file?`). Saved in place, comments kept. With no folder open: "Open a folder first: a scope's variables are kept in its environments/ folder, as plain YAML."; when there are scopes all the same (a suite's environments, opened as files; scopes that have secrets), `Scope` and `choose it` stay, over "Open a folder to add scopes and their variables…". The scope button at the top of the sidebar opens this pane |
-| Configurations | Secrets | Each scope's secret values, by name (`Scope`: `.select#secretsEnv`; the pane opens on "every scope"; a value for every scope applies where a scope has none of its own); `{{scope.NAME}}` and `${env:NAME}` both reach them: a row for each name the open files reference as `${env:NAME}` (and the presets' default keys), and for each name that has a value (`set`, or `set for every scope` when the value is kept for all of them). `JEV_API_KEY` isn't here: it's System One's, in its pane. `Add a secret` (`#secretAdd`: a name, `.input#secretName`, and a value, `.input#secretValue`) keeps any number under names of your own (letters, digits and `_`, not starting with a digit), for files to use as `${env:NAME}`. In the desktop app they're stored encrypted by the system; in the browser build, in this browser's storage, which the pane says plainly |
-| Configurations | Plugins | The folder's plugins (every file in `plugins/`, and every plugin a suite names), each loaded to show it: a row (`plugin-<name>`) with `<name> · <kind> · <version>`, its file and the hosts it may reach, any problem loading it (in `--danger`), how to use it (`kind: plugin:<name>`, `{ type: <name> }`, or `judges: { mine: { kind: plugin, plugin: <name> } }`), "Any suite in the folder can use it: …", and the suites that use it (`.hint#plugin-<name>-used`: `Used by a.hafen.yml, b.hafen.yml`, those that name it in their `plugins` or use it by name; `Used by no suite yet`). There's nothing to add it to a suite: any suite uses the folder's plugins by name. `edit` (the file in the [code editor](../../design/components.md#code-editor): JavaScript in colour, Tab and Enter keeping its indent, `Format`); `×` (`#plugin-<name>-delete`, asking `delete file?`). `Add a plugin` (`#newPluginForm`: its kind, `.select#newPluginKind`: Provider, Check or Judge; its name, `.input#newPluginName`) writes `plugins/<name>.js` from a starting file that works as it is (`engine/plugin-templates.js`); a provider one also writes its provider file, `providers/<name>.yml` (`kind: plugin:<name>`; `<name>-2`… when that's taken), so it's in Providers at once. With no folder open: "Open a folder first: plugins are files in its plugins/ folder." |
-| App | Appearance | Light, Dark, or As the system's |
-| App | Notifications | What a run's end does besides its toast ([Notifications](#notifications)): `Play a sound when a run ends` (`.check#notifySound`, on); `When it sounds` (`.select#notifyWhen`, off without sound: "only when I'm not looking at what ran", the default, or "after every run"); `For runs that` `passed` (`#notifyPassed`) and `failed, or couldn't run` (`#notifyFailed`), both on; `System notifications` (`#notifySystem`: "Also show the system's notification when Hafen isn't in front": on in the desktop app; in a browser off until turned on, which asks the browser's permission; `#notifySystemState` says `allowed`, `blocked by the browser`, `asks the browser when turned on` or `this browser has none`); `Try it` (`#notifyTry`: the sound and a sample toast, and the system's if on). Kept in `eval.notifications` |
+| Configurations | Environments | Environment values ([Head](#head)), apart from the suites, as [scope panes](../../design/components.md#scope-panes). Down the left: **Globals** (`#envGlobals`), a line, then **Scopes** (`#envScopes`, each `#envScope-<name>`: the scope chosen with a ✓; `2 not set` (`--danger`) when the open files use names it hasn't got, Globals' counted in; `more` and a right-click: `Choose it`, `Rename`, `Duplicate`, `Delete`), `+` (`#newScope`) opening `#newScopeForm` (`.input#newScopeName`, `add`: letters, digits, `.`, `-`, `_`; not taken, not `globals`, `global` or `every-scope`, not ending `.secret`; shown once made). On the right, the entry picked (it opens on the scope chosen, or Globals with none): its head (a scope's name, `.input#envScopeName`, renaming it on Enter or blur: its values and secrets go with it, and it stays chosen; a name that won't do is refused, said, and put back; `choose it` (`#envChoose`) or `chosen now` (`#envChosen`); Globals: `Globals`, and `choose no scope` or `no scope chosen`; `more` (`#envMore`)); `#envSearch` (`Search variables`: by name or value); `import .env` (`#envImport`, a file picker, `#envImportFile`: each name the file has is set, the others stay; a file that isn't one says its first problem and where, and changes nothing), `export .env` (`#envExport`: downloads `globals.env` or `<scope>.env`, the entry's own values), `edit as .env` (`#envText`: the entry's own values as a `.env` file's text in the large editor; saved, they're its values); the table (`#envVars`: `VARIABLE`, `VALUE`, `SOURCE`), a row a name (`#envVar-<name>`, `data-source`): the name over `{{env.<name>}}` (and `not used by the open files` when they don't), its value in an `.input` saved on blur or Enter, its source (`this scope`, `overrides Globals`, `from Globals`, `not set`; on Globals, `overridden in …`), `×` (`#envVar-<name>-delete`, asking `delete`) or, inherited, `override` (`#envVar-<name>-override`: the scope's own, Globals' value to start from); the names the open files use that neither has, `not set`; Globals' it doesn't override, muted, `from Globals`; the add row last (`#envVarAdd`: `.input#envVarName`, `.input#envVarValue`, no button: Enter in either adds it; a name as a `.env` file's and the engine's: letters, digits, `_`, `.`, `-`, not starting with a digit). For a scope, `Delete scope` (`#envDelete`, asking `delete its values and secrets?`: the scope, all of it, its entry, its values and its secrets, from every list and store, for good ([Head](#head)); the scope chosen, no scope is chosen after it). No scopes yet: "No scopes yet: add one (stage, prod…)." (`#environmentsEmpty`). The scope button at the top of the sidebar opens this pane |
+| Configurations | Secrets | Secrets, as Environments: the same entries (`#secretsGlobals`, `#secretsScopes`, `#secretsScope-<name>`: `2 not set` counts the secrets the open files use that it and Globals haven't got; the same `+`, menu and head: `#secretsScopeName`, `#secretsChoose`, `#secretsChosen`, `#secretsMore`), `#secretsSearch` (by name), `import .env` (`#secretsImport`, `#secretsImportFile`: into the entry shown; a name that won't do changes nothing, and a problem never quotes what's in a line), `export .env` (`#secretsExport`, a ConfirmButton asking `write them in plain text?`; it writes `globals.secret.env` or `<scope>.secret.env`, the entry's own, what `--secret` reads in CI: the desktop app's main process asks where and writes it (mode 600), so the values never pass through the page; a browser downloads it), `edit as .env` (`#secretsText`: the entry's own secrets as text, read for it; saved, they're its secrets, a name taken out forgotten), and the table (`#secretsList`: `NAME`, `VALUE`, `SOURCE`, `show all`/`hide all` (`#secretsRevealAll`)): a row for each name the open files use (`{{secret.NAME}}`, `{{secrets.NAME}}`; and the presets' default keys) and each name that has a value (`#secret-<name>`: its value a password field, `••••••••`, never shown until `show` (`#secret-<name>-reveal`): then as text, until `hide`; a new value typed in it is kept on blur or Enter; its source as Environments'; `forget` (`#secret-<name>-forget`, a ConfirmButton asking `forget it?`), or, inherited, `override` (`#secret-<name>-override`); `not set` in `--danger`), and the add row (`#secretAdd`: `.input#secretName`, `.input#secretValue`, no button: Enter in either adds it, or, with no value yet, goes to the value; a name as Environments'). `JEV_API_KEY` isn't here: it's System One's, in its pane. They're kept, in the desktop app, encrypted by the system when it can (else unencrypted in the app's data folder, until it can); in the browser build, in this browser's storage, unencrypted: while they're unencrypted, one line over the panes says so (`.note#secretsNote`), and nothing else explains the pane in words. `#secretsExport`'s `title` names the file it writes, in plain text. Secrets kept for a name that isn't a scope now (from before the scopes were only the ones made here: keys of the desktop app's `secrets.json`, read by name, never a value; or of `eval.secrets`) aren't any scope's and aren't used; while there are any, the pane ends with `Secrets of scopes that no longer exist` (`#goneScopes`): a row each (`#goneScope-<name>`), the name over its secrets' names, and `delete` (`#goneScope-<name>-delete`, a ConfirmButton asking `delete its secrets?`: that name's secrets go from the keystore, or the browser's storage; nothing else does). They're never deleted by themselves, and never make a scope |
+| Configurations | Plugins | The plugins kept (every file in `plugins/`, and every plugin a suite names), each loaded to show it: a row (`plugin-<name>`) with `<name> · <kind> · <version>`, its file and the hosts it may reach, for a fixture the names it gives (`.hint#plugin-<name>-provides`: `Gives ACME_COOKIE, ACME_CSRF, for the run`) and the lists it runs in, its phases (`.hint#plugin-<name>-phases`: `Runs in beforeAll, afterAll`; all four when it doesn't say), any problem loading it (in `--danger`), how to use it (`kind: plugin:<name>`, `{ type: <name> }`, `judges: { mine: { kind: plugin, plugin: <name> } }`, or `fixture: <name>`), "Any suite can use it: …" ("Any provider …" for a fixture), and the suites that use it (`.hint#plugin-<name>-used`: `Used by a.hafen.yml, b.hafen.yml`, those that name it in their `plugins` or use it by name; `Used by no suite yet`). There's nothing to add it to a suite: any suite uses the plugins kept by name. `edit` (the file in the [code editor](../../design/components.md#code-editor): JavaScript in colour, Tab and Enter keeping its indent, `Format`); `×` (`#plugin-<name>-delete`, asking `delete file?`). `Add a plugin` (`#newPluginForm`: its kind, `.select#newPluginKind`: Provider, Check, Judge or Fixture; its name, `.input#newPluginName`) writes `plugins/<name>.js` from a starting file that works as it is (`engine/plugin-templates.js`); a provider one also writes its provider file, `providers/<name>.yml` (`kind: plugin:<name>`; `<name>-2`… when that's taken), so it's in Providers at once, and a provider one is one of a new provider's kinds (`plugin:<name>`) at once. |
+| App | Appearance | `Theme`: Light, System or Dark, side by side, the one chosen pressed (a [segmented choice](../../design/components.md#segmented-choice): `#themeChoice`, `role=radiogroup`; `#themeLight`, `#themeSystem`, `#themeDark`, `role=radio`, `aria-checked`; the arrows choose the next). System (the default) is the system's, following it as it changes. Kept in `eval.theme` (`light`, `system`, `dark`). The desktop window is drawn before the page in the theme the page last applied, or, with System or nothing chosen yet (a first start), the system's now, so a dark system never sees a light window first (`window.json`: `{ applied, choice }`) |
+| App | Notifications | What a run's end does besides its toast ([Notifications](#notifications)), in [groups](../../design/components.md#settings-groups), a line between them, each under its name: **Sound** (`#notifySoundGroup`): `Play a sound when a run ends` (`.check#notifySound`, on); `When it sounds` (`.select#notifyWhen`, off without sound: "only when I'm not looking at what ran", the default, or "after every run"); **For runs that** (`#notifyRunsGroup`): `passed` (`#notifyPassed`) and `failed, or couldn't run` (`#notifyFailed`), both on; **System notifications** (`#notifySystemGroup`; `#notifySystem`: "Also show the system's notification when Hafen isn't in front": on in the desktop app; in a browser off until turned on, which asks the browser's permission; `#notifySystemState`, at the right of its name, says `allowed`, `blocked by the browser`, `asks the browser when turned on` or `this browser has none`); then, under a line of its own, `Try it` (`#notifyTry`: the sound and a sample toast, and the system's if on). Kept in `eval.notifications` |
 
 ### Providers (Settings)
 
-Each provider is a file in the open folder's `providers/` folder, which suites name and the command
-line uses as it is. The pane shows one of three things; leaving it (another pane, or closing
+Each provider is a file the app keeps (`providers/<name>.yml` in its workspace), which suites name,
+and which Export writes with the suites that use it, for the command line to use as it is. The pane shows one of three things; leaving it (another pane, or closing
 Settings) goes back to the list.
 
-- **The list:** `new provider` (`.btn#newProvider`, disabled until a folder is open), then a
+- **The list:** `new provider` (`.btn#newProvider`), then a
   `.settings-list` (`#providerList`) of `.settings-row`s (`provider-<name>`): the name over a `.hint`
   (`<kind> · <file>`, a plugin's kind as `plugin:<name>`, `· has problems` in `--danger`, `· in use`
   for the conversation's), `edit` (`.btn#provider-<name>-open`) and `×` (`#provider-<name>-delete`,
-  asking `delete file?`, then deleting the file from the opened folder). After them, each provider
-  plugin in the folder that no provider file uses (`provider-plugin-<name>`: its name over
+  asking `delete file?`, then deleting the file). After them, each provider plugin kept that no
+  provider file uses (`provider-plugin-<name>`: its name over
   `plugin:<name> · <file> · no provider file yet`), with `add provider`
-  (`.btn#provider-plugin-<name>-add`), which writes its provider file and opens it. Empty: "No providers yet. Add one: Ollama, OpenAI,
-  Anthropic, Gemini, or your own endpoint." With no folder open: "Open a folder first: providers
-  are files in its providers/ folder."
+  (`.btn#provider-plugin-<name>-add`), which writes its provider file and opens it. Empty: "No
+  providers yet. Add one: Ollama, OpenAI, Anthropic, Gemini, your own endpoint, or one of your
+  provider plugins."
+- **A provider**'s `Fixtures` (`#providerFixtures`, between its problems and its YAML, in its own
+  [section](../../design/components.md#settings-sections), `#providerFixturesSection`: open by default
+  when the provider has fixtures, or a problem with them; closed, its head says what it runs, in order,
+  `#providerFixturesSummary`: `acme-login → reset-cart`, `none yet`, `· has problems` in `--danger`;
+  a panel's fixtures `edit`, `edit the provider` and the way back from a fixture's `code` open it): a
+  hint (where they're kept, that every suite using it runs them), then a section for each list
+  (`#providerFixtures-<beforeAll|before|after|afterAll>`), its name in plain words (`Once, before the
+  run`, `Before each test`, `After each test`, `Once, after the run`) over when it runs; its fixtures as
+  rows in their order (`#providerFixtures-<list>-<i>`: the place, the name as written, what it gives or,
+  in `--danger`, `isn't one of your fixture plugins`, or, for one in a list its phases don't name, `runs
+  only in beforeAll, afterAll: it can't be in this list` (the engine refuses it too, and a message to the
+  provider is stopped before it's sent, as for a fixture that isn't there), `↑` `↓` `×`: `-up`, `-down`,
+  `-remove`); then `+ add a fixture` (`.select#providerFixtures-<list>-add`: the fixture plugins kept,
+  each with what it gives; one whose phases don't name the list listed but not to pick, `acme-login
+  (runs only in beforeAll, afterAll)`, as one in it already is; `No fixture plugins yet` with none),
+  which adds one at the end. Each change is written in the provider's file at once (comments
+  kept; a list left empty leaves the file; none, the key goes). A `fixtures` the file has that can't be
+  read is said (`#providerFixturesProblem`), to fix in the YAML. With no fixture plugins, `add one in
+  Plugins` (Settings → Plugins).
 - **A provider** (`edit`): `‹ all providers` (ghost, `#providersBack`); `Name`
-  (`.input#providerName`): the file's name. Changing it (on blur or Enter) renames the file in its
-  folder, keeping the extension, and points every suite that uses it at the new name (their
+  (`.input#providerName`): the file's name. Changing it (on blur or Enter) renames the file,
+  keeping the extension, and points every suite that uses it at the new name (their
   comments kept); a name that's taken, or with characters other than letters, digits, `.`, `-` and
-  `_`, is refused with a toast and put back. Facts (kind, file, url, model), its problems, `The
-  provider (YAML)` (a code textarea with the max button; saved on blur when it parses), `TRY IT`
+  `_`, is refused with a toast and put back. Facts (kind, file, url, model), its problems, its
+  fixtures (above), then its `YAML`, in its own section (`#providerYamlSection`, closed by default;
+  closed, its head says `kind: http · 12 lines`, or why what's typed isn't saved, in `--danger`): the
+  file, a code textarea named by its path, with the max button; saved on blur when it parses. Each
+  section is open or closed as it was last left, for every provider (`eval.section.providerFixturesSection`,
+  `eval.section.providerYamlSection`). YAML that doesn't parse opens its section to say why when it's
+  left or tried, closed or not. `TRY IT`
   (`.btn-primary#providerTry`: chooses it for the conversation, closes Settings and focuses the
   message box), `Delete provider` (`#providerDelete`, asking `delete this file?`).
 - **A new provider** (`new provider`): `‹ all providers`, then a form (`#newProviderForm`):
   - `Kind` (`.select#newProviderKind`): every kind a provider can start from, in this order:
     Ollama, OpenAI chat completions, OpenAI responses, Anthropic messages, Gemini, HTTP endpoint ·
     one JSON reply, HTTP endpoint · streamed (SSE), HTTP endpoint · streamed (JSON lines),
-    WebSocket; under it, a `.hint` (`#newProviderAbout`) saying what it's for.
+    WebSocket, A2A agent; then, under `Your provider plugins` (an `<optgroup>`), each provider plugin
+    kept, `<name> (plugin)` (its value `plugin:<name>`; one added in Settings → Plugins is there at
+    once); under it, a `.hint` (`#newProviderAbout`) saying what it's for (a plugin's: its file and
+    version, and that the file says `kind: plugin:<name>`). (An A2A agent's `URL` is where its agent
+    card is: the file gets `card:`.)
   - `Name` (`.input#newProviderName`): the kind's short name (`ollama`, `openai`, `anthropic`, …),
     with `-2`, `-3` added when taken; a `.hint` shows the file (`providers/<name>.yml`).
+  - For a provider plugin, nothing more: the file it makes is `kind: plugin:<name>` (as Plugins'
+    makes one), its other fields the plugin's settings, to add in its YAML.
   - For a preset: `Model` (`.input#newProviderModel`, Ollama's placeholder `gemma4`) and `Address`
-    (`.input#newProviderBase`, the preset's default as its placeholder); a `.hint` names the key's
-    secret (`${env:OPENAI_API_KEY}`, …; none for Ollama). Otherwise `URL` (`.input#newProviderUrl`).
+    (`.input#newProviderBase`, a text field, the preset's default as its placeholder: it takes a
+    template, `{{env.base_url}}/v1`); a `.hint#newProviderKey` names the key's secret
+    (`{{secret.OPENAI_API_KEY}}`, …; none for Ollama). Otherwise `URL` (`.input#newProviderUrl`,
+    placeholder `{{env.base_url}}/chat`).
   - `ADD PROVIDER` (`.btn-primary#newProviderCreate`) writes `providers/<name>.yml` (from
     `engine/providers/templates.js`: valid as written, with the options it doesn't set as
     comments; an HTTP endpoint's body sends `{{history}}`), opens it, and chooses it for the

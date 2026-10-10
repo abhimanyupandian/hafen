@@ -32,14 +32,21 @@ the desktop app and on the command line (CI).
 - Anything platform-specific (how a request reaches the network, where files live, where secrets
   come from) is passed into the engine, never inside it.
 
-### III. The file is the test
+### III. The app keeps the tests; Export writes the files
 
-Tests are plain YAML or JSON files, in the user's repository, with a published schema.
+The app keeps the tests the user builds, as plain YAML or JSON files with a published schema, in its
+own workspace: nothing has to be opened or picked before the work starts. Export writes them, with
+everything they use, as plain files the command line runs unchanged, so they're still reviewed in
+git, and still run by the one engine in CI.
 
-- The app reads and writes those files directly. Nothing needed to run a test lives only in the
-  app's storage, and there is no separate "export" step.
+- The app's workspace holds suites, providers, plugins and data files exactly as the engine reads a
+  folder of them. Import brings files or a folder in, and Export writes them out, at the same paths
+  and with the same text. Nothing a test needs to run lives only in the app's other storage (secrets
+  are given where it runs, by principle IV).
 - Saving from the app keeps the file's comments, key order and formatting, so a one-field change
-  is a one-line diff.
+  is a one-line diff once it's exported.
+- Neither writes over a file without asking: Export lists the files in the folder that it would
+  change, Import the app's own that it would, and both say what they wrote.
 - A file states its schema version. Readers refuse versions they don't understand, and say so.
 
 ### IV. Local-first and private
@@ -91,7 +98,7 @@ The engine and its interfaces are covered by tests written before the code they 
 - **Stack:** React 19 and Vite for the UI; Electron for the desktop app; Node 22 or newer for the
   CLI, the relay and tests.
 - **Default environments:** the desktop app and CI. The browser build is supported where the
-  endpoints allow it (CORS), or through the project's own relay (`hafen serve`).
+  endpoints allow it (CORS), or through the project's own relay (`npm run serve`).
 - **Accessibility and automation:** every control has an `id` and an accessible name; rows and
   regions have ids made from what they show; state that matters (running, selected, status) is in
   the DOM as attributes.
@@ -114,4 +121,4 @@ request that changes this file, says why, and updates any spec or plan it affect
 semantic versioning: a removed or redefined principle is a major change, a new principle or section
 a minor one, wording a patch. Reviews check that a change follows these principles.
 
-**Version**: 2.0.0 | **Ratified**: 2026-10-05 | **Last Amended**: 2026-10-05
+**Version**: 3.0.0 | **Ratified**: 2026-10-05 | **Last Amended**: 2026-10-07

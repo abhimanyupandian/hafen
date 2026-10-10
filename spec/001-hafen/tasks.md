@@ -305,6 +305,18 @@ the quickstart's remaining fixture suites (T114).
 
 ---
 
+## Phase 18: The app keeps its work (constitution III, 3.0.0)
+
+**Goal**: no folder to open: the app keeps its suites, providers, plugins and data files in its own
+workspace; Import brings suites in, Export writes them (and everything they use) to a folder the CLI
+runs as it is ([contracts/ui.md, The workspace](contracts/ui.md#the-workspace)).
+
+- [x] T115 Write tests, then implement the engine's `dependencies` (what suites use, plugins' relative imports too), `suites`, `copyPlan` and `copy` commands in packages/hafen/tests/engine/dependencies.test.js, packages/hafen/engine/files/dependencies.js and packages/hafen/engine/serve-port.js
+- [x] T116 Write tests, then let the CLI find a named folder's plugins/ (an exported folder runs from anywhere), and pack JSON Schemas, in packages/hafen/tests/cli/exported-folder.test.js, packages/hafen/cli/commands.js and packages/hafen/cli/pack.js
+- [x] T117 The workspace in each host: the desktop app's data folder (desktop/main.js, desktop/engine-host.js), the browser's private file system (app/js/worker.js); folder mode removed
+- [x] T118 Import, Export, Copy CI command from the last export, the one-time offer of the folder opened before, the first steps, and a new provider's kinds with the provider plugins, in app/js/transfer.js, app/js/lib/ci.js and app/js/views/; their Additions in spec/design/components.md first
+- [x] T119 The browser tests start with the workspace filled (tests/browser/fixtures.js); the workspace, Import, Export and the desktop app's restart in tests/browser/workspace.spec.js; Getting started follows the new guide
+
 ## Dependencies & Execution Order
 
 ### Phase dependencies

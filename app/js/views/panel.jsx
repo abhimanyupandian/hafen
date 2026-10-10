@@ -17,15 +17,19 @@ import { copyText } from "../lib/clipboard.js";
 import { ago, money, sec, tokens as tokenText, when } from "../lib/format.js";
 import * as idb from "../lib/idb.js";
 import {
-  app, chooseProvider, compareRuns, deleteCheck, deleteConversation, deleteFile, deleteRun, deleteTest, deleteTurn, editSuite, freeSuiteFile, newTest, relativePath, renameSuite, exportRun, openRun, readFile, renameConversation, runForTest, runTests,
+  app, chooseProvider, compareRuns, providerChoices, deleteCheck, deleteConversation, deleteFile, deleteRun, deleteTest, deleteTurn, editSuite, freeSuiteFile, newTest, problemsOf, warningsOf, relativePath, renameSuite, exportRun, openRun, readFile, renameConversation, runForTest, runTests,
   liveForSuite, liveForTest, liveIn, runAgain, saveConversation, select, setCheckOn, stopRun, suiteOf, suiteRunFor, testOf, writeFile,
 } from "../state.js";
+import { ciCommand, ciFiles, written } from "../lib/ci.js";
+import { openExport } from "../transfer.js";
 import { CheckCard, CheckOnBox } from "./check-card.jsx";
 import { runTestDefinition } from "./thread.jsx";
 import { isOn, kindOf } from "./check-types.js";
 import { Facts, FieldHead, NumberField, Pre, Problems, TextField } from "./fields.jsx";
 import { showProvider } from "./providers.jsx";
-import { instancesOf, pairResults, pairTurns, pickedInstance, spanFor, statsLine, testResult, testStatusText, turnsOf, visibilityText } from "./derive.js";
+import { showPlugin } from "./plugins.jsx";
+import { FixturesSummary, sendProblem } from "./fixtures-field.jsx";
+import { countedResult, instancesOf, pairResults, pairTurns, pickedInstance, refusedRun, rowLabel, spanFor, statsLine, stoppedTurn, testResult, testStatusText, turnsOf, visibilityText } from "./derive.js";
 
 // The run a turn or check is shown from (the open run when picked in its thread, else the test's
 // latest), its record of turn i, and each of the turn's checks' results as the file has them now
@@ -42,7 +46,9 @@ function turnRecordOf(selection, test, i) {
 
 /* ---------- parts ---------- */
 
-// onBack: what holds this (a check's or a step's turn, a turn's test, a test's suite)
+// onBack: what holds this (a check's or a step's turn, a turn's test, a test's suite). On a small
+// screen, where the panel covers the thread, hide (before ×) puts it away and keeps what's selected
+// open; × closes it (spec/design/components.md, Additions: The panel on a small screen)
 const Head = ({ icon, label, onClose, onBack, backLabel }) => (
   <div className="panel-head">
     {onBack && (
@@ -51,6 +57,10 @@ const Head = ({ icon, label, onClose, onBack, backLabel }) => (
       </button>
     )}
     <span className="block-label"><Icon name={icon} size={16} /><span className="label">{label}</span></span>
+    <button className="btn btn-ghost btn-icon panel-hide" id="panelHide" type="button" aria-label="Hide the details" aria-controls="panel"
+            title="Hide the details (what's open stays open)" onClick={() => app.set({ panelOpen: false })}>
+      <Icon name="sidebar" size={16} />
+    </button>
     <button className="btn btn-ghost btn-icon" id="panelClose" type="button" aria-label={`Close ${label.toLowerCase()}`} title="Close" onClick={onClose}>
       <Icon name="close" size={16} />
     </button>
@@ -61,15 +71,17 @@ const stem = (file) => file.split("/").pop().replace(/\.hafen\.(ya?ml|json)$/i, 
 // A provider reference's name: a file's (providers/ollama.yml → ollama), a preset's, or "inline"
 const refName = (ref) => (typeof ref === "string" ? ref.split("/").pop().replace(/\.(ya?ml|json)$/i, "") : ref ? "inline" : "");
 
-// Which provider a suite (or one test) runs on: the folder's providers, by name. The file says it as
+// Which provider a suite (or one test) runs on: the providers kept, by name. The file says it as
 // a path relative to itself. A reference that isn't one of them (a missing file, a preset, an inline
-// provider) shows as it is, so it can be seen and replaced.
-function ProviderPicker({ id, label, file, current, resolved, inherit, onChange }) {
-  const { providers } = useStore(app);
+// provider, one of the suite's named providers) shows as it is, so it can be seen and replaced.
+// used: the provider file the test or suite runs with (its own, or the one it inherits): its fixtures.
+// named: the name under the suite's providers: the reference is, when it's one
+function ProviderPicker({ id, label, file, current, resolved, used, named, inherit, onChange }) {
+  const providers = providerChoices(useStore(app));
   const value = current === undefined ? "" : resolved && providers.some((p) => p.file === resolved) ? resolved : "?";
   const options = [
     ...(inherit ? [["", inherit]] : current === undefined ? [["", "choose a provider", true]] : []),
-    ...(value === "?" ? [["?", `${refName(current)}${typeof current === "string" && !resolved ? " (missing)" : ""}`, true]] : []),
+    ...(value === "?" ? [["?", named ? `${named} (in this suite's providers)` : `${refName(current)}${typeof current === "string" && !resolved ? " (missing)" : ""}`, true]] : []),
     ...providers.map((p) => [p.file, p.name]),
   ];
   return (
@@ -84,16 +96,37 @@ function ProviderPicker({ id, label, file, current, resolved, inherit, onChange 
           onChange(next ? relativePath(file, next) : null);
         }} />
       </label>
+      <FixturesSummary id={`${id}Fixtures`} providerFile={value === "?" ? null : used ?? resolved ?? null} />
     </>
   );
 }
 
-const ciCommand = (file, test, env) => [
-  "npx hafen run", JSON.stringify(file),
-  env && `--env ${env}`,
-  test && (test.id ? `--test ${JSON.stringify(test.name)}` : `--test ${JSON.stringify(test.name)}`),
-  "--report junit:results/junit.xml", "--report run:results/run.hafen-run.json",
-].filter(Boolean).join(" ");
+// Under Copy CI command: the folder CI runs (where the suite was last exported to), with the files that
+// export wrote there (the ones the command names); not exported yet, it says so, and offers Export
+function CiHint({ id, file }) {
+  const state = useStore(app);
+  const now = useNow();
+  const where = state.exports[file];
+  if (!where) {
+    return (
+      <p className="hint panel-note" id={id}>
+        {"Not exported yet: CI runs the folder it's exported to. "}
+        <button className="btn btn-ghost inline-link" id={`${id}Export`} type="button" onClick={() => openExport([file])}>Export it</button>
+        {" first."}
+      </p>
+    );
+  }
+  const envs = written(where.env);
+  const files = [...envs, ...written(where.secret)];
+  // (values there are now, that no .env file went with: CI runs without them)
+  const missing = !envs.length && ciFiles(state).env.length > 0;
+  return (
+    <p className="hint panel-note" id={id}>
+      {`Runs ${where.path}, exported ${ago(where.at, now)}${files.length ? ` with ${files.join(", ").replace(/, ([^,]*)$/, " and $1")}` : ""}: export again after a change.`}
+      {missing && " No .env file went with it: CI runs without your values, unless you export them too."}
+    </p>
+  );
+}
 
 function CopyButton({ id, text, label = "Copy CI command", className = "btn" }) {
   const [said, setSaid] = useState(label);
@@ -103,6 +136,15 @@ function CopyButton({ id, text, label = "Copy CI command", className = "btn" }) 
       setTimeout(() => setSaid(label), 1500);
     }}>{said}</button>
   );
+}
+
+// Copy CI command, for a suite (or one of its tests): the command that runs the folder it was last
+// exported to; never exported, the button offers Export instead (CI runs an exported folder)
+function CopyCi({ id, file, test }) {
+  const state = useStore(app);
+  const text = ciCommand(file, test, state);
+  if (text) return <CopyButton id={id} text={text} />;
+  return <button className="btn" id={id} type="button" title="Export it first: CI runs the folder it's exported to" onClick={() => openExport([file])}>Copy CI command</button>;
 }
 
 // Edit a YAML file in the large editor: a button that reads the file as it is when it's pressed (so the
@@ -135,7 +177,8 @@ function EditFile({ file, id, label }) {
   );
 }
 
-// Which repeat and data row the thread shows, when a run has more than one
+// Which repeat and data row the thread shows, when a run has more than one: "run 2 of 3 · passed", a
+// row by its name, "row 3: a refund please · run 2 · failed"
 function InstancePicker({ run, file, test, selection, id }) {
   const instances = instancesOf(run, file, test);
   if (instances.length < 2) return null;
@@ -144,9 +187,9 @@ function InstancePicker({ run, file, test, selection, id }) {
   const current = pickedInstance(instances, selection);
   const result = testResult(run, file, test);
   const statusOf = (x) => result?.instances?.find((i) => i.repeat === x.repeat && (i.row ?? null) === (x.row ?? null))?.status;
-  const options = instances.map((x) => [key(x), `${x.row ? `row ${x.row}` : `run ${x.repeat}`}${x.row && instances.some((y) => y.repeat > 1) ? ` · run ${x.repeat}` : ""} of ${instances.length}${statusOf(x) ? ` · ${statusOf(x)}` : ""}`]);
-  // Failed ones first, so they're easy to find
-  options.sort((a, b) => (a[1].includes("failed") ? -1 : 0) - (b[1].includes("failed") ? -1 : 0));
+  // Failed ones first, so they're easy to find (by status: a row's name may say "failed")
+  const failedFirst = [...instances].sort((a, b) => (statusOf(a) === "failed" ? -1 : 0) - (statusOf(b) === "failed" ? -1 : 0));
+  const options = failedFirst.map((x) => [key(x), `${x.row ? `${rowLabel(x.row, x.row_name)}${instances.some((y) => y.repeat > 1) ? ` · run ${x.repeat}` : ""}` : `run ${x.repeat} of ${instances.length}`}${statusOf(x) ? ` · ${statusOf(x)}` : ""}`]);
   return (
     <>
       <FieldHead label="Showing" htmlFor={id} />
@@ -190,10 +233,17 @@ function judgeCallOf(run, record, k) {
 /* ---------- views ---------- */
 
 function ConversationView({ close }) {
-  const { conversation, providers, suites, selection } = useStore(app);
+  const state = useStore(app);
+  const { conversation, providers, suites, selection } = state;
+  const choices = providerChoices(state);
   const [chosenSuite, setSuiteFile] = useState("");
   const suiteFile = suites.some((s) => s.file === chosenSuite) ? chosenSuite : "";
   const [name, setName] = useState("");
+  // A new suite's name (its file's, without .hafen.yml: smoke, or support/refunds), else the next free
+  const [suiteName, setSuiteName] = useState("");
+  const typed = suiteName.trim().replace(/\.hafen\.(ya?ml|json)$/i, "");
+  const badName = typed !== "" && !/^[A-Za-z0-9][\w.-]*(\/[A-Za-z0-9][\w.-]*)*$/.test(typed);
+  const newFile = typed && !badName ? `${typed}.hafen.yml` : freeSuiteFile();
   const run = conversation?.run;
   const turns = run?.turns ?? [];
   const selected = selection.explore && selection.turn !== undefined ? turns[selection.turn] : turns.at(-1);
@@ -213,11 +263,13 @@ function ConversationView({ close }) {
           <button className="btn btn-ghost" id="convProviders" type="button" title="Settings → Providers" onClick={() => showProvider(providers.length ? conversation?.provider ?? null : "new")}>{providers.length ? "manage" : "add one"}</button>
         } />
         <label className="select">
-          <Select id="convProvider" value={conversation?.provider ?? ""} options={[["", providers.length ? "Choose a provider" : "No providers yet", true], ...providers.map((p) => [p.file, p.name])]}
+          <Select id="convProvider" value={conversation?.provider ?? ""} options={[["", providers.length ? "Choose a provider" : "No providers yet", true], ...choices.map((p) => [p.file, p.name])]}
                   disabled={!!conversation?.sending} title={conversation?.sending ? "Wait for the reply (or stop it) to change the provider" : undefined}
                   onChange={(e) => chooseProvider(e.target.value, { keep: true })} />
         </label>
         {turns.length > 0 && <p className="hint">Another provider carries this conversation on: the turns so far are its history.</p>}
+        {/* (what stops a message to the provider, known before sending, is said here, by it: not at the box) */}
+        <FixturesSummary id="convFixtures" providerFile={conversation?.provider ?? null} problem={sendProblem(state.plugins)} />
         {turns.length > 0 && (
           <TextField key={conversation.id} id="convTitle" label="Name" single value={conversation.title ?? ""} placeholder={String(turns.find(Boolean)?.user ?? "").replace(/\s+/g, " ").slice(0, 60)}
                      onSave={(v) => renameConversation(v)} />
@@ -232,15 +284,24 @@ function ConversationView({ close }) {
         {selected && <TurnRecord record={selected} index={turns.indexOf(selected)} />}
         <FieldHead label="Save as test" />
         <label className="select">
-          <Select id="saveSuite" value={suiteFile} options={[["", `New suite (${freeSuiteFile()})`], ...suites.map((s) => [s.file, s.file])]} onChange={(e) => setSuiteFile(e.target.value)} />
+          <Select id="saveSuite" value={suiteFile} options={[["", `New suite (${newFile})`], ...suites.map((s) => [s.file, s.file])]} onChange={(e) => setSuiteFile(e.target.value)} />
         </label>
-        <div className="field-head"><label className="hint" htmlFor="saveName">Name</label></div>
+        {!suiteFile && (
+          <>
+            <div className="field-head"><label className="hint" htmlFor="saveSuiteName">Suite name</label></div>
+            <input className="input" id="saveSuiteName" type="text" placeholder={freeSuiteFile().replace(/\.hafen\.yml$/, "")} value={suiteName} onChange={(e) => setSuiteName(e.target.value)} autoComplete="off" spellCheck={false} />
+            {badName && <p className="hint error" id="saveSuiteNameProblem" role="alert">A suite's name is letters, digits, '.', '-' and '_' (and '/' for a folder).</p>}
+            {!badName && suites.some((s) => s.file === newFile) && <p className="hint" id="saveSuiteNameNote">{`${newFile} is there already: the test goes into it.`}</p>}
+          </>
+        )}
+        <div className="field-head"><label className="hint" htmlFor="saveName">Test name</label></div>
         <input className="input" id="saveName" type="text" placeholder="What this conversation tests" value={name} onChange={(e) => setName(e.target.value)} autoComplete="off" />
         <div className="controls">
-          <button className="btn btn-primary" id="saveTest" type="button" disabled={!turns.length || !name.trim()} onClick={async () => {
+          <button className="btn btn-primary" id="saveTest" type="button" disabled={!turns.length || !name.trim() || (!suiteFile && badName)} onClick={async () => {
             try {
-              await saveConversation({ file: suiteFile || freeSuiteFile(), name: name.trim() });
+              await saveConversation({ file: suiteFile || newFile, name: name.trim() });
               setName("");
+              setSuiteName("");
             } catch (err) {
               notify({ title: "Couldn't save the test", text: err.message, kind: "error" });
             }
@@ -258,7 +319,7 @@ function ConversationView({ close }) {
 }
 
 function SuiteView({ file, close }) {
-  const { env } = useStore(app);
+  useStore(app);
   const now = useNow();
   const [tries, setTries] = useState(0);  // a rename that didn't happen puts the name back
   const suite = suiteOf(file);
@@ -277,7 +338,7 @@ function SuiteView({ file, close }) {
           if (!v.trim() || !(await renameSuite(file, v))) setTries((n) => n + 1);
         }} />
         <p className="hint">{file}</p>
-        <ProviderPicker id="suiteProvider" label="Provider" file={file} current={d.provider} resolved={suite.providerFiles?.[""]}
+        <ProviderPicker id="suiteProvider" label="Provider" file={file} current={d.provider} resolved={suite.providerFiles?.[""]} named={suite.providerNames?.[""]}
                         onChange={(ref) => editSuite(file, [{ op: "set", path: ["provider"], value: ref }]).catch(() => {})} />
         <div className="controls">
           <NumberField id="suiteGroup" label="Group" min="1" step="1" value={d.group}
@@ -295,13 +356,17 @@ function SuiteView({ file, close }) {
             return at ? `${when(at)} · ${ago(at, now)}` : undefined;
           })()],
         ]} />
-        <Problems problems={[...(suite.errors ?? []), ...(suite.missing ?? [])]} />
-        {suite.warnings?.length > 0 && <p className="hint panel-note">{suite.warnings.map((w) => w.message).join(" · ")}</p>}
+        <Problems problems={problemsOf(file)} file={file} />
+        {warningsOf(file).length > 0 && <p className="hint panel-note">{warningsOf(file).map((w) => w.message).join(" · ")}</p>}
         <div className="controls">
           <button className={"btn btn-primary" + (running ? " stop" : "")} id="suiteRun" type="button" disabled={busy} title={busy ? "A test of it is running" : undefined} onClick={() => (running ? stopRun(going.token) : runTests(file).catch(() => {}))}>{running ? "Stop" : "Run suite"}</button>
           <button className="btn" id="suiteAddTest" type="button" onClick={() => newTest(file).catch(() => {})}>Add test</button>
-          <CopyButton id="suiteCopyCi" text={ciCommand(file, null, env)} />
         </div>
+        <div className="controls">
+          <button className="btn" id="suiteExport" type="button" title="Write it, with everything it uses, to a folder: for git and npx hafen run" onClick={() => openExport([file])}>Export…</button>
+          <CopyCi id="suiteCopyCi" file={file} />
+        </div>
+        <CiHint id="suiteCiHint" file={file} />
         <div className="controls"><EditFile file={file} id="suiteYaml" label="Edit the file as YAML" /></div>
         <div className="panel-foot">
           <p className="hint">{suite.file}</p>
@@ -315,7 +380,7 @@ function SuiteView({ file, close }) {
 function TestView({ file, index, close }) {
   const state = useStore(app);
   const now = useNow();
-  const { env, runs } = state;
+  const { runs } = state;
   const suite = suiteOf(file);
   const test = testOf(file, index);
   const [history, setHistory] = useState([]);
@@ -347,10 +412,11 @@ function TestView({ file, index, close }) {
       <Head icon="test" label="Test" onClose={close} onBack={() => select({ kind: "suite", file })} backLabel="Back to the suite" />
       <div className="panel-body">
         <TextField id="testName" label="Name" value={test.name} single onSave={(v) => v.trim() && set("name", v.trim())} />
-        <ProviderPicker id="testProvider" label="Provider" file={file} current={test.provider} resolved={suite.providerFiles?.[`test:${index}`]}
+        <ProviderPicker id="testProvider" label="Provider" file={file} current={test.provider} resolved={suite.providerFiles?.[`test:${index}`]} named={suite.providerNames?.[`test:${index}`]}
+                        used={test.provider === undefined ? suite.providerFiles?.[""] : suite.providerFiles?.[`test:${index}`]}
                         inherit={`the suite's (${refName(suite.data?.provider) || "none"})`}
                         onChange={(ref) => editSuite(file, [ref ? { op: "set", path: ["tests", index, "provider"], value: ref } : { op: "delete", path: ["tests", index, "provider"] }]).catch(() => {})} />
-        <TextField id="testTags" label="Tags (comma-separated)" single value={tags} placeholder="smoke, refunds" onSave={(v) => {
+        <TextField id="testTags" label="Tags (comma-separated)" single value={tags} placeholder="No tags yet" onSave={(v) => {
           const list = v.split(",").map((x) => x.trim()).filter(Boolean);
           return list.length ? set("tags", list) : unset("tags");
         }} />
@@ -370,15 +436,37 @@ function TestView({ file, index, close }) {
         <FieldHead label="On failure" htmlFor="testOnFail" />
         <label className="select"><Select id="testOnFail" value={test.on_fail ?? suite.data?.defaults?.on_fail ?? "continue"} options={[["continue", "continue with the next turn"], ["stop", "stop the test"]]} onChange={(e) => set("on_fail", e.target.value)} /></label>
         <FieldHead label="Unsure results" htmlFor="testUnsure" />
-        <label className="select"><Select id="testUnsure" value={test.unsure ?? suite.data?.defaults?.unsure ?? "warn"} options={[["warn", "warn (count as passed)"], ["pass", "pass"], ["fail", "fail"]]} onChange={(e) => set("unsure", e.target.value)} /></label>
+        <label className="select"><Select id="testUnsure" value={test.unsure ?? suite.data?.defaults?.unsure ?? "fail"} options={[["fail", "fail (count as failed)"], ["warn", "warn (count as passed, with a warning)"], ["pass", "pass"]]} onChange={(e) => set("unsure", e.target.value)} /></label>
         <TextField id="testData" label="Data file (CSV or JSON lines)" single value={typeof test.data === "string" ? test.data : test.data?.file ?? ""} placeholder="data/rows.csv" onSave={(v) => (!v.trim() ? unset("data") : test.data && typeof test.data === "object" ? editSuite(file, [{ op: "set", path: ["tests", index, "data", "file"], value: v.trim() }]) : set("data", v.trim()))} />
+        {/* (each data row's name: shown with a data file, or while the file has one; empty removes it) */}
+        {(test.data || test.row_name !== undefined) && (
+          <>
+            <TextField id="testRowName" label="Row names" single value={test.row_name ?? ""} placeholder="first column" onSave={(v) => (!v.trim() ? unset("row_name") : set("row_name", v.trim()))} />
+            <p className="hint" id="testRowNameHint">{"Each row's name in the reports and the thread (row 3: …): its first column's value, or a template such as {{row.question}} ({{row.order}}). Cut at 60 characters; never a secret."}</p>
+          </>
+        )}
         <div className="controls">
           <button className={"btn btn-primary" + (isLive ? " stop" : "")} id="testRun" type="button" onClick={() => (isLive ? stopRun(going.token) : runTests(file, index).catch(() => {}))}>{isLive ? "Stop" : "Run"}</button>
-          <CopyButton id="testCopyCi" text={ciCommand(file, test, env)} />
+          <CopyCi id="testCopyCi" file={file} test={test} />
         </div>
-        <Problems problems={[...(suite.errors ?? []), ...(suite.missing ?? [])]} />
+        <CiHint id="testCiHint" file={file} />
+        <Problems problems={problemsOf(file)} file={file} />
         <InstancePicker run={run} file={file} test={test} selection={state.selection} id="testInstance" />
-        {result && (
+        {/* (its last run broke off before it: how, and why, each problem its check found for one that
+            couldn't run; nothing of it ran, so nothing else to count) */}
+        {result?.unreached && (
+          <>
+            <FieldHead label="Last run" actions={<span className="hint error" id="testLastStatus">{testStatusText(result).text}</span>} />
+            <Facts id="testFacts" facts={[
+              ["status", testStatusText(result).text],
+              ["when", run?.started ? `${when(run.started)} · ${ago(run.started, now)}` : undefined],
+            ]} />
+            <ul className="problems" id="testRunError">{(result.refused ? run.error.all : [{ message: result.reason }]).map((p, i) => (
+              <li key={i}>{`${p.file && p.line ? `${p.file}:${p.line}: ` : ""}${p.message}`}</li>
+            ))}</ul>
+          </>
+        )}
+        {result && !result.unreached && (
           <>
             <FieldHead label="Last run" actions={<span className="hint">{testStatusText(result).text}</span>} />
             <Facts id="testFacts" facts={[
@@ -396,7 +484,7 @@ function TestView({ file, index, close }) {
               ]),
               ["when", run?.started ? `${when(run.started)} · ${ago(run.started, now)}` : undefined],
             ]} />
-            {result.reason && <p className="hint panel-note">{result.reason}</p>}
+            {result.reason && <p className={`hint panel-note${result.status === "error" ? " error" : ""}`}>{result.reason}</p>}
           </>
         )}
         {history.length >= 2 && (
@@ -460,7 +548,8 @@ function TurnRecord({ record, index, onAddCheck }) {
       <details className="panel-template" id="turnRequest"><summary>Request</summary><Pre value={record.request ?? "—"} /></details>
       {record.response?.chunks?.length > 0 && <details className="panel-template" id="turnStream"><summary>{`Raw stream · ${record.response.chunks_total} chunk${record.response.chunks_total === 1 ? "" : "s"}`}</summary><Pre value={record.response.chunks.join("")} /></details>}
       <Facts className="panel-facts" id="turnFacts" facts={[
-        ["first token", m.ttft_ms !== undefined ? sec(m.ttft_ms) : undefined],
+        // (a turn that failed before any text came had no first token)
+        ["first token", m.ttft_ms !== undefined && (!record.error || record.reply) ? sec(m.ttft_ms) : undefined],
         ["thinking", m.thinking_ms !== undefined ? sec(m.thinking_ms) : undefined],
         ["first answer", m.first_answer_ms !== undefined ? sec(m.first_answer_ms) : undefined],
         ["total", m.ms !== undefined ? sec(m.ms) : undefined],
@@ -469,19 +558,20 @@ function TurnRecord({ record, index, onAddCheck }) {
         ["cost", m.cost !== undefined ? money(m.cost) : undefined],
         ["checks", m.checks ? `${m.checks.passed}/${m.checks.total - m.checks.skipped}` : undefined],
         ["confidence", m.confidence !== undefined ? `lowest ${m.confidence}` : undefined],
-        ["finish", record.finish],
-        ["error", record.error],
+        // (a request stopped on purpose finished that way: it isn't an error)
+        ["finish", record.finish ?? (stoppedTurn(record) ? "stopped" : undefined)],
+        ["error", stoppedTurn(record) ? undefined : record.error],
       ]} />
     </>
   );
 }
 
-// A turn (or a check) of a run's test the open folder doesn't have (a CI run, say): as the run recorded
+// A turn (or a check) of a run's test the app doesn't have (a CI run, say): as the run recorded
 // it, read-only. (record: the run's record of the turn, or null)
 function recordedTurn(selection) {
   const run = app.get().openRun;
   if (selection.in !== "run" || !run || run._id !== selection.run) return null;
-  // (the test selected, if the folder has it; else the one picked in the run's list)
+  // (the test selected, if the app has it; else the one picked in the run's list)
   const inFolder = selection.test !== undefined ? testOf(selection.file, selection.test) : null;
   const test = inFolder ? { id: inFolder.id, name: inFolder.name, turns: [] } : runTestDefinition(run, selection);
   const instance = pickedInstance(instancesOf(run, selection.file ?? test?.suite, test), selection);
@@ -495,12 +585,12 @@ function RunTurnView({ selection, record, close }) {
     <>
       <Head icon="test" label={`Turn ${i + 1}`} onClose={close} backLabel="Back to the run" onBack={() => backToRun(selection)} />
       <div className="panel-body">
-        <p className="hint panel-note" id="turnFromRun">As the run recorded it: its test isn't in the open folder.</p>
+        <p className="hint panel-note" id="turnFromRun">As the run recorded it: its test isn't in your suites.</p>
         <FieldHead label="Message" />
         <Pre id="turnUser" value={typeof record.user === "string" ? record.user : JSON.stringify(record.user, null, 2)} />
         <FieldHead label="Checks" />
         {(record.results ?? []).length > 0
-          ? <ul className="check-cards" id="turnChecks" aria-label="Checks">{record.results.map((r, j) => <CheckCard key={j} id={`turnCheck-${j}`} check={r.check ?? {}} result={r} onOpen={() => select({ ...selection, kind: "check", check: j })} />)}</ul>
+          ? <ul className="check-cards" id="turnChecks" aria-label="Checks">{record.results.map((r, j) => <CheckCard key={j} id={`turnCheck-${j}`} check={r.check ?? {}} result={countedResult(r)} onOpen={() => select({ ...selection, kind: "check", check: j })} />)}</ul>
           : <p className="note placeholder">No checks.</p>}
         <TurnRecord record={record} index={i} />
       </div>
@@ -509,13 +599,13 @@ function RunTurnView({ selection, record, close }) {
 }
 
 function RunCheckView({ selection, record, close }) {
-  const r = record.results?.[selection.check];
+  const r = countedResult(record.results?.[selection.check]);
   if (!r) return <Missing close={close} what="check" />;
   return (
     <>
       <Head icon="check" label={`Check · ${kindOf(r.check ?? {}).name}`} onClose={close} backLabel="Back to its turn" onBack={() => select({ ...selection, kind: "turn", check: undefined })} />
       <div className="panel-body">
-        <p className="hint panel-note">As the run recorded it: its test isn't in the open folder.</p>
+        <p className="hint panel-note">As the run recorded it: its test isn't in your suites.</p>
         {r.check && <><FieldHead label="The check" /><Pre id="checkYaml" value={yaml(r.check).trimEnd()} /></>}
         <FieldHead label="Last result" />
         <ul className="check-cards" id="checkResult" aria-label="Result"><CheckCard id="checkResultCard" check={r.check ?? {}} result={r} /></ul>
@@ -578,7 +668,7 @@ function TurnView({ selection, close }) {
         {(turn.expect ?? []).length > 0 && (
           <ul className="check-cards" id="turnChecks" aria-label="Checks">
             {(turn.expect ?? []).map((c, j) => (
-              <CheckCard key={j} id={`turnCheck-${j}`} check={c} result={paired[j]}
+              <CheckCard key={j} id={`turnCheck-${j}`} check={c} result={countedResult(paired[j])}
                          onOpen={() => select({ kind: "check", file, test: t, turn: i, check: j, repeat: selection.repeat, row: selection.row, in: selection.in, run: selection.run })}
                          onToggle={(on) => setCheckOn(file, t, i, j, on)}
                          onDelete={() => deleteCheck(file, t, i, j).catch(() => {})} />
@@ -606,6 +696,7 @@ function CheckView({ selection, close }) {
   }
   const { run: from, record, results } = turnRecordOf(selection, test, i);
   const r = results[j];
+  const counted = countedResult(r);  // (shown as it counted; r, as recorded, finds its judge's request)
   const type = check.type ?? (check.path ? "path" : "text");
   // A System One check: the request it was judged with, or is being judged with as the run goes on
   // (a turn running has no results yet: its checks are the file's, in order)
@@ -629,11 +720,11 @@ function CheckView({ selection, close }) {
         <FieldHead label="Last result" />
         {r || !isOn(check) ? (
           <>
-            <ul className="check-cards" id="checkResult" aria-label="Last result"><CheckCard id="checkResultCard" check={check} result={r} /></ul>
+            <ul className="check-cards" id="checkResult" aria-label="Last result"><CheckCard id="checkResultCard" check={check} result={counted} /></ul>
             {r && <Facts className="panel-facts" id="checkFacts" facts={[
-              ["status", r.status], ["value", r.value !== undefined ? String(r.value) : undefined], ["confidence", r.confidence !== undefined ? String(r.confidence) : undefined],
+              ["status", counted.status], ["value", r.value !== undefined ? String(r.value) : undefined], ["confidence", r.confidence !== undefined ? String(r.confidence) : undefined],
               ["expected", r.expected !== undefined ? JSON.stringify(r.expected) : undefined], ["actual", r.actual !== undefined ? JSON.stringify(r.actual).slice(0, 400) : undefined],
-              ["reason", r.reason], ["judge", r.judge ? [r.judge.kind, r.judge.model ?? r.judge.provider].filter(Boolean).join(" · ") : undefined],
+              ["reason", counted.reason], ["judge", r.judge ? [r.judge.kind, r.judge.model ?? r.judge.provider].filter(Boolean).join(" · ") : undefined],
               ["tokens", r.usage ? tokenText(r.usage) : undefined], ["cost", r.cost !== undefined ? money(r.cost) : undefined],
             ]} />}
             {r?.judge?.raw && <><FieldHead label="The judge's answer" /><Pre value={r.judge.raw} /></>}
@@ -670,7 +761,48 @@ function StepView({ span, run, close, back }) {
         {event?.type === "tool_result" && <><FieldHead label="Result" /><JsonTree id="stepResult" value={event.result ?? null} label="Result" /></>}
         {span.kind === "request" && turn?.request && <><FieldHead label="Request" /><Pre value={turn.request} /></>}
         {span.kind === "judge_call" && span.request && <JudgeRequest request={span.request} id="stepJudgeRequest" running={span.end === undefined} />}
+        {span.kind === "fixture" && (
+          <Facts className="panel-facts" id="stepFixture" facts={[
+            ["fixture", span.fixture?.name && <button className="btn btn-ghost inline-link" type="button" id="stepFixtureCode" title="Its code (Settings → Plugins)" onClick={() => showPlugin(span.fixture.name)}>{span.fixture.name}</button>],
+            ["when", span.fixture?.phase], ["provider", span.fixture?.provider],
+            ["gave", m.provides?.length ? m.provides.join(", ") : undefined],
+            // (the environment's names it set with env.set, for the rest of the run; and whether its run() said to stop)
+            ["set", m.sets?.length ? m.sets.join(", ") : undefined], ["stop", m.stop ? "said to stop" : undefined],
+            ["calls", m.calls ? String(m.calls) : undefined], ["error", span.error],
+          ]} />
+        )}
+        {span.kind === "call" && <CallDetails span={span} />}
       </div>
+    </>
+  );
+}
+
+// A plugin's (or a fixture's) HTTP call: what it sent and what came back, as the run kept them
+// (redacted: a secret header or value shows as [redacted]; the body's start, when it's long)
+const pretty = (body) => {
+  if (typeof body !== "string") return JSON.stringify(body, null, 2);
+  try {
+    return JSON.stringify(JSON.parse(body), null, 2);
+  } catch {
+    return body;
+  }
+};
+function CallDetails({ span }) {
+  const req = span.request ?? {};
+  const res = span.response;
+  return (
+    <>
+      {/* (the plugin that made it, "fixture acme-login": a link to its code) */}
+      <FieldHead label="Request" id="stepCallRequestLabel" actions={span.plugin ? (
+        <button className="btn btn-ghost" type="button" id="stepCallPlugin" title="Its code (Settings → Plugins)" onClick={() => showPlugin(span.plugin.split(" ").slice(1).join(" "))}>{span.plugin}</button>
+      ) : null} />
+      <p className="hint judge-request-url" id="stepCallUrl">{`${req.method ?? "GET"} ${req.url ?? ""}`}</p>
+      {Object.keys(req.headers ?? {}).length > 0 && <Facts className="panel-facts" id="stepCallHeaders" facts={Object.entries(req.headers)} />}
+      {req.body !== undefined && <Pre id="stepCallBody" className="judge-request" value={pretty(req.body)} />}
+      <FieldHead label="Response" id="stepCallResponseLabel" actions={<span className="hint" id="stepCallStatus">{res?.status !== undefined ? String(res.status) : span.end === undefined ? "waiting…" : "no response"}</span>} />
+      {span.error && <p className="hint error" id="stepCallError">{span.error}</p>}
+      {Object.keys(res?.headers ?? {}).length > 0 && <Facts className="panel-facts" id="stepCallResponseHeaders" facts={Object.entries(res.headers).map(([k, v]) => [k, Array.isArray(v) ? v.join("; ") : v])} />}
+      {res?.body ? <Pre id="stepCallResponseBody" className="judge-request" value={pretty(res.body)} /> : null}
     </>
   );
 }
@@ -709,6 +841,8 @@ function RunView({ close }) {
           return t ? <InstancePicker run={run} file={file} test={t} selection={sel} id="runInstance" /> : null;
         })()}
         <FieldHead label="Tests" />
+        {/* (one that broke off before its tests ran none: the thread says why) */}
+        {!run.tests.length && run.status === "error" && <p className="note placeholder" id="runTestsNone">{refusedRun(run) ? "None ran: it was refused before anything was sent." : "None ran: it broke off before its tests."}</p>}
         <ul className="list" id="runTests" aria-label="Tests in this run">
           {run.tests.map((t, i) => {
             const index = (suiteOf(t.suite)?.data?.tests ?? []).findIndex((x) => (x.id ?? x.name) === (t.id ?? t.name));

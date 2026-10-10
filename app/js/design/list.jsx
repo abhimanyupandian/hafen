@@ -1,5 +1,5 @@
 // A list row: the main button, an optional size, and × to delete (click twice; the second click's
-// label is `deleteQuestion`). With `detail`, the button has two lines: the label over the detail.
+// label is `deleteQuestion`; a row with no onDelete has none). With `detail`, the button has two lines: the label over the detail.
 // With `id`, the row is #<id>, its button #<id>-open and its × #<id>-delete. `before` goes ahead
 // of the button (a tree's chevron); `actions` go after the size, before ×, and show like × does (a
 // suite's + that adds a test); `data` becomes data-* attributes. `ariaLabel` names the button when its
@@ -21,8 +21,8 @@ export function ListRow({ id, label, detail, title, active = false, size, onOpen
               disabled={openDisabled} onClick={onOpen}>{icon}{text}{extra}</button>
       {size && <span className="list-size">{size}</span>}
       {actions}
-      <ConfirmButton className="btn btn-ghost list-del" id={id && `${id}-delete`} aria-label={`${deleteLabel}: ${label}`}
-                     label="×" question={deleteQuestion} onConfirm={onDelete} />
+      {onDelete && <ConfirmButton className="btn btn-ghost list-del" id={id && `${id}-delete`} aria-label={`${deleteLabel}: ${label}`}
+                                  label="×" question={deleteQuestion} onConfirm={onDelete} />}
     </li>
   );
 }
