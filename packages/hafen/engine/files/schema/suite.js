@@ -1,4 +1,4 @@
-// The suite file's JSON Schema, from spec/001-hafen/contracts/suite.schema.json (tests/engine/schema-sync.test.js
+// The suite file's JSON Schema, from spec/001-hafen/contracts/suite.schema.json (tests/engine/foundations.test.js
 // fails if they differ). A module rather than a .json file, so every runtime imports it the same way.
 
 export default {
@@ -209,71 +209,14 @@ export default {
         "retries": {
           "type": "integer",
           "minimum": 0
-        },
-        "network": {
-          "type": "object",
-          "properties": {
-            "delay_ms": {
-              "type": "integer",
-              "minimum": 0
-            },
-            "jitter_ms": {
-              "type": "integer",
-              "minimum": 0
-            },
-            "kbps": {
-              "type": "number",
-              "exclusiveMinimum": 0
-            },
-            "drop_rate": {
-              "type": "number",
-              "minimum": 0,
-              "maximum": 1
-            }
-          }
-        },
-        "load": {
-          "type": "object",
-          "required": [
-            "concurrency"
-          ],
-          "properties": {
-            "concurrency": {
-              "type": "integer",
-              "minimum": 1
-            },
-            "requests": {
-              "type": "integer",
-              "minimum": 1
-            },
-            "duration_s": {
-              "type": "number",
-              "exclusiveMinimum": 0
-            },
-            "ramp_s": {
-              "type": "number",
-              "minimum": 0
-            }
-          },
-          "oneOf": [
-            {
-              "required": [
-                "requests"
-              ]
-            },
-            {
-              "required": [
-                "duration_s"
-              ]
-            }
-          ]
         }
       }
     },
     "test": {
       "type": "object",
       "required": [
-        "name"
+        "name",
+        "turns"
       ],
       "allOf": [
         {
@@ -350,28 +293,13 @@ export default {
             "$ref": "#/$defs/turn"
           }
         },
-        "simulate": {
-          "$ref": "#/$defs/simulate"
-        },
         "expect_conversation": {
           "type": "array",
           "items": {
             "$ref": "#/$defs/check"
           }
         }
-      },
-      "anyOf": [
-        {
-          "required": [
-            "turns"
-          ]
-        },
-        {
-          "required": [
-            "simulate"
-          ]
-        }
-      ]
+      }
     },
     "turn": {
       "type": "object",
@@ -380,46 +308,7 @@ export default {
       ],
       "properties": {
         "user": {
-          "oneOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "array",
-              "items": {
-                "type": "object",
-                "minProperties": 1,
-                "properties": {
-                  "text": {
-                    "type": "string"
-                  },
-                  "image": {
-                    "type": "string"
-                  },
-                  "file": {
-                    "type": "string"
-                  }
-                }
-              }
-            }
-          ]
-        },
-        "attachments": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "required": [
-              "file"
-            ],
-            "properties": {
-              "file": {
-                "type": "string"
-              },
-              "type": {
-                "type": "string"
-              }
-            }
-          }
+          "type": "string"
         },
         "reply": {
           "type": "string",
@@ -518,36 +407,6 @@ export default {
           }
         },
         "expect": {
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/check"
-          }
-        }
-      }
-    },
-    "simulate": {
-      "type": "object",
-      "required": [
-        "user",
-        "scenario",
-        "max_turns"
-      ],
-      "properties": {
-        "user": {
-          "type": "string",
-          "description": "A named provider that plays the user."
-        },
-        "scenario": {
-          "type": "string"
-        },
-        "stop_when": {
-          "type": "string"
-        },
-        "max_turns": {
-          "type": "integer",
-          "minimum": 1
-        },
-        "expect_each": {
           "type": "array",
           "items": {
             "$ref": "#/$defs/check"

@@ -1,5 +1,5 @@
 // The kinds of provider a new one can start from (contracts/ui.md, New provider), and the file each
-// starts as: a preset with its model and address, or an HTTP / WebSocket endpoint to fill in. Every
+// starts as: a preset with its model and address, or an HTTP endpoint to fill in. Every
 // file is valid as it is (tests/engine/providers.test.js checks them against the schema).
 
 const yamlString = (v) => (/^[\w./:@-]+$/.test(v) ? v : JSON.stringify(v));
@@ -22,10 +22,6 @@ export const PROVIDER_KINDS = [
     about: "Your own endpoint, streaming server-sent events: rules map each event to text, thinking or tool calls." },
   { id: "http-ndjson", label: "HTTP endpoint · streamed (JSON lines)", name: "endpoint-ndjson",
     about: "Your own endpoint, streaming one JSON value per line: rules map each line." },
-  { id: "websocket", label: "WebSocket", name: "websocket",
-    about: "An endpoint that chats over a WebSocket." },
-  { id: "a2a", label: "A2A agent", name: "a2a",
-    about: "An agent that speaks the A2A protocol (JSON-RPC, version 1.0 or 0.3). Give its address: its agent card says the rest." },
 ];
 
 export const kindOf = (id) => PROVIDER_KINDS.find((k) => k.id === id);
@@ -44,16 +40,8 @@ export function providerTemplate(id, { model, base, url } = {}) {
     return `${head}${lines.join("\n")}\n`;
   }
   // (with no address given, the environment's: {{env.base_url}}, as each environment has its own)
-  const at = yamlString(url || { websocket: "wss://chat.example.com/ws", a2a: "https://agent.example.com" }[k.id] || "{{env.base_url}}/chat");
+  const at = yamlString(url || "{{env.base_url}}/chat");
   switch (k.id) {
-    case "a2a":
-      return `${head}kind: a2a
-card: ${at}      # where its agent card is (/.well-known/agent-card.json): it names the endpoint, the version and whether it streams
-# url: https://agent.example.com/a2a/v1     # or its JSON-RPC endpoint itself (then no card is read)
-# version: "1.0"                            # or "0.3"
-# streaming: true                           # SendStreamingMessage; false: SendMessage
-# headers: { Authorization: "Bearer {{secret.A2A_TOKEN}}" }
-`;
     case "http":
       return `${head}kind: http
 url: ${at}
@@ -92,17 +80,5 @@ ${sse ? "# (An OpenAI-compatible API? Start from OpenAI chat completions instead
     error: $.message
 `;
     }
-    case "websocket":
-    default:
-      return `${head}kind: websocket
-url: ${at}
-send: { type: message, text: "{{user}}" }
-events:
-  - when: { $.type: delta }
-    text: $.text
-  - when: { $.type: end }
-    done: true
-end: { idle_ms: 5000 }
-`;
   }
 }

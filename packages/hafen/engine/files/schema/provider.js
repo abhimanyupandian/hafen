@@ -1,4 +1,4 @@
-// The provider file's JSON Schema, from spec/001-hafen/contracts/provider.schema.json (tests/engine/schema-sync.test.js
+// The provider file's JSON Schema, from spec/001-hafen/contracts/provider.schema.json (tests/engine/foundations.test.js
 // fails if they differ). A module rather than a .json file, so every runtime imports it the same way.
 
 export default {
@@ -12,7 +12,7 @@ export default {
   "properties": {
     "kind": {
       "type": "string",
-      "pattern": "^(http|websocket|openai-chat|openai-responses|anthropic-messages|gemini|ollama|a2a|plugin:[A-Za-z0-9@/._^~-]+)$"
+      "pattern": "^(http|openai-chat|openai-responses|anthropic-messages|gemini|ollama|plugin:[A-Za-z0-9@/._^~-]+)$"
     },
     "fixtures": {
       "type": "object",
@@ -52,28 +52,12 @@ export default {
     "url": {
       "type": "string"
     },
-    "card": {
-      "type": "string",
-      "description": "A2A: where the agent card is (the agent's address, or the card's own URL); its JSON-RPC interface is used when there's no url"
-    },
     "version": {
       "type": [
         "string",
         "number"
       ],
-      "description": "The API's version: A2A's protocol version (1.0 or 0.3), or anthropic-version for anthropic-messages"
-    },
-    "streaming": {
-      "type": "boolean",
-      "description": "A2A: SendStreamingMessage (true) or SendMessage (false); default: what the agent card says, else true"
-    },
-    "configuration": {
-      "type": "object",
-      "description": "A2A: the SendMessageConfiguration sent with each message (acceptedOutputModes, historyLength…)"
-    },
-    "metadata": {
-      "type": "object",
-      "description": "A2A: metadata sent with each message"
+      "description": "The API's version: anthropic-version for anthropic-messages"
     },
     "method": {
       "enum": [
@@ -213,41 +197,6 @@ export default {
         }
       }
     },
-    "attachments": {
-      "type": "object",
-      "required": [
-        "as"
-      ],
-      "properties": {
-        "as": {
-          "enum": [
-            "openai-image-url",
-            "anthropic-blocks",
-            "gemini-inline",
-            "multipart"
-          ]
-        },
-        "field": {
-          "type": "string"
-        }
-      }
-    },
-    "protocols": {
-      "type": "array",
-      "items": {
-        "type": "string"
-      }
-    },
-    "send": {},
-    "end": {
-      "type": "object",
-      "properties": {
-        "idle_ms": {
-          "type": "integer",
-          "minimum": 1
-        }
-      }
-    },
     "base_url": {
       "type": "string"
     },
@@ -288,8 +237,7 @@ export default {
         "properties": {
           "kind": {
             "enum": [
-              "http",
-              "websocket"
+              "http"
             ]
           }
         }

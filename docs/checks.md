@@ -217,6 +217,6 @@ In the app, untick a check's **on** box. Ticking it again removes the key, so th
 | Result | When |
 |---|---|
 | **skipped** | It's turned off; its turn didn't run (an earlier check failed and `on_fail: stop`); or it checks thinking that wasn't returned and isn't `required` |
-| **error** | The input isn't there or isn't the right kind (not JSON for a path, no status on a WebSocket); a regular expression or path is invalid; a judge was unreachable, timed out or answered something unusable; a value it needs wasn't reported (tokens, cost, a judge's confidence for a check with `confidence`); a field its type needs is missing ([a problem](#what-a-check-needs) before a run) |
+| **error** | The input isn't there or isn't the right kind (not JSON for a path, no response status); a regular expression or path is invalid; a judge was unreachable, timed out or answered something unusable; a value it needs wasn't reported (tokens, cost, a judge's confidence for a check with `confidence`); a field its type needs is missing ([a problem](#what-a-check-needs) before a run) |
 
 Errors don't count as passed. A test with errors and no failures reports both, and fails the run.

@@ -1,6 +1,6 @@
 // The desktop app (spec US3; research §4–5): Electron, the engine in a utility process (Node, as in
-// CI), on the app's own workspace (<its data folder>/workspace: the suites and providers it keeps, as
-// plain files), the window without a title bar, and each run kept by the app.
+// CI), on the app's own workspace (<its data folder>/workspace: plain files), the window without a title
+// bar, each run kept by the app, its notifications, and its secrets from the environment it started in.
 
 import { _electron as electron, expect, test } from "@playwright/test";
 import { cp, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
@@ -9,7 +9,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parse } from "yaml";
 import { startMock } from "../../packages/hafen/tests/fixtures/mock-endpoint.mjs";
-import { addScope } from "./fixtures.js";
+import { addScope, showEntry } from "./fixtures.js";
 
 const ROOT = fileURLToPath(new URL("../../", import.meta.url));
 
@@ -165,69 +165,6 @@ test("in development on macOS the app runs as Hafen (not Electron; Hafen Lab ins
   }
 });
 
-test("what the app kept as hafen eval (its data folder, its database) is carried over to Hafen once", async () => {
-  const mock = await startMock({ chunkMs: 10 });
-  const { data: legacy } = await workspaceWith(mock);
-  const fresh = await mkdtemp(join(tmpdir(), "hafen-data-"));
-  const launch = (env) => {
-    const e = { ...process.env, ...env };
-    delete e.ELECTRON_RUN_AS_NODE;
-    return electron.launch({ args: [ROOT], cwd: ROOT, env: e });
-  };
-  try {
-    // The old app's data: a run in its database ("hafen-eval"), and the dark theme chosen
-    let app = await launch({ HAFEN_LAB_DATA: legacy });
-    let page = await app.firstWindow();
-    await addScope(page, "local");
-    await page.locator("#suiteList .list-open", { hasText: "refund for a broken item" }).click();
-    await page.click("#testRun");
-    await expect(page.locator("#status")).toContainText("failed 0/1");
-    await page.click("#openSettings");
-    await page.click("#settings-tab-appearance");
-    await page.click("#themeDark");
-    const runId = await page.evaluate(async () => {
-      const done = (req) => new Promise((resolve, reject) => { req.onsuccess = () => resolve(req.result); req.onerror = () => reject(req.error); });
-      const now = await done(indexedDB.open("hafen"));
-      const runs = await done(now.transaction("runs").objectStore("runs").getAll());
-      const old = indexedDB.open("hafen-eval", 2);
-      old.onupgradeneeded = () => { old.result.createObjectStore("runs", { keyPath: "_id" }); old.result.createObjectStore("conversations", { keyPath: "_id" }); };
-      const legacyDb = await done(old);
-      const tx = legacyDb.transaction("runs", "readwrite");
-      for (const r of runs) tx.objectStore("runs").put({ ...r, kind: "hafen-eval-run" });
-      await new Promise((r) => { tx.oncomplete = r; });
-      const clear = now.transaction("runs", "readwrite");
-      clear.objectStore("runs").clear();
-      await new Promise((r) => { clear.oncomplete = r; });
-      legacyDb.close();
-      now.close();
-      return runs[0]._id;
-    });
-    await app.close();
-
-    // Hafen, on a data folder of its own, carrying over from the old one
-    app = await launch({ HAFEN_LAB_DATA: fresh, HAFEN_LAB_CARRY_FROM: legacy });
-    page = await app.firstWindow();
-    await expect(page.locator(`#run-${runId}`)).toBeVisible();
-    await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
-    const mark = JSON.parse(await readFile(join(fresh, "carried-over.json"), "utf8"));
-    expect(mark.copied).toEqual(expect.arrayContaining(["IndexedDB", "Local Storage"]));
-    await expect.poll(() => page.evaluate(async () => (await indexedDB.databases()).map((d) => d.name).sort())).toEqual(["hafen"]);
-    await app.close();
-
-    // Once only: started again, nothing is copied over what's there now
-    const { stat } = await import("node:fs/promises");
-    const before = (await stat(join(fresh, "carried-over.json"))).mtimeMs;
-    app = await launch({ HAFEN_LAB_DATA: fresh, HAFEN_LAB_CARRY_FROM: legacy });
-    page = await app.firstWindow();
-    await expect(page.locator(`#run-${runId}`)).toBeVisible();
-    expect((await stat(join(fresh, "carried-over.json"))).mtimeMs).toBe(before);
-    await app.close();
-  } finally {
-    await mock.close();
-    for (const d of [legacy, fresh]) await rm(d, { recursive: true, force: true });
-  }
-});
-
 test("a run that ends while the window is in the background: the system's notification (on by default here); clicked, the window comes forward on what ran", async () => {
   const mock = await startMock({ chunkMs: 10 });
   const { data } = await workspaceWith(mock);
@@ -257,6 +194,76 @@ test("a run that ends while the window is in the background: the system's notifi
     await app.evaluate(() => globalThis.__notes[0].emit("click"));
     await expect(page.locator("#evalTitle")).toHaveText("refund for a broken item");
     await expect(page.locator("#testRun")).toBeVisible();
+  } finally {
+    await app.close();
+    await mock.close();
+    await rm(data, { recursive: true, force: true });
+  }
+});
+
+// A {{secret.NAME}} that Settings → Secrets has no value for takes the environment variable the app was
+// started with; one Settings has (for the scope, or for every scope) wins over it; neither is in the runs
+// the app keeps. (Settings → Secrets says nothing in words, but, with no encryption, that it's unencrypted.)
+test("a secret Settings hasn't got comes from the environment the desktop app was started with; one Settings has wins; neither is in the runs kept", async () => {
+  const mock = await startMock({ chunkMs: 10 });
+  // (the app's workspace, in a data folder of the test's own, filled before it starts)
+  const data = await mkdtemp(join(tmpdir(), "hafen-data-"));
+  const folder = join(data, "workspace");
+  await cp(join(ROOT, "packages/hafen/tests/fixtures/suites"), folder, { recursive: true });
+  await writeFile(join(folder, "providers/keyed.yml"), `kind: http\nurl: "${mock.url}/json"\nheaders: { Authorization: "Bearer {{secret.HAFEN_COVER_KEY}}" }\nbody: { message: "{{user}}" }\nresponse: { text: $.data.reply }\n`);
+  await writeFile(join(folder, "keyed.hafen.yml"), "version: 1\nname: Keyed\nprovider: providers/keyed.yml\ntests:\n  - name: keyed hello\n    turns: [ { user: hello, expect: [ { type: status, equals: 200 } ] } ]\n");
+  const env = { ...process.env, HAFEN_LAB_DATA: data, HAFEN_COVER_KEY: "k-from-env-4242" };
+  delete env.ELECTRON_RUN_AS_NODE;
+  const app = await electron.launch({ args: [ROOT], cwd: ROOT, env });
+  const lastAuth = async () => (await (await fetch(`${mock.url}/_log`)).json()).at(-1)?.headers.authorization;
+  try {
+    const page = await app.firstWindow();
+    // The runs the app keeps, each as its run file has it
+    const runFiles = () => page.evaluate(async () => {
+      const done = (req) => new Promise((resolve, reject) => { req.onsuccess = () => resolve(req.result); req.onerror = () => reject(req.error); });
+      const db = await done(indexedDB.open("hafen"));
+      const runs = await done(db.transaction("runs").objectStore("runs").getAll());
+      db.close();
+      return runs.map((r) => JSON.stringify(r));
+    });
+    await expect(page.locator('#suiteList .list-row[data-file="keyed.hafen.yml"]')).toHaveCount(1);
+    // Nothing in Settings: the environment variable's
+    await page.locator("#suiteList .list-open", { hasText: "keyed hello" }).click();
+    await page.click("#testRun");
+    await expect(page.locator("#status")).toContainText("passed 1/1");
+    expect(await lastAuth()).toBe("Bearer k-from-env-4242");
+    // Settings → Secrets, for every scope: that one wins
+    await page.click("#openSettings");
+    await page.click("#settings-tab-secrets");
+    // (no words, but a warning while the system offers the app no encryption)
+    const encrypted = await app.evaluate(({ safeStorage }) => safeStorage.isEncryptionAvailable());
+    if (encrypted) await expect(page.locator("#secretsNote")).toHaveCount(0);
+    else await expect(page.locator("#secretsNote")).toHaveText("Kept unencrypted: this system offers the app no encryption yet.");
+    await showEntry(page, "", "secrets");
+    await page.fill("#secretName", "HAFEN_COVER_KEY");
+    await page.fill("#secretValue", "k-from-app-1234");
+    await page.press("#secretValue", "Enter");
+    await expect(page.locator("#secret-HAFEN_COVER_KEY .vars-source")).toHaveText("Globals");
+    await page.click("#settingsClose");
+    await page.click("#testRun");
+    await expect(page.locator("#status")).toContainText("passed 1/1");
+    expect(await lastAuth()).toBe("Bearer k-from-app-1234");
+    // Forgotten again: the environment variable's once more
+    await page.click("#openSettings");
+    await page.click("#settings-tab-secrets");
+    await showEntry(page, "", "secrets");
+    await page.click("#secret-HAFEN_COVER_KEY-forget");
+    await page.click("#secret-HAFEN_COVER_KEY-forget");
+    await page.click("#settingsClose");
+    await page.click("#testRun");
+    await expect(page.locator("#status")).toContainText("passed 1/1");
+    expect(await lastAuth()).toBe("Bearer k-from-env-4242");
+    // The runs kept: three, neither value in any
+    await expect.poll(async () => (await runFiles()).length).toBe(3);
+    for (const text of await runFiles()) {
+      expect(text).not.toContain("k-from-env-4242");
+      expect(text).not.toContain("k-from-app-1234");
+    }
   } finally {
     await app.close();
     await mock.close();

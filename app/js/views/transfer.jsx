@@ -27,15 +27,9 @@ const ASKED = {
     note: `${plural(files.length, "file")} ${files.length === 1 ? "is" : "are"} in ${name} already, and exporting writes over ${files.length === 1 ? "it" : "them"}:`,
     answers: [["cancel", "Cancel"], ["overwrite", "Overwrite", true]],
   }),
-  legacy: ({ name, path }) => ({
-    label: "Your suites",
-    note: `Import the suites from ${name}?`,
-    hint: `Hafen keeps your suites in the app now, not in a folder. Import copies the suites in ${path}, and what they use, into it; the folder stays as it is. Suites → Import a folder… does it any time.`,
-    answers: [["later", "Not now"], ["import", "Import", true]],
-  }),
 };
 
-const answerId = (choice) => `question${{ cancel: "Cancel", skip: "Skip", both: "Both", replace: "Replace", overwrite: "Overwrite", later: "Later", import: "Import" }[choice]}`;
+const answerId = (choice) => `question${{ cancel: "Cancel", skip: "Skip", both: "Both", replace: "Replace", overwrite: "Overwrite" }[choice]}`;
 
 // The question being asked, if any
 export function Question() {

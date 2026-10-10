@@ -54,10 +54,7 @@ npx hafen run tests/ --env globals.env --env staging.env \
   --secret globals.secret.env --secret staging.secret.env
 ```
 
-`--env staging` (a name, no file) picks each suite's environment of that name, with no values: a
-folder's `environments/staging.yml` isn't read. The old spellings, `${env:NAME}`, `{{scope.NAME}}`
-and a plugin's `{ secret: "NAME" }`, are problems (exit `2`, nothing sent), each saying what to write
-instead: `{{secret.NAME}}`, or `{{env.NAME}}` for a value of the environment.
+`--env staging` (a name, no file) picks each suite's environment of that name, with no values.
 
 Secrets are redacted from the output, every report and every run file: every value in the
 `--secret` files, used or not. In the app, a suite's

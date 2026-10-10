@@ -20,7 +20,7 @@ New to Hafen? Start with [Getting started](getting-started.md).
 | Page | What's in it |
 |---|---|
 | [Test files](test-files.md) | The suite format: tests, turns, variables, environments and secrets, data files, groups, validation |
-| [Providers](providers.md) | Connecting to an endpoint: HTTP, streams, WebSocket, presets, A2A agents, logins, conversation history, thinking |
+| [Providers](providers.md) | Connecting to an endpoint: HTTP, streams, presets, logins, conversation history, thinking |
 | [Checks and judges](checks.md) | Every check, its operators, System One and LLM judges, confidence and unsure results |
 | [Plugins](plugins.md) | Your own providers, checks, judges and login fixtures, in JavaScript, importing any file or package |
 | [Command line](cli.md) | `run`, `validate`, `report`, `compare`, `pack`: options, environments and secrets, exit codes, output, reports |

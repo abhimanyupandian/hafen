@@ -3,5 +3,3 @@
 
 export const RUN_KIND = "hafen-run";
 export const RUN_VERSION = 1;
-// A run from before the app was Hafen: the same format, under its old kind
-export const LEGACY_RUN_KIND = "hafen-eval-run";

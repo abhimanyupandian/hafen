@@ -51,8 +51,6 @@ folder the app exported runs as it is from anywhere: `hafen run exported/`.
 | `--report <format>:<path>` | Write a report (repeatable): `junit`, `run`, `md` or `json`. `-` as the path is standard output. See [Reports](#reports) | a run file in `.hafen/runs/` |
 | `--baseline <run-file>` | Compare with this run, and fail on a regression | none |
 | `--fail-on pass_rate=<points>,p95=<percent>,cost=<percent>` | What counts as a regression (see [`compare`](#report-and-compare)). Only with `--baseline`: without one it's a setup error | `pass_rate=5` |
-| `--load` | Allow tests with `load:` (load mode isn't built yet: a chosen load test is a setup error) | off: they're skipped |
-| `--network delay=<ms>,jitter=<ms>,kbps=<n>,drop=<rate>` | A network profile for every request: a delay (give or take `jitter`) before each response, bandwidth, and a share of responses cut off partway (any response, a stream or a JSON reply; `drop=1` cuts off every one). `delay` and `jitter` are 0 or more, `kbps` above 0, `drop` from 0 to 1: anything else is a setup error | none |
 | `--redact email,card,phone` | Also redact these patterns, as well as each suite's `redact` (a name that isn't one of these is an error) | secrets, secret headers and each suite's `redact` |
 | `--quiet`, `--verbose` | Less or more output | |
 | `--no-color` | Plain output (also when `NO_COLOR` is set, or output isn't a terminal) | |
@@ -67,7 +65,6 @@ prices. Each says so, and nothing is sent:
 ```
 --fail-on compares with a baseline: add --baseline <run file>
 --max-cost needs prices: no suite has prices and no provider has a price, so the run's cost is unknown; add prices to the suite or a provider's price, or leave out --max-cost
---network drop takes a rate from 0 to 1 (1 drops every response), not 5
 ```
 
 ## Environments and secrets
@@ -156,16 +153,6 @@ overrides too, and ones no suite uses), and every secret the run fills in from t
 redacted from the output, every report and the run file (`[redacted]`), wherever it shows (a reply
 that says it back too).
 
-**Old spellings.** `${env:NAME}`, `{{scope.NAME}}` and a plugin's `{ secret: "NAME" }` are problems,
-each at its file, line and column, saying what to write instead: `validate` exits `2`, and so does
-`run`, with nothing sent ([Old spellings](test-files.md#old-spellings)).
-
-```
-providers/acme.yml:3:35  ${env:ACME_KEY} is the old way to write a secret: write {{secret.ACME_KEY}}
-providers/acme.yml:2:7  {{scope.base_url}} is the old way: write {{env.base_url}} (a value of the environment) or {{secret.base_url}} (a secret)
-
-2 problems: nothing was sent.
-```
 
 ## `validate`
 
@@ -205,7 +192,7 @@ tests passed but that regressed is headed `## Hafen · regressed`.
 |---|---|
 | `0` | Every test ran and passed (an unsure result counts as failed unless `--unsure`, or the file, says `warn` or `pass`) |
 | `1` | A test failed, or the run regressed past `--fail-on` |
-| `2` | A setup error. Found before the run: a file that doesn't parse or validate, an old spelling (`${env:NAME}`, `{{scope.NAME}}`, a plugin's `{ secret: "NAME" }`), a missing variable, environment value, secret, file or plugin, an `--env` or `--secret` file that doesn't exist or has a line that isn't `NAME=value`, an option that's wrong or would do nothing, a report that can't be written, or no tests to run (nothing was sent). Or found as it ran: a suite's setup step or a provider's `beforeAll` fixture that failed (that suite's tests weren't sent; what ran before, and `afterAll` fixtures, were). Also a run that passed, but whose report couldn't be written after all |
+| `2` | A setup error. Found before the run: a file that doesn't parse or validate, a missing variable, environment value, secret, file or plugin, an `--env` or `--secret` file that doesn't exist or has a line that isn't `NAME=value`, an option that's wrong or would do nothing, a report that can't be written, or no tests to run (nothing was sent). Or found as it ran: a suite's setup step or a provider's `beforeAll` fixture that failed (that suite's tests weren't sent; what ran before, and `afterAll` fixtures, were). Also a run that passed, but whose report couldn't be written after all |
 | `3` | Stopped early: `--max-cost`, `--bail`, or cancelled. Reports are written for what ran: a test that had already failed counts as failed, one that never ran as skipped |
 
 A test whose turns hit errors (endpoint down, judge unreachable) and no failures also exits `1`;
@@ -285,7 +272,7 @@ test as one case, however many runs or data rows it has, with one status:
 | Passed: its pass rate met (unsure results with `warn` or `pass`) | No element | `✓` (`!` with unsure results that warn) | passed (unsure) |
 | Failed: its pass rate missed (an unsure result counts as failed, with `unsure: fail`, the default) | `<failure>` | `✗`, under Failures | failed |
 | An error: its turns broke (the endpoint down, a timeout, a judge unreachable), a `before` fixture or a setup step failed, its provider couldn't be made | `<error>` | `✗`, under Failures | errors |
-| Skipped (never ran: a load test, or the run stopped first) or stopped partway (`--max-cost`, `--bail`, cancelled) | `<skipped>`, saying why | `–`, under Skipped | skipped |
+| Skipped (never ran: the run stopped first) or stopped partway (`--max-cost`, `--bail`, cancelled) | `<skipped>`, saying why | `–`, under Skipped | skipped |
 
 JUnit gives each data row of a test that passed, failed or errored a `<testcase>` of its own,
 `<test> [row N: <its name>]` (its repeats within it: one case, its failed repeats in `<system-out>`),
@@ -368,9 +355,8 @@ Their names also go next to the pack, never a value, to fill in copies of (`NAME
 A pack that needs no environment values, or no secrets, gets no file for them.
 
 Nothing is packed if a suite has a problem, or if a plugin it uses can't be loaded or bundled (an
-import that isn't installed, say) or names a secret the old way (`{ secret: "NAME" }`): `pack` says
-why and exits `2`. None of your machine's paths go into
-the file.
+import that isn't installed, say): `pack` says why and exits `2`. None of your machine's paths go
+into the file.
 
 Running a pack takes the same commands and options as `hafen` itself:
 

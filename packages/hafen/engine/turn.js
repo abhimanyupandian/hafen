@@ -5,7 +5,7 @@
 import { callSteps } from "./calls.js";
 import { assemble, createCollector } from "./events.js";
 import { first } from "./jsonpath.js";
-import { withNetwork, withRetries } from "./transport.js";
+import { withRetries } from "./transport.js";
 import { anySignal, isAbort, short } from "./util.js";
 import { fmtMs } from "./checks/names.js";
 import { same } from "./checks/operators.js";
@@ -19,7 +19,7 @@ const TOOL_ROUNDS = 5;
 // the provider's own, else 120 s and 2
 export async function executeTurn({
   provider, message, history = [], scope, transport, signal, wantThinking = false, session,
-  spans, parent, timeoutMs = provider?.config?.timeout_ms ?? 120000, retries = provider?.config?.retries ?? 2, network, tools, price, now, onEvent = () => {}, index = 0,
+  spans, parent, timeoutMs = provider?.config?.timeout_ms ?? 120000, retries = provider?.config?.retries ?? 2, tools, price, now, onEvent = () => {}, index = 0,
   secretHeader = () => false, noteSecret = () => {},
 }) {
   const timeout = new AbortController();
@@ -48,7 +48,7 @@ export async function executeTurn({
   // cuts the reply short), else null
   let reading = null;
 
-  const retrying = withRetries(withNetwork(transport, network), {
+  const retrying = withRetries(transport, {
     retries,
     onRetry: ({ attempt, status, waitMs }) => {
       spans.record("retry", `retry ${attempt} after ${status}`, { parent: requestSpan, end: spans.at() + waitMs, metrics: { status, wait_ms: waitMs } });
@@ -132,8 +132,7 @@ export async function executeTurn({
       // The connection closed with the body part read (Node says "terminated", a browser "network
       // error"): said as what happened. What came before it stays in the record
       const n = chunksTotal - reading;
-      const how = err?.network ? "the connection dropped (network simulation)" : "the connection closed";
-      error = `the response ended early: ${how} ${n ? `after ${n} chunk${n === 1 ? "" : "s"} (the reply so far is kept)` : "before its body was all in"}`;
+      error = `the response ended early: the connection closed ${n ? `after ${n} chunk${n === 1 ? "" : "s"} (the reply so far is kept)` : "before its body was all in"}`;
     } else {
       error = err.message || String(err);
     }

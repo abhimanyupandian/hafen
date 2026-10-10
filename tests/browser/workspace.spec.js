@@ -1,24 +1,20 @@
-// The app keeps its own work (contracts/ui.md, The workspace; Import and Export): no folder to open or
-// pick. A first start offers the first steps, and what's added (a provider, a conversation, a suite, a
-// plugin) is kept by the app across a reload; a new provider's kinds are the built-in ones and the
-// provider plugins kept; Import copies suites in, from files or a folder, with everything they use (a
-// file here with another text asked about once); Export writes suites out to a folder, with everything
-// they use (files there asked about first), which the command line runs as it is, and Copy CI command
-// then names; the desktop app keeps its workspace in its data folder across a restart, imports and
-// exports through its dialogs, and offers the folder it opened before once.
+// The app keeps its own work (contracts/ui.md, The workspace; Import and Export): a first start, what's
+// added kept across a reload; Suites' import and export all; Import from files or a folder, Export to a
+// folder the command line runs as it is; and the desktop app's workspace, kept across a restart.
 
 import { _electron as electron, test as plain } from "@playwright/test";
 import { spawn } from "node:child_process";
-import { cp, mkdir, mkdtemp, readdir, readFile, rm, writeFile as writeDisk } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile as writeDisk } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parse } from "yaml";
 import { startMock } from "../../packages/hafen/tests/fixtures/mock-endpoint.mjs";
-import { addScope, expect, fileText, fixtureFiles, openYaml, pickFolder, reopen, showEntry, storedFiles, test, writeFiles } from "./fixtures.js";
+import { addScope, expect, fileText, fixtureFiles, openYaml, pickFolder, reopen, showEntry, storedFiles, test, toast, writeFile, writeFiles } from "./fixtures.js";
 
 const ROOT = fileURLToPath(new URL("../../", import.meta.url));
 const CLI = join(ROOT, "packages/hafen/cli/hafen.js");
+const SUITE = "smoke.hafen.yml";
 
 // A suite that uses everything there is to copy: its provider file (its address the scope's, its key a
 // secret), a data file, a prices file, a JSON Schema, and a check plugin by name that imports a helper
@@ -56,6 +52,7 @@ const cli = (cwd, args) => new Promise((resolve) => {
   child.stderr.on("data", (d) => { out += d; });
   child.on("close", (status) => resolve({ status, out }));
 });
+
 // Files written into a folder on the disk
 async function onDisk(dir, files) {
   for (const [path, text] of Object.entries(files)) {
@@ -63,6 +60,7 @@ async function onDisk(dir, files) {
     await writeDisk(join(dir, path), text);
   }
 }
+
 // Every file in a folder on the disk: { path: text }
 async function fromDisk(dir) {
   const out = {};
@@ -71,15 +69,66 @@ async function fromDisk(dir) {
   }
   return out;
 }
+
 const suiteRow = (page, file) => page.locator(`#suiteList .list-row[data-file="${file}"]`);
-const toast = (page, text) => page.locator(".toast", { hasText: text });
+
+// Settings → Providers, where the providers are
+async function openProviders(page) {
+  await page.click("#openSettings");
+  await page.click("#settings-tab-providers");
+  await expect(page.locator("#settingsTitle")).toHaveText("Providers");
+}
+
+test("deletes a provider in Settings and a suite from its panel, in the workspace", async ({ app: { page } }) => {
+  const exists = (path) => page.evaluate(async (path) => {
+    const parts = path.split("/");
+    let dir = await navigator.storage.getDirectory().then((root) => root.getDirectoryHandle("workspace", { create: true }));
+    try {
+      for (const p of parts.slice(0, -1)) dir = await dir.getDirectoryHandle(p);
+      await dir.getFileHandle(parts.at(-1));
+      return true;
+    } catch {
+      return false;
+    }
+  }, path);
+  await expect(page.locator("#providersSection")).toHaveCount(0);
+  await openProviders(page);
+  const row = page.locator("#provider-mock-sse");
+  await page.click("#provider-mock-sse-delete");
+  await expect(page.locator("#provider-mock-sse-delete")).toHaveText("delete file?");
+  await page.click("#provider-mock-sse-delete");
+  await expect(row).toHaveCount(0);
+  expect(await exists("providers/mock-sse.yml")).toBe(false);
+  expect(await exists("providers/mock-json.yml")).toBe(true);
+  await page.click("#settingsClose");
+
+  await page.locator('#suiteList .list-row[data-file="smoke.hafen.yml"] .list-open').click();
+  await page.click("#suiteDelete");
+  await expect(page.locator("#suiteDelete")).toHaveText("delete this file?");
+  await page.click("#suiteDelete");
+  await expect(page.locator("#suitesEmpty")).toBeVisible();
+  expect(await exists("smoke.hafen.yml")).toBe(false);
+  await expect(page.locator("#panel .panel-head")).toContainText("Conversation");
+});
 
 test.describe("in the browser build", () => {
+  // A suite to import, with the provider it uses (picked with it, found by the path it names it by)
+  const MORE = {
+    "more.hafen.yml": "version: 1\nname: More\nprovider: providers/more.yml\ntests:\n  - name: one more\n    turns: [ { user: hello } ]\n",
+    "providers/more.yml": "kind: http\nurl: http://127.0.0.1:9/json\nbody: { message: \"{{user}}\" }\nresponse: { text: $.data.reply }\n",
+  };
+
+  // The browser's file picker answered with these files, one by one (no folders to go by)
+  const pickFiles = (page, files) => page.evaluate((files) => {
+    window.showOpenFilePicker = async () => Object.entries(files).map(([path, text]) => {
+      const name = path.split("/").pop();
+      return { kind: "file", name, getFile: async () => new File([text], name) };
+    });
+  }, files);
+
   test.afterEach(async ({ app: { errors } }) => {
     expect(errors).toEqual([]);
   });
-
-  /* ---------- a first start ---------- */
 
   test.describe("a first start", () => {
     test.use({ workspace: {} });
@@ -190,7 +239,62 @@ test.describe("in the browser build", () => {
     });
   });
 
-  /* ---------- a new provider's kinds ---------- */
+  test("Suites' head: +, then import and export all as words, as Runs' open and clear all are; no menu button", async ({ app: { page } }) => {
+    await expect(page.locator("#suitesMenu")).toHaveCount(0);
+    expect(await page.locator("#suitesSection > .section-head > button").evaluateAll((all) => all.map((b) => b.id))).toEqual(["suitesToggle", "newSuite", "importSuites", "exportSuites"]);
+    await expect(page.locator("#importSuites")).toHaveText("import");
+    await expect(page.locator("#exportSuites")).toHaveText("export all");
+    // (the same ghost words as Runs' head has)
+    for (const id of ["#importSuites", "#exportSuites"]) expect(await page.locator(id).getAttribute("class")).toBe(await page.locator("#openRun").getAttribute("class"));
+    await expect(page.locator("#importSuites svg, #exportSuites svg")).toHaveCount(0);
+
+    // import: the Import items, under it; then suite files picked
+    await pickFiles(page, MORE);
+    await page.click("#importSuites");
+    await expect(page.locator("#contextMenu")).toBeVisible();
+    await expect(page.locator("#contextMenu .context-menu-item")).toHaveText([/^Import suite files…/, /^Import a folder…/]);
+    const link = await page.locator("#importSuites").boundingBox();
+    const menu = await page.locator("#contextMenu").boundingBox();
+    expect(Math.abs(menu.y - (link.y + link.height))).toBeLessThan(2);
+    await page.click("#menu-import-files");
+    await expect(toast(page, "Imported 1 suite from 2 files")).toBeVisible();
+    await expect(suiteRow(page, "more.hafen.yml")).toHaveCount(1);
+
+    // export all: the Export dialog for every suite, then the folder picked
+    await pickFolder(page, "all");
+    await page.click("#exportSuites");
+    await expect(page.locator("#exportDialog")).toBeVisible();
+    await expect(page.locator("#exportNote")).toContainText("your 2 suites");
+    await page.click("#exportGo");
+    await expect(page.locator("#exportDialog")).toHaveCount(0);
+    const out = Object.keys(await storedFiles(page, "all"));
+    expect(out).toEqual(expect.arrayContaining(["smoke.hafen.yml", "more.hafen.yml", "providers/more.yml"]));
+
+    // Closed, Suites shows + alone
+    await page.click("#suitesToggle");
+    await expect(page.locator("#importSuites")).toBeHidden();
+    await expect(page.locator("#exportSuites")).toBeHidden();
+    await expect(page.locator("#newSuite")).toBeVisible();
+  });
+
+  test.describe("with no suites yet", () => {
+    test.use({ workspace: {} });
+
+    test("export all shows only once there's a suite; import, and the note's import some, open the same Import items", async ({ app: { page } }) => {
+      await expect(page.locator("#importSuites")).toBeVisible();
+      await expect(page.locator("#exportSuites")).toBeHidden();
+      for (const from of ["#importSuites", "#suitesImport"]) {
+        await page.click(from);
+        await expect(page.locator("#contextMenu .context-menu-item")).toHaveText([/^Import suite files…/, /^Import a folder…/]);
+        await page.keyboard.press("Escape");
+        await expect(page.locator("#contextMenu")).toHaveCount(0);
+      }
+      await writeFiles(page, MORE);
+      await reopen(page);
+      await expect(suiteRow(page, "more.hafen.yml")).toHaveCount(1);
+      await expect(page.locator("#exportSuites")).toBeVisible();
+    });
+  });
 
   test("a new provider's kinds: the built-in ones and the provider plugins kept, one added in Plugins there at once", async ({ app: { page } }) => {
     await page.click("#openSettings");
@@ -213,8 +317,6 @@ test.describe("in the browser build", () => {
     await page.click("#settingsClose");
     await expect(page.locator("#convProvider")).toHaveValue("providers/acme-2.yml");
   });
-
-  /* ---------- Export ---------- */
 
   test.describe("Export", () => {
     test.use({ workspace: ORDERS });
@@ -306,15 +408,74 @@ test.describe("in the browser build", () => {
   });
 });
 
-/* ---------- the desktop app ---------- */
+test.describe("Getting started's command line", () => {
+  // A file written into the app's workspace (the browser's private file system)
+  const writeOpfs = writeFile;
+
+  test.beforeEach(async ({ app: { page } }) => {
+    await expect(page.locator(`#suiteList .list-row[data-file="${SUITE}"]`)).toHaveCount(1);
+  });
+  test.afterEach(async ({ app: { errors } }) => {
+    expect(errors).toEqual([]);
+  });
+
+  test("Getting started's command line: the scope's Export .env, given to hafen with --env, runs the same files; without it, exit 2 and the line that says why", async ({ app: { page, servers } }) => {
+    const files = {
+      "providers/gs.yml": "kind: http\nurl: \"{{env.base_url}}/json\"\nbody: { message: \"{{user}}\" }\nresponse: { text: $.data.reply }\n",
+      "gs.hafen.yml": "version: 1\nname: smoke\nprovider: providers/gs.yml\ntests:\n  - name: refund\n    turns:\n      - user: I want a refund for order 4417\n        expect: [ { type: status, equals: 200 } ]\n      - user: It arrived broken\n        expect: [ { contains: refund } ]\n",
+    };
+    for (const [path, text] of Object.entries(files)) await writeOpfs(page, path, text);
+    await reopen(page);
+    await addScope(page, "local", { base_url: servers.mock.url });
+    // In the app: the run fails as Getting started says (the second reply doesn't say "refund")
+    await page.locator("#suiteList .list-open", { hasText: "refund" }).first().click();
+    await page.click("#testRun");
+    await expect(page.locator("#status")).toContainText("failed 0/1");
+    // Export .env: local.env
+    await page.click("#scopeButton");
+    const [download] = await Promise.all([page.waitForEvent("download"), page.click("#envExport")]);
+    expect(download.suggestedFilename()).toBe("local.env");
+    const exported = await readFile(await download.path(), "utf8");
+    await page.click("#settingsClose");
+    // The same files on the disk, and the exported file beside them
+    const dir = await mkdtemp(join(tmpdir(), "hafen-getting-started-"));
+    try {
+      for (const [path, text] of Object.entries(files)) {
+        await mkdir(join(dir, path, ".."), { recursive: true });
+        await writeDisk(join(dir, path), text);
+      }
+      await writeDisk(join(dir, "local.env"), exported);
+      const cli = (args) => new Promise((resolve) => {
+        const child = spawn(process.execPath, [CLI, ...args], { cwd: dir, env: { ...process.env, NO_COLOR: "1", GITHUB_STEP_SUMMARY: "" } });
+        let out = "";
+        child.stdout.on("data", (d) => { out += d; });
+        child.stderr.on("data", (d) => { out += d; });
+        child.on("close", (code) => resolve({ code, out }));
+      });
+      expect((await cli(["validate", ".", "--env", "local.env"])).code).toBe(0);
+      const ran = await cli(["run", ".", "--env", "local.env"]);
+      expect(ran.code, ran.out).toBe(1);
+      expect(ran.out).toMatch(/✗ smoke › refund/);
+      for (const command of ["validate", "run"]) {
+        const bare = await cli([command, "."]);
+        expect(bare.code, bare.out).toBe(2);
+        expect(bare.out).toContain("providers/gs.yml:2:7  {{env.base_url}} isn't set: no environment is chosen (the app's scope, or --env <file> in the CLI)");
+      }
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});
 
 plain.describe("the desktop app", () => {
   plain.skip(process.platform === "linux" && !process.env.DISPLAY, "needs a display (run under xvfb-run on Linux)");
+
   const launch = (data, more = {}) => {
     const env = { ...process.env, HAFEN_LAB_DATA: data, ...more };
     delete env.ELECTRON_RUN_AS_NODE;
     return electron.launch({ args: [ROOT], cwd: ROOT, env });
   };
+
   // Its dialogs answered with this path
   const picks = (app, path) => app.evaluate(({ dialog }, p) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [p] }); }, path);
 
@@ -363,45 +524,6 @@ plain.describe("the desktop app", () => {
       await app.close();
       await mock.close();
       for (const d of [data, source, target]) await rm(d, { recursive: true, force: true });
-    }
-  });
-
-  plain("the folder it opened before is offered once on its next start: imported, or not now; then forgotten", async () => {
-    const before = await mkdtemp(join(tmpdir(), "hafen-before-"));
-    await cp(join(ROOT, "packages/hafen/tests/fixtures/suites"), before, { recursive: true });
-    const datas = [];
-    try {
-      for (const answer of ["#questionImport", "#questionLater"]) {
-        const data = await mkdtemp(join(tmpdir(), "hafen-data-"));
-        datas.push(data);
-        // What the app remembered before it kept its own workspace
-        let app = await launch(data);
-        let page = await app.firstWindow();
-        await page.evaluate((path) => localStorage.setItem("eval.root", path), before);
-        await app.close();
-        app = await launch(data);
-        page = await app.firstWindow();
-        await expect(page.locator("#questionNote")).toHaveText(`Import the suites from ${before.split(/[\\/]/).pop()}?`);
-        await page.click(answer);
-        await expect(page.locator("#question")).toHaveCount(0);
-        if (answer === "#questionImport") {
-          await expect(suiteRow(page, "smoke.hafen.yml")).toHaveCount(1);
-          expect(await readFile(join(data, "workspace", "providers", "mock-json.yml"), "utf8")).toBe(await readFile(join(before, "providers", "mock-json.yml"), "utf8"));
-        } else {
-          await expect(page.locator("#suitesEmpty")).toBeVisible();
-        }
-        expect(await page.evaluate(() => localStorage.getItem("eval.root"))).toBeNull();
-        await app.close();
-        // Once only
-        app = await launch(data);
-        page = await app.firstWindow();
-        await page.locator("html:not(.loading)").waitFor();
-        await page.waitForTimeout(500);
-        await expect(page.locator("#question")).toHaveCount(0);
-        await app.close();
-      }
-    } finally {
-      for (const d of [before, ...datas]) await rm(d, { recursive: true, force: true });
     }
   });
 });

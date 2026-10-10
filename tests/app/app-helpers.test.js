@@ -1,12 +1,12 @@
-// The page's own helpers that need no page: "2 mins ago"; a plugin's JavaScript coloured, indented as
-// it's typed, and formatted; the run of a test shown when none is picked (the latest); ×3; a data row
-// by its name ("row 3: a refund please"); how a run, a test and a turn went, in one set of words (a
-// run that broke off before its test included).
+// The page's own helpers that need no page: "2 mins ago" and times; a plugin's JavaScript coloured,
+// indented and formatted; a test's runs and data rows; how a run, a test and a turn went, in one set of
+// words; a search's words and dates; what a run's end does (a sound, a notification), as settings say.
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { formatJs, highlightJs, newLine, tokens } from "../../app/js/design/code.js";
-import { ago } from "../../app/js/lib/format.js";
+import { ago, sec } from "../../app/js/lib/format.js";
+import { dateTexts, matches, searchWords } from "../../app/js/lib/search.js";
 import { countedResult, instancesOf, pickedInstance, repeatOf, rowLabel, runName, runOutcome, testResult, testStatusText, turnChecksText, turnStatus, turnsOf } from "../../app/js/views/derive.js";
 import { pluginTemplate } from "hafen/engine/plugin-templates.js";
 
@@ -29,6 +29,18 @@ describe("ago", () => {
     assert.match(ago(before(90 * 86400), now), /2026/);
     // (a clock behind the run's: not "in the future")
     assert.equal(ago(now + 5000, now), "just now");
+  });
+});
+
+describe("sec", () => {
+  it("times: rounded before they're split, never 60.0 s or 1 min 60 s", () => {
+    assert.equal(sec(620), "0.62 s");
+    assert.equal(sec(59940), "59.9 s");
+    assert.equal(sec(59960), "1 min 0 s");
+    assert.equal(sec(119600), "2 min 0 s");
+    assert.equal(sec(72400), "1 min 12 s");
+    assert.equal(sec(undefined), "—");
+    assert.equal(sec(Number.NaN), "—");
   });
 });
 
@@ -193,5 +205,68 @@ describe("how it went, in one set of words", () => {
     assert.equal(turnStatus({ results: [unsure("pass"), pass] }, checks), "passed");
     assert.equal(turnChecksText({ results: [unsure("pass"), pass] }, checks), "2/2");
     assert.equal(turnStatus({ results: [unsure("fail"), pass] }), "failed");
+  });
+});
+
+describe("search", () => {
+  const now = new Date(2026, 9, 6, 15, 30).getTime();      // Tue 6 Oct 2026, 15:30 (local)
+  const at = new Date(2026, 9, 6, 14, 2).getTime();        // the same day, 14:02
+  const before = new Date(2025, 0, 9, 8, 5).getTime();     // Thu 9 Jan 2025, 08:05
+
+  it("a date, the ways it's written", () => {
+    const texts = dateTexts(at, now).join(" | ");
+    for (const t of ["2026-10-06 14:02", "06/10/2026", "10/06/2026", "6/10/2026", "6.10.2026", "Oct 6, 2026", "October 6, 2026", "6 Oct 2026", "6 October 2026", "Tuesday", "14:02", "today", "1 hour ago"]) {
+      assert.ok(texts.includes(t), `${t} in ${texts}`);
+    }
+    assert.ok(dateTexts(new Date(2026, 9, 5, 9, 0).getTime(), now).includes("yesterday"));
+    assert.ok(!dateTexts(before, now).includes("today"));
+    assert.deepEqual(dateTexts(undefined, now), []);
+    assert.deepEqual(dateTexts(0, now), []);
+  });
+
+  it("every word found somewhere (any case, any order); none typed: everything", () => {
+    const row = { texts: ["Refund for a broken item", "smoke"], times: [at] };
+    assert.deepEqual(searchWords("  Broken   REFUND "), ["broken", "refund"]);
+    assert.equal(matches(searchWords(""), row, now), true);
+    assert.equal(matches(searchWords("broken refund"), row, now), true);
+    assert.equal(matches(searchWords("SMOKE oct"), row, now), true);
+    assert.equal(matches(searchWords("2026-10-06"), row, now), true);
+    assert.equal(matches(searchWords("today"), row, now), true);
+    assert.equal(matches(searchWords("refund 2025"), row, now), false);
+    assert.equal(matches(searchWords("refund 2025"), { ...row, times: [before] }, now), true);
+    assert.equal(matches(searchWords("jan 9"), { texts: [], times: [before] }, now), true);
+    assert.equal(matches(searchWords("thursday"), { texts: [], times: [before] }, now), true);
+    assert.equal(matches(searchWords("parcel"), row, now), false);
+    // (a word isn't found across two texts joined)
+    assert.equal(matches(searchWords("itemsmoke"), row, now), false);
+  });
+});
+
+describe("a run's end", async () => {
+  globalThis.document = { visibilityState: "visible", hasFocus: () => true };
+  const { runEndActions } = await import("../../app/js/lib/notifications.js");
+  const settings = { sound: true, when: "away", passed: true, failed: true, system: true };
+
+  it("a sound when not looking at what ran; looking: none; always: one anyway", () => {
+    assert.deepEqual(runEndActions("passed", false, settings), { sound: "done", system: false });
+    assert.deepEqual(runEndActions("failed", false, settings), { sound: "failed", system: false });
+    assert.deepEqual(runEndActions("passed", true, settings), { sound: null, system: false });
+    assert.deepEqual(runEndActions("passed", true, { ...settings, when: "always" }), { sound: "done", system: false });
+  });
+
+  it("the outcomes chosen only; sound off; a stopped run: nothing", () => {
+    assert.deepEqual(runEndActions("passed", false, { ...settings, passed: false }), { sound: null, system: false });
+    assert.deepEqual(runEndActions("failed", false, { ...settings, passed: false }), { sound: "failed", system: false });
+    assert.deepEqual(runEndActions("failed", false, { ...settings, sound: false }), { sound: null, system: false });
+    assert.deepEqual(runEndActions("stopped", false, settings), { sound: null, system: false });
+  });
+
+  it("the system's notification only while the window isn't in front, and when it's on", () => {
+    globalThis.document = { visibilityState: "visible", hasFocus: () => false };
+    assert.deepEqual(runEndActions("passed", false, settings), { sound: "done", system: true });
+    assert.deepEqual(runEndActions("passed", false, { ...settings, system: false }), { sound: "done", system: false });
+    globalThis.document = { visibilityState: "hidden", hasFocus: () => true };
+    assert.deepEqual(runEndActions("failed", false, { ...settings, sound: false }), { sound: null, system: true });
+    assert.deepEqual(runEndActions("stopped", false, settings), { sound: null, system: false });
   });
 });

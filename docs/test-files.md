@@ -146,7 +146,6 @@ tests:
 | `on_fail` | `continue` (the default), or `stop` to skip the remaining turns after a failed check |
 | `unsure`, `unsure_below` | How [unsure results](checks.md#unsure) count (`fail`, the default: as failed; `warn`: as passed, with a warning; `pass`: as passed), and below which confidence a judged result whose value passes is unsure (default `0.6`). A check can say its own of both |
 | `timeout_ms`, `retries` | Per turn (defaults: 120000 ms, and 2 retries on rate limits and server errors). A provider can set them too |
-| `network` | A network profile: `{ delay_ms, jitter_ms, kbps, drop_rate }` |
 
 A test's settings come from, the most specific first:
 
@@ -156,8 +155,8 @@ A test's settings come from, the most specific first:
 4. Hafen's defaults, above.
 
 So a provider with `timeout_ms: 300` times out its turns after 300 ms unless the suite's `defaults`
-or the test say otherwise. On the command line, `--timeout` (and `--repeat`, `--unsure`,
-`--network`) override all of them.
+or the test say otherwise. On the command line, `--timeout` (and `--repeat`, `--unsure`) override
+all of them.
 
 ## Data rows
 
@@ -197,9 +196,6 @@ apart. A data cell's text is redacted in the name as everywhere: a secret's valu
 | `tools` | Results to give a model API that asks for a tool: `{ get_weather: { result: { temp: 21 } } }`, or a list of `{ when: { $.city: Paris }, result: … }` |
 | `expect` | The turn's [checks](checks.md) |
 
-Images and other files in a message (`user` as a list of parts, `attachments`) aren't built yet. A
-file that has them loads with a warning, and running that turn is an error that says so. Nothing is
-sent.
 
 ## Steps
 
@@ -326,26 +322,6 @@ changes nothing. The app's Environments and Secrets import and export the same f
 secret as `"Bearer {{secret.NAME}}"`, and Hafen fills it in as the request leaves
 ([Plugins](plugins.md#trust-the-network-and-secrets)).
 
-### Old spellings
-
-The old ways to write these are problems now, each at its file, line and column: `validate` exits
-`2`, and a run exits `2` with nothing sent. Write the new way instead:
-
-| Old | Write |
-|---|---|
-| `${env:NAME}` | `{{secret.NAME}}` |
-| `{{scope.NAME}}` | `{{env.NAME}}` (a value of the environment) or `{{secret.NAME}}` (a secret) |
-| A plugin's `{ secret: "NAME" }` | `"{{secret.NAME}}"` in its request ([Plugins](plugins.md#trust-the-network-and-secrets)) |
-
-```
-providers/acme.yml:3:35  ${env:ACME_KEY} is the old way to write a secret: write {{secret.ACME_KEY}}
-providers/acme.yml:2:7  {{scope.base_url}} is the old way: write {{env.base_url}} (a value of the environment) or {{secret.base_url}} (a secret)
-```
-
-A folder's `environments/<name>.yml` isn't read: `--env <name>` only names the environment (each
-suite's `environments:` entry of that name). Give the values in a `KEY=VALUE` file
-(`--env staging.env`), or keep them in the app's scopes.
-
 ## Groups
 
 What runs at the same time is set in the files, by groups:
@@ -440,9 +416,8 @@ Each problem comes with the file, line and column, and what to fix. A secret tha
 named where it's first used: in the suite, or in the provider file that uses it. A preset's own key
 (`ANTHROPIC_API_KEY`) is named at the provider's `kind`, and System One's (`JEV_API_KEY`) at its judge.
 An `{{env.NAME}}` the environment hasn't is named at its first use too, and a secret a plugin writes
-at that line of the plugin's file. A name that can't be used is named where it's set, and an old
-spelling where it's written ([Old spellings](#old-spellings)). A problem with a provider's fixtures is
-named at the fixture in its list (`fixtures.before`):
+at that line of the plugin's file. A name that can't be used is named where it's set. A problem with
+a provider's fixtures is named at the fixture in its list (`fixtures.before`):
 
 ```
 tests/support/refund.hafen.yml:30:42  {{secret.ACME_QA_PASSWORD}} isn't set (not in the --secret file or the environment)
@@ -461,12 +436,3 @@ A file a suite names (a provider, data, prices or schema file, or a plugin) by a
 of the folder (`../outside.yml` from a suite at its top) is outside it, wherever that leads,
 and said so: `provider: the provider file ../outside.yml isn't in the opened folder (only files in
 it are read)`.
-
-## Not built yet
-
-These parts of the format load (with a warning) but don't run yet. Running them is an error that
-says so, never a silent pass:
-
-- `simulate:` on a test (a simulated user).
-- Images and file attachments in a message.
-- `load:` on a test (load tests): skipped without `--load`, and an error with it.

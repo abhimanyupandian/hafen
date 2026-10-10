@@ -189,7 +189,7 @@ Notifications).
 | Group | Pane | What it's for |
 |---|---|---|
 | Storage | Runs, Conversations | What the app keeps, with sizes. Delete one, or clear all |
-| Connection | Providers | Your providers: add one (Ollama, OpenAI, Anthropic, Gemini, an HTTP endpoint, a WebSocket, an A2A agent, or one of your provider plugins: `plugin:<name>`), set its [fixtures](plugins.md#fixtures) (a list for each of the four, each in its order; a fixture is offered only in the lists it runs in, its `phases`), edit its YAML, rename it, **Try it**. **Fixtures** and **YAML** each open and close (Fixtures is open when the provider has some, YAML closed until you open it, and each stays as you leave it, for every provider); closed, each says what's in it (`acme-login → reset-cart`, `kind: http · 12 lines`). YAML that doesn't parse isn't saved, and isn't lost: it stays in the field with the problem and its line under it, **Try it** waits until it's fixed, and closing Settings asks (**discard edits?**) before it throws your edits away, opening the YAML to show why |
+| Connection | Providers | Your providers: add one (Ollama, OpenAI, Anthropic, Gemini, an HTTP endpoint, or one of your provider plugins: `plugin:<name>`), set its [fixtures](plugins.md#fixtures) (a list for each of the four, each in its order; a fixture is offered only in the lists it runs in, its `phases`), edit its YAML, rename it, **Try it**. **Fixtures** and **YAML** each open and close (Fixtures is open when the provider has some, YAML closed until you open it, and each stays as you leave it, for every provider); closed, each says what's in it (`acme-login → reset-cart`, `kind: http · 12 lines`). YAML that doesn't parse isn't saved, and isn't lost: it stays in the field with the problem and its line under it, **Try it** waits until it's fixed, and closing Settings asks (**discard edits?**) before it throws your edits away, opening the YAML to show why |
 | Connection | System One | The `JEV_API_KEY` that System One checks use |
 | Connection | Relay | The relay's address and whether it answers (browser build) |
 | Configurations | Environments | Globals and your scopes, each with its environment values (`{{env.NAME}}`), and which scope is chosen. Search, import, export and edit them as `.env` files |
@@ -218,9 +218,7 @@ secrets, else Globals'. So a name only Globals has is Globals', a name both have
 **overrides** Globals), and a name only the scope has is the scope's. With no scope chosen, Globals'
 are all there is. They work in suites, providers, plugins' settings and the message box. A name
 neither has is an error: a run stops before it sends anything and says why, a message's turn says why
-and nothing is sent, and a field says so under it as you type. The old ways to write them,
-`{{scope.NAME}}` and `${env:NAME}`, fill nothing: a file that has one can't run until it's written the
-new way, and a field that has one says what to write instead.
+and nothing is sent, and a field says so under it as you type.
 
 **Settings → Environments** (the scope button opens it) and **Settings → Secrets** look alike, as an
 API client's environments do:
@@ -335,7 +333,3 @@ them in any time). Either way it isn't asked again.
   with a key the system's keychain keeps under *Hafen Lab* and marked as encrypted
   (`{ "encrypted": true, "value": … }`). Scopes' and Globals' environment values are in its page
   storage.
-
-If you used Hafen when it was called *hafen eval*, its runs, conversations and settings are copied
-over the first time the app starts. Secrets aren't: enter them again in Settings → Secrets and
-Settings → System One.

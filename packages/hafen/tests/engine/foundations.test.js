@@ -14,7 +14,7 @@ import { createSpans } from "../../engine/spans.js";
 import { ndjson } from "../../engine/stream/ndjson.js";
 import { sse } from "../../engine/stream/sse.js";
 import { thinkTagSplitter } from "../../engine/stream/think-tags.js";
-import { withNetwork, withRetries } from "../../engine/transport.js";
+import { withRetries } from "../../engine/transport.js";
 import { createScope, MissingVariable, references } from "../../engine/vars.js";
 import { fakeTransport } from "../helpers.js";
 
@@ -79,12 +79,8 @@ describe("variables", () => {
     assert.throws(() => scope.resolve("{{nope}}"), MissingVariable);
     assert.throws(() => scope.resolve("{{secret.NOPE}}"), /isn't set/);
   });
-  it("fills in no old way: ${env:…} and {{scope.…}} are refused, saying what to write instead", () => {
-    assert.throws(() => scope.resolve("Bearer ${env:KEY}"), { message: "${env:KEY} is the old way to write a secret: write {{secret.KEY}}" });
-    assert.throws(() => scope.resolve("{{scope.KEY}}"), { message: "{{scope.KEY}} is the old way: write {{env.KEY}} (a value of the environment) or {{secret.KEY}} (a secret)" });
-  });
   it("finds references", () => {
-    const r = references({ a: "{{x}} {{secret.Y}} ${env:Z}", b: ["{{row.z}}"] });
+    const r = references({ a: "{{x}} {{secret.Y}}", b: ["{{row.z}}"] });
     assert.deepEqual([...r.vars], ["x", "secret.Y", "row.z"]);
     assert.deepEqual([...r.env], ["Y"]);
   });
@@ -157,12 +153,6 @@ describe("transport", () => {
     const t2 = fakeTransport(() => ({ status: 500 }));
     assert.equal((await withRetries(t2, { retries: 1 }).send({ url: "x" })).status, 500);
     assert.equal(t2.requests.length, 2);
-  });
-  it("network simulation adds delay", async () => {
-    const t = fakeTransport(() => ({ status: 200, body: "ok" }));
-    const start = performance.now();
-    await withNetwork(t, { delay_ms: 60 }).send({ url: "x" });
-    assert.ok(performance.now() - start >= 55);
   });
 });
 

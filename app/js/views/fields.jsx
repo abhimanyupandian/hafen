@@ -3,7 +3,6 @@
 
 import { useEffect, useRef, useState } from "react";
 import { MaxButton } from "../design/editor.jsx";
-import { oldWay } from "hafen/engine/vars.js";
 import { useStore } from "../design/hooks.js";
 import { app } from "../state.js";
 import { effectiveValues } from "../lib/scopes.js";
@@ -24,17 +23,14 @@ function scopeContext({ env, scopes = [], globals = {}, scopeSecrets = {}, plugi
   return contextFor;
 }
 
-// What's wrong with what a text takes from the scope chosen now (references.js): an old way to write
-// one (${env:NAME}, {{scope.NAME}}: what to write instead, as the engine says it, which fills in
-// neither), an {{env.NAME}} neither it nor Globals has (nor an open suite's environment of its name,
+// What's wrong with what a text takes from the scope chosen now (references.js): an {{env.NAME}}
+// neither it nor Globals has (nor an open suite's environment of its name,
 // nor a fixture sets), a {{secret.NAME}} neither it nor Globals has a secret for (nor a fixture gives).
 // "" when nothing is. As the engine looks (a field doesn't always know which suite it's for: any open
 // suite's counts).
 export function scopeProblem(text, state = {}) {
   const refs = referencesIn(text);
   if (!refs.length) return "";
-  const old = refs.find((r) => r.kind === "old");
-  if (old) return oldWay(old.way, old.name);
   const { env } = state;
   const { values, secrets, sets } = scopeContext(state);
   const missing = { env: [], secret: [] };
