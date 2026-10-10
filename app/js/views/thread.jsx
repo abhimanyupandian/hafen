@@ -365,8 +365,12 @@ export function Thread() {
     }
   }
 
-  // Follow new text while at the bottom; scroll a selected turn into view. Sending a message (or adding
-  // a turn) goes to the bottom, wherever the thread was, and follows the reply from there.
+  // Following a run (the top bar's Follow): what's running now kept in view as the run goes on: the
+  // turn (a test), or the test and its turn (a suite)
+  const following = state.follow && (mode === "test" ? !!liveForTest(selection.file, selection.test) : mode === "suite" && !!liveForSuite(selection.file));
+  // Follow new text while at the bottom (unless following a run); scroll a selected turn into view.
+  // Sending a message (or adding a turn) goes to the bottom, wherever the thread was, and follows the
+  // reply from there.
   useEffect(() => on("thread:bottom", () => {
     atBottom.current = true;
     const el = scroller.current;
@@ -374,12 +378,17 @@ export function Thread() {
   }), []);
   useLayoutEffect(() => {
     const el = scroller.current;
-    if (el && atBottom.current) el.scrollTop = el.scrollHeight;
+    if (el && atBottom.current && !following) el.scrollTop = el.scrollHeight;
   });
   useLayoutEffect(() => {
     if (selection.turn === undefined) return;
     document.getElementById(`turn-${selection.turn}-user`)?.scrollIntoView({ block: "nearest", behavior: "smooth" });
   }, [selection.turn, selection.kind]);
+  useLayoutEffect(() => {
+    if (!following) return;
+    const running = [...(scroller.current?.querySelectorAll('[data-status="running"]') ?? [])].at(-1);
+    running?.closest(".turn-group, .suite-turn")?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  });
 
   return (
     <div className="scroller" id="scroller" ref={scroller} onScroll={(e) => { const el = e.currentTarget; atBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40; }}>

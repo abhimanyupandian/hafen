@@ -51,6 +51,7 @@ export const app = createStore({
   problems: {},          // suite file → what stops a run of it, as a run checks before sending anything (problemsOf)
   warnings: {},          // suite file → what that check warns of, beyond the file's own (warningsOf)
   showFixtures: store.get(KEYS.fixtures) !== "hidden",  // the fixtures' steps (timeline) and lines (console) shown
+  follow: store.get(KEYS.follow) !== "off",  // while a test or suite runs, the thread keeps what's running in view
   exports: store.getJSON(KEYS.exports, {}),  // suite file → where it was last exported to (rememberExport)
   error: null,
 });
@@ -82,6 +83,11 @@ export async function setProviderFixtures(file, lists) {
 export function setShowFixtures(show) {
   store.set(KEYS.fixtures, show ? "shown" : "hidden");
   set({ showFixtures: show });
+}
+
+export function setFollow(on) {
+  store.set(KEYS.follow, on ? "on" : "off");
+  set({ follow: on });
 }
 
 export let engine = null;

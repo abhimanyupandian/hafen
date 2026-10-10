@@ -1,9 +1,5 @@
 # Hafen
 
-> *Hafen* is German for **harbour**.
-
-![Hafen: a conversation with a chat endpoint, the checks on each reply, and the run's timeline](docs/cover.gif)
-
 **Test chat endpoints like your users talk to them.** Send messages to any chat API and watch the replies stream
 in as a conversation. Check every reply. See every step of a run on a timeline. Then run the same
 test files in CI.
@@ -171,6 +167,10 @@ npx hafen run tests/ --env tests/staging.env --secret staging.secret.env
 | [Command line](docs/cli.md) | `run`, `validate`, `report`, `compare`, `pack`: options, environments and secrets, exit codes, output, reports |
 | [Running in CI](docs/ci.md) | Exporting suites into your repository, installing the `hafen` package, a GitHub Actions workflow, running a pack, secrets and `.env` files, baselines and regressions |
 | [Development](docs/development.md) | How the project is built (the app, and the `hafen` package in `packages/hafen/`), its tests, and how to work on it |
+
+![An animated harbour: boats sail past a lighthouse, cranes and warehouses](docs/cover.gif)
+
+> *Hafen* is German for **harbour**.
 
 ---
 

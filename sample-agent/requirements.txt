@@ -1,0 +1,2 @@
+google-adk[a2a]==2.11.0
+litellm==1.104.2

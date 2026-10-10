@@ -9,3 +9,13 @@ playwright-report/
 # Runs written by the desktop app or the CLI by default
 .hafen/
 out/
+# Secrets and local settings: never committed
+.env
+*.secret.env
+# The sample agent's Python environment
+sample-agent/.venv/
+__pycache__/
+# The demo video (npm run demo-video): uploaded to GitHub, not committed
+docs/demo/*.mp4
+# macOS Finder files
+.DS_Store

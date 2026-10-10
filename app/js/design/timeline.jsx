@@ -1,12 +1,13 @@
 // The steps of a run on a time axis: a Gantt chart (spec/design/components.md, Additions: Timeline), in
 // a dock built on the console's frame, above the console. Rows are the spans, grouped by turn and
-// indented by depth; bars by status; a now line while running; zoom (25% to 200% of "fit") and Space
-// and drag to pan, from the design system's zoom and pan.
+// indented by depth; bars by status; a now line while running, and Follow, which keeps the step running
+// now and the now line in view; zoom (25% to 200% of "fit") and Space and drag to pan, from the design
+// system's zoom and pan.
 //
 //   <TimelineDock spans running selected onSelect={(span) => …} total />
 
 import { useLayoutEffect, useMemo, useRef, useState } from "react";
-import { KEYS } from "../lib/store.js";
+import { KEYS, store } from "../lib/store.js";
 import { useCollapsible } from "./collapsible.jsx";
 import { openMenu } from "./context-menu.jsx";
 import { createZoom, Zoom } from "./zoom.jsx";
@@ -111,6 +112,7 @@ export function TimelineDock({ spans = [], running = false, selected, onSelect, 
   const [scale, setScale] = useState(1);
   const [now, setNow] = useState(0);
   const [width, setWidth] = useState(800);
+  const [follow, setFollow] = useState(() => store.get(KEYS.timelineFollow) !== "off");
 
   const end = useMemo(() => Math.max(1, ...spans.map((s) => s.end ?? s.start ?? 0), running ? now : 0), [spans, running, now]);
   const origin = useMemo(() => Math.min(...spans.map((s) => s.start ?? 0), end), [spans, end]);
@@ -156,6 +158,20 @@ export function TimelineDock({ spans = [], running = false, selected, onSelect, 
     return () => clearInterval(timer);
   }, [running]);
 
+  // Following (while running): the latest step that's still going (else the last), and the now line,
+  // scrolled into the chart's view as the run goes on
+  useLayoutEffect(() => {
+    const chart = chartRef.current;
+    if (!running || !follow || !chart || !rows.length) return;
+    let at = rows.length - 1;
+    for (let i = rows.length - 1; i >= 0; i--) if (rows[i].span.end === undefined) { at = i; break; }
+    const top = AXIS + at * ROW;
+    if (top < chart.scrollTop + AXIS) chart.scrollTop = top - AXIS;
+    else if (top + ROW > chart.scrollTop + chart.clientHeight) chart.scrollTop = top + ROW - chart.clientHeight;
+    const line = x(Math.max(origin, now));
+    if (line > chart.scrollLeft + chart.clientWidth - 40) chart.scrollLeft = line - chart.clientWidth + 120;
+  });
+
   // Keep the labels' scroll in step with the chart's
   const syncScroll = () => { if (labelsRef.current) labelsRef.current.style.top = `${-chartRef.current.scrollTop}px`; };
 
@@ -181,6 +197,11 @@ export function TimelineDock({ spans = [], running = false, selected, onSelect, 
         </button>
         {rows.length > 0 && <span className="hint when-open" id="timelineTotal">{`${total}${total ? " · " : ""}${rows.length} steps`}</span>}
         {rows.length > 0 && <button className="btn btn-ghost when-open" id="timelineFit" type="button" onClick={() => zoom.set(1)}>fit</button>}
+        {running && rows.length > 0 && (
+          <label className="check timeline-follow when-open" title="Keep the step running now in view as the run goes on">
+            <input type="checkbox" id="timelineFollow" checked={follow} onChange={(e) => { setFollow(e.target.checked); store.set(KEYS.timelineFollow, e.target.checked ? "on" : "off"); }} />Follow
+          </label>
+        )}
         {actions}
       </div>
       <div className={`timeline-body collapsible-body${rows.length ? "" : " no-steps"}`} id="timelineBody">

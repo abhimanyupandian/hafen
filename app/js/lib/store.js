@@ -17,6 +17,7 @@ export const KEYS = {
   consoleHeight: "eval.consoleHeight",     // the console's height, when resized (px)
   timelineHeight: "eval.timelineHeight",   // the timeline dock's height (px)
   timelineLabels: "eval.timelineLabels",   // the timeline's label column width (px)
+  timelineFollow: "eval.timelineFollow",   // the timeline's Follow, while a run goes on: "off" when not following
   theme: "eval.theme",                     // Settings → Appearance: "light", "dark" or "system" (the default)
   env: "eval.env",                         // the scope chosen last ("": none, chosen so; unset: never chosen)
   scopes: "eval.scopes",                   // the app's scopes, by name, in the order they were made
@@ -29,4 +30,5 @@ export const KEYS = {
   notifications: "eval.notifications",     // Settings → Notifications: { sound, when, passed, failed, system }
   collapsed: "eval.collapsed",             // tree rows folded: {row id: true}
   fixtures: "eval.fixtures",               // the timeline's and the console's fixtures: "hidden" when hidden
+  follow: "eval.follow",                   // the top bar's Follow, while a run goes on: "off" when not following
 };

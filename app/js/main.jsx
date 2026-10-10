@@ -29,7 +29,7 @@ import { Tooltip } from "./design/tooltip.jsx";
 import { $, closeDrawer, pageReady } from "./lib/dom.js";
 import { attachLog, say } from "./lib/log.js";
 import { onRouteChange, readRoute } from "./lib/url.js";
-import { app, liveForSuite, liveForTest, liveIn, openConversation, openRun, runForTest, runSelection, runTests, select, setShowFixtures, start, stopRun, stopSending, suiteOf, suiteRunFor, testOf, threadMode } from "./state.js";
+import { app, liveForSuite, liveForTest, liveIn, openConversation, openRun, runForTest, runSelection, runTests, select, setFollow, setShowFixtures, start, stopRun, stopSending, suiteOf, suiteRunFor, testOf, threadMode } from "./state.js";
 import { isRunKey, RUN_KEY } from "./lib/keys.js";
 import { Composer } from "./views/composer.jsx";
 import { Panel } from "./views/panel.jsx";
@@ -136,6 +136,12 @@ function TopBar() {
           </button>
         )}
         <span id="status" role="status" className={error ? "error" : undefined} data-status={shown || undefined} title={tip || status}>{status}</span>
+        {/* (while it runs: keep the turn, or the test, that's running in view) */}
+        {play?.running && (
+          <label className="check topbar-follow" title="Scroll what's running into view as the run goes on">
+            <input type="checkbox" id="followRun" checked={state.follow} onChange={(e) => setFollow(e.target.checked)} />Follow
+          </label>
+        )}
       </div>
       {/* (small screens only, as the menu's button: the panel, over the thread) */}
       <button id="panelToggle" className="btn btn-ghost btn-icon topbar-panel" type="button" aria-label={state.panelOpen ? "Hide the details" : "Show the details"}

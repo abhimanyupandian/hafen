@@ -1,0 +1,27 @@
+# The order agent (sample-agent/server.py): Google ADK on a local Qwen3-4B (Ollama), streamed as SSE.
+# The agent keeps the conversation in its ADK session: each turn sends only its message, and the
+# session id the first reply gave.
+kind: http
+url: "{{env.agent_url}}/chat"
+body: { message: "{{user}}", session: "{{session}}" }
+history: session
+stream: sse
+done_marker: "[DONE]"
+timeout_ms: 300000          # a local model on a laptop (a thinking one can take minutes a turn)
+retries: 0
+events:
+  - when: { $.type: session }
+    session: $.id
+  - when: { $.type: thinking }
+    thinking: $.text
+    thinking_visibility: full
+  - when: { $.type: text }
+    text: $.text
+  - when: { $.type: tool_call }
+    tool_call: { id: $.id, name: $.name, args: $.args }
+  - when: { $.type: tool_result }
+    tool_result: { id: $.id, name: $.name, result: $.result }
+  - when: { $.type: usage }
+    usage: { input: $.input, output: $.output, thinking: $.thinking }
+  - when: { $.type: error }
+    error: $.message

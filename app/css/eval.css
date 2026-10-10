@@ -730,3 +730,7 @@ button.check-card-text:focus-visible { outline: 1px solid var(--fg); outline-off
   .scope-panes { flex-direction: column; align-items: stretch; }
   .scope-list { width: auto; padding: 0 0 8px; border-right: 0; border-bottom: 1px solid var(--line); }
 }
+
+/* ---------- the top bar's Follow, while a run goes on ---------- */
+.topbar .topbar-follow { flex: none; font: 11px/1.3 var(--mono); color: var(--muted); gap: 6px; }
+.timeline .timeline-follow { flex: none; font: 11px/1.3 var(--mono); color: var(--muted); gap: 6px; height: auto; }

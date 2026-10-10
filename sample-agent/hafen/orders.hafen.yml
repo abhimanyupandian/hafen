@@ -1,0 +1,50 @@
+version: 1
+name: Coffee shop agent
+provider: providers/orders-agent.yml
+
+environments:
+  local: { agent_url: "http://127.0.0.1:8100" }
+
+judges:
+  default: { kind: systemone }      # TypeSafe's System One (Jev): its key is the secret JEV_API_KEY
+
+tests:
+  - name: fill a cart, then order
+    turns:
+      - user: Hi there!
+        expect:
+          - { type: systemone.noul, question: "Is the reply a polite, friendly greeting?", min: 0.8 }
+      - user: Please add 2 bags of Ethiopian coffee beans to my cart.
+        expect:
+          - { type: tool.called, tool: add_to_cart, args: { $.quantity: 2 } }
+      - user: Also add a pour-over kettle.
+        expect:
+          - { type: tool.called, tool: add_to_cart, args: { $.item: pour-over kettle } }
+      - user: What's in my cart?
+        expect:
+          - { type: tool.called, tool: list_cart }
+          - { matches: '\|\s*-{3,}' }        # a markdown table
+          - { contains: "67.00" }
+      - user: Please remove the kettle.
+        expect:
+          - { type: tool.called, tool: remove_from_cart }
+      - user: Show me my cart again.
+        expect:
+          - { type: tool.called, tool: list_cart }
+          - { matches: '\|\s*-{3,}' }
+          - { contains: "28.00" }
+      - user: Great, please place my order.
+        expect:
+          - { type: tool.called, tool: place_order }
+          - { contains: "1001" }
+          - { type: systemone.noul, question: "Does the reply confirm that the order was placed?", min: 0.8 }
+      - user: What orders do I have, and what's their status?
+        expect:
+          - { type: tool.called, tool: list_orders }
+          - { matches: '\|\s*-{3,}' }
+          - { contains: "1001" }
+          - type: systemone.score
+            on: conversation
+            question: "How polite and professional is the assistant throughout the conversation?"
+            rubric: [rude, curt, polite, warm and professional]
+            min: 2

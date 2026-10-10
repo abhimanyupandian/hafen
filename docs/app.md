@@ -181,6 +181,9 @@ is about, so the file Export writes, once committed, shows a one-field change as
 | A suite | The whole suite |
 
 While a run goes on, the same shortcut (or `▷`, or Esc) stops it. Several runs can go on at once.
+While the open test or suite runs, **Follow** in the top bar (on by default, and remembered) keeps
+what's running in view: the turn being sent, or in a suite, the test and its turn. The timeline has a
+**Follow** of its own: it keeps the step running now, and the now line, in the chart's view.
 When a run ends you get a toast, and, if you like, a sound and a system notification (Settings →
 Notifications).
 

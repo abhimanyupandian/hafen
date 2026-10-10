@@ -738,3 +738,61 @@ tests:
     }
   });
 });
+
+test.describe("Follow, while a run goes on", () => {
+  // A test of ten turns, each answered after a moment: taller than the window, and its timeline far
+  // taller than the dock; opened
+  async function tenTurns(page, servers) {
+    await writeFile(page, "providers/slow.yml", `kind: http\nurl: "${servers.mock.url}/slow?ms=400"\nbody: { message: "{{user}}" }\nresponse:\n  text: $.data.reply\n`);
+    const turns = Array.from({ length: 10 }, (_, i) => `      - user: message ${i + 1}\n`).join("");
+    await writeFile(page, "follow.hafen.yml", `version: 1\nname: follow\nprovider: providers/slow.yml\ntests:\n  - name: ten turns\n    turns:\n${turns}`);
+    await reopen(page);
+    await page.locator("#suiteList .list-open", { hasText: "ten turns" }).click();
+  }
+
+  test("the top bar's Follow, shown while a test runs, keeps the running turn in view; off, the thread stays put, and that's remembered", async ({ app: { page, servers } }) => {
+    await tenTurns(page, servers);
+    const top = () => page.locator("#scroller").evaluate((el) => { el.scrollTop = 0; el.dispatchEvent(new Event("scroll")); });
+    await expect(page.locator("#followRun")).toHaveCount(0);
+
+    // On (the default): the last turn, as it runs, is scrolled into view
+    await top();
+    await page.click("#testHeaderRun");
+    await expect(page.locator("#followRun")).toBeChecked();
+    await expect(page.locator("#turn-9")).toBeInViewport({ timeout: 15000 });
+    await expect(page.locator("#status")).toContainText("passed");
+    await expect(page.locator("#followRun")).toHaveCount(0);
+
+    // Off: the thread stays where it was, and the choice is kept
+    await top();
+    await page.click("#testHeaderRun");
+    await page.locator("#followRun").uncheck();
+    await top();
+    await expect(page.locator("#status")).toContainText("passed", { timeout: 15000 });
+    await expect(page.locator("#turn-9")).not.toBeInViewport();
+    expect(await page.evaluate(() => localStorage.getItem("eval.follow"))).toBe("off");
+  });
+
+  test("the timeline's Follow, shown while a run goes on, keeps the step running now in view; off, the chart stays put, and that's remembered", async ({ app: { page, servers } }) => {
+    await tenTurns(page, servers);
+    const chartTop = () => page.locator(".timeline-chart").evaluate((el) => { el.scrollTop = 0; });
+    const lastTurn = page.locator('.timeline-bar[data-kind="turn"]').last();
+    await expect(page.locator("#timelineFollow")).toHaveCount(0);
+
+    // On (the default): the last turn's bar, as it runs, is scrolled into the chart's view
+    await page.click("#testHeaderRun");
+    await expect(page.locator("#timelineFollow")).toBeChecked();
+    await expect(page.locator('.timeline-bar[data-kind="turn"]')).toHaveCount(10, { timeout: 15000 });
+    await expect(lastTurn).toBeInViewport();
+    await expect(page.locator("#status")).toContainText("passed");
+    await expect(page.locator("#timelineFollow")).toHaveCount(0);
+
+    // Off: the chart stays where it was left, and the choice is kept
+    await page.click("#testHeaderRun");
+    await page.locator("#timelineFollow").uncheck();
+    await chartTop();
+    await expect(page.locator("#status")).toContainText("passed", { timeout: 15000 });
+    await expect(lastTurn).not.toBeInViewport();
+    expect(await page.evaluate(() => localStorage.getItem("eval.timelineFollow"))).toBe("off");
+  });
+});
