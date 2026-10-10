@@ -10,6 +10,9 @@ your work, and plain files to commit.
 > **Proof of concept.** Hafen is at an early stage, and testing of its features is in progress. Expect
 > rough edges, and please report what you find.
 
+## Demo
+https://github.com/user-attachments/assets/6305c5f4-78a3-4f33-bb85-9bbaf3f427d9
+
 ## Why Hafen
 
 - **Any chat endpoint.** Plain HTTP (one JSON reply, SSE or NDJSON streams), or presets for OpenAI
