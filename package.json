@@ -1,7 +1,7 @@
 {
   "name": "hafen-app",
   "productName": "Hafen",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "private": true,
   "description": "End-to-end tests for chat endpoints: the desktop app and the browser build, on the hafen package (packages/hafen: the engine and the command-line runner for CI)",
   "license": "MIT",

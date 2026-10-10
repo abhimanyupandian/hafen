@@ -54,8 +54,8 @@ tests use them too.
 To check the package installs on its own, pack it and install the file somewhere else:
 
 ```sh
-npm pack -w hafen                   # hafen-0.0.1.tgz: engine/, cli/ and the README, not the tests
-cd /some/empty/folder && npm install /path/to/hafen-0.0.1.tgz && npx hafen --version
+npm pack -w hafen                   # hafen-0.0.2.tgz: engine/, cli/ and the README, not the tests
+cd /some/empty/folder && npm install /path/to/hafen-0.0.2.tgz && npx hafen --version
 ```
 
 ## Packaging
@@ -71,14 +71,16 @@ A version tag builds the macOS app on GitHub (Apple silicon and Intel) and publi
 (`.github/workflows/release.yml`, its notes from `.github/release-notes.md`):
 
 ```sh
-git tag v0.0.1 && git push origin v0.0.1
+git tag v0.0.2 && git push origin v0.0.2
 ```
 
 **Actions → Release → Run workflow** builds it without a release, to try a change first. The tests
 run on every push to `master` and every pull request (`.github/workflows/test.yml`): the unit tests and
 the browser tests, on macOS. Windows and Linux builds are made by `npm run app:build` on those systems,
-not on GitHub for now. The build isn't signed yet: the release notes say how to open it anyway (`xattr
--cr`). A version 0.x release is marked as a pre-release.
+not on GitHub for now. The build is signed ad hoc (`"identity": "-"` in `desktop/builder.json`: no
+Apple certificate, not notarized), so macOS asks before its first start: the release notes say how to
+open it (Privacy & Security → Open Anyway). Unsigned, a download is called damaged and can't be opened
+at all. A version 0.x release is marked as a pre-release.
 
 ## Screenshots
 

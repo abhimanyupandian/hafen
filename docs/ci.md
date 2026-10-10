@@ -62,8 +62,8 @@ TypeScript compiler's that json-p3 brings, which running suites doesn't need.)
 Until `hafen` is on npm, make its package in Hafen's repository and install that:
 
 ```sh
-npm pack -w hafen                          # in Hafen's repository: hafen-0.0.1.tgz
-npm install --save-dev ./hafen-0.0.1.tgz   # in yours
+npm pack -w hafen                          # in Hafen's repository: hafen-0.0.2.tgz
+npm install --save-dev ./hafen-0.0.2.tgz   # in yours
 ```
 
 ## Environments and secrets

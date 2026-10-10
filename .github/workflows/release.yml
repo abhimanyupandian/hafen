@@ -1,6 +1,6 @@
 # Builds the desktop app for macOS (Apple silicon and Intel), and publishes it as a GitHub release.
 #
-#   git tag v0.0.1 && git push origin v0.0.1    builds it and publishes the release v0.0.1
+#   git tag v0.0.2 && git push origin v0.0.2    builds it and publishes the release v0.0.2
 #   Actions → Release → Run workflow            builds it, kept on the run, without a release
 #
 # The build isn't signed yet: .github/release-notes.md says how to open it anyway.

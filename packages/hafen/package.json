@@ -1,6 +1,6 @@
 {
   "name": "hafen",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "End-to-end tests for chat endpoints: the engine and the command-line runner (hafen run, validate, report, compare, pack) for CI",
   "license": "MIT",
   "type": "module",

@@ -150,8 +150,8 @@ the package from a clone of this repository, and install that:
 
 ```sh
 git clone <this repository's URL> hafen-src
-npm pack -w hafen --prefix hafen-src     # hafen-0.0.1.tgz, made from hafen-src/packages/hafen
-npm install --save-dev ./hafen-0.0.1.tgz
+npm pack -w hafen --prefix hafen-src     # hafen-0.0.2.tgz, made from hafen-src/packages/hafen
+npm install --save-dev ./hafen-0.0.2.tgz
 npx hafen run tests/ --env tests/staging.env --secret staging.secret.env
 ```
 

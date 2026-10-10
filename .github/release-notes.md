@@ -6,8 +6,9 @@ find.
 | macOS, Apple silicon (M1 and later) | `Hafen-<version>-mac-arm64.dmg` |
 | macOS, Intel | `Hafen-<version>-mac-x64.dmg` |
 
-**It isn't signed yet**, so macOS warns before the first start. Open the `.dmg` and drag Hafen to
-Applications. If macOS says it's damaged or can't be checked, run this once in Terminal, then open it
-again: `xattr -cr /Applications/Hafen.app`
+**It isn't notarized by Apple yet**, so macOS won't open it the first time. Open the `.dmg`, drag
+Hafen to Applications and open it: macOS says it can't verify it. Then open **System Settings →
+Privacy & Security**, scroll down to Hafen, click **Open Anyway** and confirm. (Or run this once in
+Terminal: `xattr -cr /Applications/Hafen.app`.)
 
 The command-line runner for CI is installed from the repository for now: see the README's Quick start.
