@@ -2,6 +2,7 @@
   "name": "hafen",
   "version": "0.1.0",
   "description": "End-to-end tests for chat endpoints: the engine and the command-line runner (hafen run, validate, report, compare, pack) for CI",
+  "license": "MIT",
   "type": "module",
   "engines": {
     "node": ">=22"
