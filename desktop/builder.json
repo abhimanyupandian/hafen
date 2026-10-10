@@ -1,10 +1,12 @@
 {
-  "appId": "dev.hafen.lab",
-  "productName": "Hafen Lab",
+  "appId": "dev.hafen.app",
+  "productName": "Hafen",
+  "artifactName": "Hafen-${version}-${os}-${arch}.${ext}",
   "directories": { "output": "release" },
   "files": ["desktop/**", "!desktop/icons/{make.mjs,source.svg}", "app/dist/**", "package.json", "!node_modules/{rolldown,@rolldown,@oxc-project}{,/**}"],
-  "mac": { "category": "public.app-category.developer-tools", "icon": "desktop/icons/icon.icns", "extendInfo": { "CFBundleName": "Hafen", "CFBundleDisplayName": "Hafen" } },
-  "win": { "target": "nsis", "icon": "desktop/icons/icon.ico" },
+  "publish": null,
+  "mac": { "target": [{ "target": "dmg", "arch": ["arm64", "x64"] }], "category": "public.app-category.developer-tools", "icon": "desktop/icons/icon.icns" },
+  "win": { "target": [{ "target": "nsis", "arch": ["x64"] }], "icon": "desktop/icons/icon.ico" },
   "nsis": { "shortcutName": "Hafen" },
-  "linux": { "target": "AppImage", "category": "Development", "icon": "desktop/icons/icon.png" }
+  "linux": { "target": [{ "target": "AppImage", "arch": ["x64"] }], "category": "Development", "icon": "desktop/icons/icon.png" }
 }

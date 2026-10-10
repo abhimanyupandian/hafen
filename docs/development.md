@@ -54,16 +54,31 @@ tests use them too.
 To check the package installs on its own, pack it and install the file somewhere else:
 
 ```sh
-npm pack -w hafen                   # hafen-0.1.0.tgz: engine/, cli/ and the README, not the tests
-cd /some/empty/folder && npm install /path/to/hafen-0.1.0.tgz && npx hafen --version
+npm pack -w hafen                   # hafen-0.0.1.tgz: engine/, cli/ and the README, not the tests
+cd /some/empty/folder && npm install /path/to/hafen-0.0.1.tgz && npx hafen --version
 ```
 
 ## Packaging
 
 ```sh
-npm run app:build      # packages in release/: a .app on macOS, an NSIS installer on Windows, an AppImage on Linux
+npm run app:build      # packages in release/: a .dmg on macOS (Apple silicon and Intel), an installer on Windows, an AppImage on Linux
 npm run icons          # icon.png, icon.icns and icon.ico from desktop/icons/source.svg
 ```
+
+### Releasing
+
+A version tag builds all three on GitHub and publishes them as a release
+(`.github/workflows/release.yml`, its notes from `.github/release-notes.md`):
+
+```sh
+git tag v0.0.1 && git push origin v0.0.1
+```
+
+**Actions → Release → Run workflow** builds them without a release, to try a change first. The tests run on
+every push to `master` and every pull request (`.github/workflows/test.yml`): the unit tests on
+macOS, Windows and Linux, the browser tests on Linux. The builds
+aren't signed yet: the release notes say how to open them anyway (macOS: `xattr -cr`; Windows: More
+info → Run anyway). A version 0.x release is marked as a pre-release.
 
 ## Screenshots
 
@@ -77,8 +92,9 @@ npm run screenshots
 This builds the app, runs it in Chromium against a demo support bot and the mock endpoint's judges,
 and saves each screen in both themes. It needs no keys and makes no network calls.
 
-The app is called **Hafen** wherever it's seen. Inside, it's **Hafen Lab**: the name of its data
-folder, its keychain entry and its package id (`dev.hafen.lab`).
+The app is called **Hafen**. Its data folder is named by its id, `dev.hafen.app`, not "Hafen", so it
+never shares storage with the hafen desktop app (whose folder, on a disk that ignores case, "Hafen"
+would be).
 
 ## The spec
 

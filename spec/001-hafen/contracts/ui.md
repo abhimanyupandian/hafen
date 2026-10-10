@@ -24,7 +24,7 @@ own. It's tried again when what's selected, or the files, change.
 The app keeps its own work; the user never picks a folder to work in. Its suites (`*.hafen.yml`),
 providers (`providers/*.yml`), plugins (`plugins/*.js`) and data files are plain files, laid out as
 the engine reads a folder, in the app's **workspace**, opened by itself as the app starts: in the
-desktop app `<the data folder>/workspace/` (`HAFEN_LAB_DATA` names another data folder), the engine's
+desktop app `<the data folder>/workspace/` (`HAFEN_DATA` names another data folder), the engine's
 host rooted there (`desktop/engine-host.js`: the main process hands it the path with each port); in
 the browser build the Origin Private File System's `workspace/` folder (`navigator.storage
 .getDirectory()`), in the engine's worker (`worker.js`; a browser that can't keep one has it in memory,
@@ -172,8 +172,11 @@ Globals'). Secrets: in the desktop app, the main process's `secrets.json` in the
 keyed by scope (`""`: Globals'; a scope with no secrets left isn't in the file), each value with
 whether it's encrypted (`{ "encrypted": true, "value": <base64> }`, with the system's keychain through
 safeStorage, whenever the system offers it; `{ "encrypted": false, "value": <text> }` when it doesn't,
-which Settings → Secrets says), handed to the engine's process as they change, and to the page only
-when shown (`show`, `edit as .env`); in the browser build, `eval.secrets` (unencrypted, as Settings →
+which Settings → Secrets says once the keychain's been used), handed to the engine's process when it
+first needs them (its first run or message asks, and waits) and again as they change, and to the page
+only when shown (`show`, `edit as .env`). The keychain is used only for a value: one set, shown or
+exported, or the engine's first ask; never as the app starts, nor to list, forget, rename or copy them
+(the file keeps the names as plain keys, and they move as they're kept); in the browser build, `eval.secrets` (unencrypted, as Settings →
 Secrets says), given to the engine's worker (`configure`) as they change. Other tabs and windows
 follow a change to either (`storage` events). The engine's hosts look a secret up by its own name only
 (nothing an object inherits, such as `constructor`), and tell the engine every secret value the scope
@@ -925,14 +928,14 @@ window's on Windows and Linux; packages get it from `desktop/builder.json`.
 
 ### Its name
 
-The app is **Hafen** wherever it's seen: the window's title, the menu bar and the Dock (its bundle's
-name: `Hafen.app` in development, made by `desktop/start.js`; a package's `CFBundleName`), macOS's
-app menu (`About Hafen`, `Hide Hafen`, `Quit Hafen`), About, the CLI (`hafen`). Inside, it's **Hafen
-Lab** (`app.setName`): the name of its data folder (`~/Library/Application Support/Hafen Lab` on
-macOS) and of its keychain entry, and of a package's file (`Hafen Lab.app`, its id `dev.hafen.lab`).
-That keeps it apart from the hafen desktop app in this repository (`app.hafen.desktop`, data folder
-`hafen`), which, on a disk that ignores case, "Hafen" would share: its storage and its one-window
-lock, so only one of them could be open. `HAFEN_LAB_DATA` names another data folder (the tests').
+The app is **Hafen** wherever it's seen (`app.setName`): the window's title, the menu bar and the
+Dock (its bundle's name: `Hafen.app` in development, made by `desktop/start.js`, its id
+`dev.hafen.app.dev`; a package's `Hafen.app`, its id `dev.hafen.app`), macOS's app menu (`About
+Hafen`, `Hide Hafen`, `Quit Hafen`), About, the CLI (`hafen`). Its data folder is named by its id,
+`dev.hafen.app` (`~/Library/Application Support/dev.hafen.app` on macOS), not "Hafen": that keeps it
+apart from the hafen desktop app in this repository (`app.hafen.desktop`, data folder `hafen`), which,
+on a disk that ignores case, "Hafen" would share: its storage and its one-window lock, so only one of
+them could be open. `HAFEN_DATA` names another data folder (the tests').
 
 Before, it was "hafen eval" (data folder `hafen eval`, database `hafen-eval`, run files
 `*.hafen-eval-run.json`). What that kept is carried over, once:

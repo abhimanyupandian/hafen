@@ -11,7 +11,7 @@ import { pathToFileURL } from "node:url";
 import { fetchTransport } from "../engine/transport.js";
 
 const SKIP = new Set(["node_modules", ".git", ".hafen", "dist", "release"]);
-export const VERSION = "0.1.0";
+export const VERSION = "0.0.1";
 
 // root: the folder suite paths are relative to. secrets(NAME, {env}): where secrets ({{secret.NAME}})
 // come from (the command line's: secretsFrom; by default, the process's environment variables).

@@ -12,6 +12,17 @@ import { setPluginsWhere } from "hafen/engine/plugin-place.js";
 setPluginsWhere("your plugins (Settings → Plugins) or the suite's plugins");
 
 let secrets = {};  // env -> {NAME: value}; "" holds Globals', for every scope
+// The values come only when they're needed (reading them can ask the user to allow the system's
+// keychain): the first run or message asks the main process for them, and waits
+const NEED_SECRETS = new Set(["run", "send"]);
+let given;
+const secretsGiven = new Promise((resolve) => { given = resolve; });
+let asked = false;
+const askSecrets = () => {
+  if (!asked) process.parentPort.postMessage({ type: "unlock" });
+  asked = true;
+  return secretsGiven;
+};
 const places = new Map();  // id → { root, write }: a folder picked in a dialog
 
 // A secret: the scope's own (none chosen: "", Globals' alone), else Globals', else the environment
@@ -30,6 +41,8 @@ process.parentPort.on("message", (e) => {
   const message = e.data;
   if (message?.type === "secrets") {
     secrets = message.values ?? {};
+    asked = true;
+    given();
     return;
   }
   if (message?.type === "place") {
@@ -41,7 +54,14 @@ process.parentPort.on("message", (e) => {
     const workspace = message.workspace;
     servePort(
       {
-        receive: (handler) => port.on("message", (event) => handler(event.data)),
+        // (in order: one that needs the secrets waits for them, and what came after it waits too)
+        receive: (handler) => {
+          let ready = Promise.resolve();
+          port.on("message", (event) => {
+            if (NEED_SECRETS.has(event.data?.cmd)) ready = ready.then(askSecrets);
+            ready.then(() => handler(event.data));
+          });
+        },
         send: (m) => port.postMessage(m),
       },
       async () => hostAt(workspace),

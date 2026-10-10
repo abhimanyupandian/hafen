@@ -44,7 +44,7 @@ export const app = createStore({
   secretScopes: [],      // the scopes that have secrets kept ("" is Globals')
   scopeSecrets: {},      // scope → the names of its secrets ("" Globals'), never a value: checked in fields, counted in Settings
   secretsUnreadable: {}, // scope → the names of its secrets that can't be decrypted (the desktop app's)
-  secretsStorage: null,  // the desktop app's: { encrypted (the system encrypts them), plain (how many are kept unencrypted) }
+  secretsStorage: null,  // the desktop app's: { encrypted (the system encrypts them; null: not known yet), plain (how many are kept unencrypted) }
   secretsVersion: 0,     // counts changes to the secrets (here, or in another tab): what shows their values reads them again
   relay: null,           // the relay's address, when served by `npm run serve`
   plugins: [],           // the plugins kept (plugins/*.js), loaded to say what each is: [{ file, name, kind, version, provides, error }]

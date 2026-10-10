@@ -327,12 +327,16 @@ them in any time). Either way it isn't asked again.
 
 ## Where the desktop app keeps things
 
-- **Everything** is kept in the app's data folder, *Hafen Lab* (`~/Library/Application
-  Support/Hafen Lab` on macOS). Set `HAFEN_LAB_DATA` to use another folder.
+- **Everything** is kept in the app's data folder, *dev.hafen.app* (`~/Library/Application
+  Support/dev.hafen.app` on macOS, `%APPDATA%\dev.hafen.app` on Windows, `~/.config/dev.hafen.app`
+  on Linux). Set `HAFEN_DATA` to use another folder.
 - **Your suites, providers, plugins and data files** are plain files in its `workspace/` folder, as
   the engine reads them (leave it to the app: [Export](#import-and-export) writes copies for git).
 - **Runs, conversations and app state** are in its page storage (IndexedDB and Local Storage).
 - **Secrets** are in `secrets.json` in that folder, by scope (`""` is Globals'), each value encrypted
-  with a key the system's keychain keeps under *Hafen Lab* and marked as encrypted
-  (`{ "encrypted": true, "value": … }`). Scopes' and Globals' environment values are in its page
-  storage.
+  with a key the system keeps for Hafen (macOS's keychain, Windows' DPAPI, Linux's keyring) and marked as encrypted
+  (`{ "encrypted": true, "value": … }`). The app asks the system for that key only when it needs a
+  value: when you set one (a secret, or System One's key), show or export them, or the first time you
+  run a test or send a message after it starts with secrets kept. Starting it, and listing, deleting or
+  renaming them, never does; on macOS, that's when it may ask you to allow it the keychain (choose
+  **Always Allow**). Scopes' and Globals' environment values are in its page storage.

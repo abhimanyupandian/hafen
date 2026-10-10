@@ -36,7 +36,7 @@ export function devElectron({ electron = require("electron"), into = join(ROOT, 
     cpSync(source, app, { recursive: true, verbatimSymlinks: true });
   }
   const plist = join(app, "Contents", "Info.plist");
-  for (const [key, value] of [["CFBundleName", NAME], ["CFBundleDisplayName", NAME], ["CFBundleIdentifier", "dev.hafen.lab.dev"]]) {
+  for (const [key, value] of [["CFBundleName", NAME], ["CFBundleDisplayName", NAME], ["CFBundleIdentifier", "dev.hafen.app.dev"]]) {
     execFileSync("plutil", ["-replace", key, "-string", value, plist]);
   }
   cpSync(join(ROOT, "desktop", "icons", "icon.icns"), join(app, "Contents", "Resources", "electron.icns"));

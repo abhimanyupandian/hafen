@@ -5,7 +5,7 @@
 // port; the main process owns the window, the app's workspace (<the data folder>/workspace: the
 // suites, providers, plugins and data files the app keeps, as plain files), the dialogs that pick a
 // folder or files to import from or export to, and secrets (encrypted with the system's keychain
-// through safeStorage), and hands the engine the secrets it needs.
+// through safeStorage), and hands the engine the secrets when it first needs them.
 //
 // Commands the page can ask for (window.hafen.invoke, preload.cjs):
 //   engine_port     (re)connect the page to the engine
@@ -16,7 +16,8 @@
 //                   repository's top, else the whole path: what CI runs) }, or null
 //   secrets_state   → what's kept, never a value: { names: {env: [NAME…]} (the ones that can be read;
 //                   "" Globals'), unreadable: {env: [NAME…]} (can't be decrypted here), storage:
-//                   { encrypted (the system encrypts them now), plain (how many are kept unencrypted) } }
+//                   { encrypted (the system encrypts them now; null until the keychain's first used),
+//                   plain (how many are kept unencrypted) } }
 //   secrets_scopes  → the scopes that have secrets ("" for Globals)
 //   secrets_list    {env} → which secret names have values (never the values)
 //   secrets_names   → every scope's secret names as the file keeps them ({env: [NAME…]}, never a value;
@@ -50,17 +51,18 @@ const BACKGROUND = { light: "#ffffff", dark: "#0a0a0a" };
 // puts it in); run with npm run app, the app is Electron's own, so the Dock would show Electron's.
 const ICON = join(here, "icons", "icon.png");
 
-// The app is Hafen wherever it's seen (the window, the menu bar, About); inside it's Hafen Lab, the
-// name of its data folder and of its keychain entry, so it runs beside the hafen desktop app (whose
-// folder, on a disk that ignores case, "Hafen" would be) and never shares its storage or its lock
+// The app is Hafen. Its data folder is named by its id, dev.hafen.app, not "Hafen": so it runs
+// beside the hafen desktop app (whose folder, on a disk that ignores case, "Hafen" would be) and never
+// shares its storage or its lock
 const NAME = "Hafen";
-app.setName("Hafen Lab");
+const ID = "dev.hafen.app";
+app.setName(NAME);
 app.setAboutPanelOptions({ applicationName: NAME, applicationVersion: app.getVersion() });
 // (Windows names notifications and the taskbar's entry by this)
-if (process.platform === "win32") app.setAppUserModelId("dev.hafen.lab");
-// HAFEN_LAB_DATA: a data folder of its own (secrets, window state, the one-window lock), so a test
-// run doesn't meet the app you have open
-if (process.env.HAFEN_LAB_DATA) app.setPath("userData", process.env.HAFEN_LAB_DATA);
+if (process.platform === "win32") app.setAppUserModelId(ID);
+// HAFEN_DATA: a data folder of its own (secrets, window state, the one-window lock), so a test run
+// doesn't meet the app you have open
+app.setPath("userData", process.env.HAFEN_DATA || join(app.getPath("appData"), ID));
 if (!app.requestSingleInstanceLock()) app.quit();
 
 let win = null;
@@ -111,9 +113,20 @@ function ciPath(dir) {
 // kept), so neither is ever read as the other when the system's offer changes: one encrypted that can't
 // be decrypted now is kept as it is, unused, and never written back as text. A value written before
 // the marker (a bare string) was encrypted whenever the system could.
+//
+// The system's keychain (safeStorage) is used only when a value is needed: a secret set, shown or
+// exported, or the engine's first run or message (it asks for them: desktop/engine-host.js). Never as
+// the app starts, and never to list names: the file keeps them as plain keys. (On macOS even asking
+// whether it can encrypt reads the keychain, and the system may ask the user to allow that.)
 const secretsFile = () => join(app.getPath("userData"), "secrets.json");
-const canEncrypt = () => safeStorage.isEncryptionAvailable();
-const encrypt = (value) => (canEncrypt() ? { encrypted: true, value: safeStorage.encryptString(value).toString("base64") } : { encrypted: false, value });
+let valuesRead = false;  // the values have been read in this run of the app: the engine has them
+let keychainUsed = false;
+const keychain = () => {
+  keychainUsed = globalThis.hafenKeychainUsed = true;  // (the tests look: tests/browser/desktop.spec.js)
+  return safeStorage;
+};
+const canEncrypt = () => keychain().isEncryptionAvailable();
+const encrypt = (value) => (canEncrypt() ? { encrypted: true, value: keychain().encryptString(value).toString("base64") } : { encrypted: false, value });
 function decrypt(stored) {
   const marked = stored !== null && typeof stored === "object";
   const encrypted = marked ? stored.encrypted === true : canEncrypt();
@@ -121,7 +134,7 @@ function decrypt(stored) {
   if (typeof value !== "string") throw new Error("not a value");
   if (!encrypted) return { value, plain: true };
   if (!canEncrypt()) throw new Error("the system can't decrypt it now");
-  return { value: safeStorage.decryptString(Buffer.from(value, "base64")), plain: false };
+  return { value: keychain().decryptString(Buffer.from(value, "base64")), plain: false };
 }
 
 // The values, decrypted: { values: { env: { NAME: value } }, stored (the file as it is), unreadable
@@ -164,6 +177,7 @@ function readSecrets() {
   }
   const all = { values, stored, unreadable, plain };
   cache = { at, all };
+  valuesRead = true;
   // (kept unencrypted when the system couldn't, and it can now: encrypted. A file that can't be written
   // keeps them as they are, and they're still read.)
   if (plain && canEncrypt()) {
@@ -174,6 +188,26 @@ function readSecrets() {
     }
   }
   return cache.all;
+}
+
+// The file as it is: each scope's names, and each value as kept, never decrypted (no keychain). A file
+// that can't be read throws, and is never written over.
+function readStored() {
+  try {
+    return JSON.parse(readFileSync(secretsFile(), "utf8")) ?? {};
+  } catch (err) {
+    if (err.code === "ENOENT") return {};
+    throw new Error(`the secrets file can't be read (${err.message}): it's left as it is`);
+  }
+}
+const namesIn = (stored) => Object.fromEntries(Object.entries(stored).map(([env, names]) => [env, Object.keys(names ?? {})]).filter(([, names]) => names.length));
+// Write the file as it is (values moved as they're kept, never decrypted); the engine is given the
+// values again if it had them
+function writeStored(stored) {
+  mkdirSync(dirname(secretsFile()), { recursive: true });
+  writeFileSync(secretsFile(), JSON.stringify(stored, null, 2), { mode: 0o600 });
+  cache = null;
+  if (valuesRead) sendSecrets();
 }
 
 // Write the values, keeping the ones that couldn't be read as they were in the file. A scope with
@@ -236,7 +270,19 @@ function startEngine() {
     // workspace again)
     if (!app.isQuitting && code !== 0) setTimeout(() => { startEngine(); if (win) connect(); }, 500);
   });
-  sendSecrets();
+  // (the values only once they've been read: before then, the engine asks for them before its first
+  // run or message, and always has an answer, {} when they can't be read)
+  if (valuesRead) sendSecrets();
+  engine.on("message", (message) => {
+    if (message?.type !== "unlock") return;
+    let values = {};
+    try {
+      values = readSecrets().values;
+    } catch (err) {
+      console.error(err.message);
+    }
+    engine?.postMessage({ type: "secrets", values });
+  });
   for (const [id, { root, write }] of places) engine.postMessage({ type: "place", id, root, write });
 }
 
@@ -318,8 +364,17 @@ const COMMANDS = {
     const path = result.filePaths[0];
     return { place: addPlace(path, true), path, name: basename(path), ci: ciPath(path) };
   },
-  // What's kept, never a value (Settings → Secrets, the fields' checks): from what's decrypted already
+  // What's kept, never a value (Settings → Secrets, the fields' checks). Before the values are needed,
+  // from the file alone (no keychain): every name kept, none known to be unreadable yet. Whether the
+  // system encrypts them is known (and asked) only once the keychain's been used: null till then,
+  // unless one was kept unencrypted
   secrets_state() {
+    const unknown = (plain) => (plain ? false : null);
+    if (!valuesRead) {
+      const stored = readStored();
+      const plain = Object.values(stored).flatMap((names) => Object.values(names ?? {})).filter((kept) => kept && typeof kept === "object" && kept.encrypted === false).length;
+      return { names: namesIn(stored), unreadable: {}, storage: { encrypted: unknown(plain), plain } };
+    }
     const { values, unreadable, plain } = readSecrets();
     const names = Object.fromEntries(Object.entries(values).map(([env, kept]) => [env, Object.keys(kept)]).filter(([, n]) => n.length));
     const cannot = {};
@@ -327,21 +382,20 @@ const COMMANDS = {
       const [env, name] = key.split("\0");
       (cannot[env] ??= []).push(name);
     }
-    return { names, unreadable: cannot, storage: { encrypted: canEncrypt(), plain } };
+    return { names, unreadable: cannot, storage: { encrypted: keychainUsed ? canEncrypt() : unknown(plain), plain } };
   },
   // The scopes that have secrets ("" is Globals')
   secrets_scopes() {
-    return Object.entries(readSecrets().values).filter(([, names]) => Object.keys(names).length).map(([env]) => env);
+    return Object.keys(namesIn(readStored()));
   },
   secrets_list({ env = "" }) {
-    return Object.fromEntries(Object.keys(ownOf(readSecrets().values, env) ?? {}).map((name) => [name, true]));
+    return Object.fromEntries(Object.keys(ownOf(readStored(), env) ?? {}).map((name) => [name, true]));
   },
   // Every scope's secret names as the file keeps them, never a value (one that can't be decrypted
   // among them: deleting its scope's secrets deletes it too): Settings → Secrets lists the scopes that
   // no longer exist by these
   secrets_names() {
-    const { stored } = readSecrets();
-    return Object.fromEntries(Object.entries(stored).map(([env, names]) => [env, Object.keys(names ?? {})]).filter(([, names]) => names.length));
+    return namesIn(readStored());
   },
   // A scope's own values, shown in Settings when the user asks (never otherwise)
   secrets_reveal({ env = "", names }) {
@@ -350,41 +404,46 @@ const COMMANDS = {
     return Object.fromEntries(wanted.map((n) => [n, kept[n]]));
   },
   secrets_set({ env = "", name, value }) {
-    changeSecrets((all) => setIn(all, env, { [name]: value }));
-    return true;
+    return COMMANDS.secrets_set_many({ env, values: { [name]: value } });
   },
   secrets_set_many({ env = "", values = {} }) {
+    // (only forgotten: from the file as it is, no keychain)
+    if (Object.values(values).every((value) => !value)) {
+      const stored = readStored();
+      const kept = { ...(ownOf(stored, env) ?? {}) };
+      for (const name of Object.keys(values)) delete kept[name];
+      if (Object.keys(kept).length) stored[env] = kept;
+      else delete stored[env];
+      writeStored(stored);
+      return true;
+    }
     changeSecrets((all) => setIn(all, env, values));
     return true;
   },
+  // A scope deleted, renamed or copied: its values move as they're kept (no keychain)
   secrets_drop({ env }) {
     if (!env) throw new Error("name the scope whose secrets go");
-    changeSecrets((all) => {
-      delete all.values[env];
-      delete all.stored[env];
-      for (const key of [...all.unreadable]) if (key.startsWith(`${env}\0`)) all.unreadable.delete(key);
-    });
+    const stored = readStored();
+    if (!Object.hasOwn(stored, env)) return true;
+    delete stored[env];
+    writeStored(stored);
     return true;
   },
   secrets_move({ from, to }) {
     if (!from || !to) throw new Error("name the scope and its new name");
-    changeSecrets((all) => {
-      if (!all.values[from] && !all.stored[from]) return;
-      all.values[to] = { ...(all.values[to] ?? {}), ...(all.values[from] ?? {}) };
-      delete all.values[from];
-      // (one that couldn't be read goes with it, as it was)
-      all.stored[to] = { ...(all.stored[to] ?? {}), ...Object.fromEntries(Object.entries(all.stored[from] ?? {}).filter(([name]) => all.unreadable.has(`${from}\0${name}`))) };
-      delete all.stored[from];
-      for (const key of [...all.unreadable]) if (key.startsWith(`${from}\0`)) { all.unreadable.delete(key); all.unreadable.add(`${to}${key.slice(from.length)}`); }
-    });
+    const stored = readStored();
+    if (!Object.hasOwn(stored, from)) return true;
+    stored[to] = { ...(stored[to] ?? {}), ...stored[from] };
+    delete stored[from];
+    writeStored(stored);
     return true;
   },
   secrets_copy({ from, to }) {
     if (!from || !to) throw new Error("name the scope and its copy");
-    changeSecrets((all) => {
-      if (!Object.keys(all.values[from] ?? {}).length) return;
-      all.values[to] = { ...(all.values[to] ?? {}), ...all.values[from] };
-    });
+    const stored = readStored();
+    if (!Object.keys(stored[from] ?? {}).length) return true;
+    stored[to] = { ...(stored[to] ?? {}), ...stored[from] };
+    writeStored(stored);
     return true;
   },
   async secrets_export({ env = "", file, place }) {
