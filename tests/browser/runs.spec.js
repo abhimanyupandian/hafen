@@ -713,7 +713,7 @@ tests:
     await writeDisk(join(folder, "plugins", "acme-login.js"), LOGIN);
     await writeDisk(join(folder, "providers", "behind-login.yml"), BEHIND_LOGIN);
     await writeDisk(join(folder, AUTH), AUTH_SUITE);
-    const env = { ...process.env, HAFEN_LAB_DATA: data };
+    const env = { ...process.env, HAFEN_DATA: data };
     delete env.ELECTRON_RUN_AS_NODE;
     const app = await electron.launch({ args: [ROOT], cwd: ROOT, env });
     try {

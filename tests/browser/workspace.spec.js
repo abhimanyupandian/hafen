@@ -471,7 +471,7 @@ plain.describe("the desktop app", () => {
   plain.skip(process.platform === "linux" && !process.env.DISPLAY, "needs a display (run under xvfb-run on Linux)");
 
   const launch = (data, more = {}) => {
-    const env = { ...process.env, HAFEN_LAB_DATA: data, ...more };
+    const env = { ...process.env, HAFEN_DATA: data, ...more };
     delete env.ELECTRON_RUN_AS_NODE;
     return electron.launch({ args: [ROOT], cwd: ROOT, env });
   };

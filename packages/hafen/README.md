@@ -8,10 +8,10 @@ browser: Node 22 or newer, and three small dependencies.
 ## Install
 
 **TODO: not published to npm yet.** Until it is, make the package from a clone of Hafen's
-repository (`npm pack -w hafen` there gives `hafen-0.1.0.tgz`) and install that file:
+repository (`npm pack -w hafen` there gives `hafen-0.0.1.tgz`) and install that file:
 
 ```sh
-npm install --save-dev ./hafen-0.1.0.tgz     # once published: npm install --save-dev hafen
+npm install --save-dev ./hafen-0.0.1.tgz     # once published: npm install --save-dev hafen
 npx hafen --help
 ```
 

@@ -112,7 +112,8 @@ const browserSecrets = () => {
 // What's kept, never a value: { names: { scope: [NAME…] } (the ones that can be read; "" Globals'),
 // unreadable: { scope: [NAME…] } (the desktop app's that can't be decrypted: under another keychain, or
 // the system's gone), storage: { encrypted, plain } (the desktop app's: whether the system encrypts
-// them; how many are kept unencrypted) or null (the browser build's, never encrypted) }
+// them, null until its keychain's first used; how many are kept unencrypted) or null (the browser
+// build's, never encrypted) }
 export async function secretState() {
   if (isApp) return invoke("secrets_state");
   const names = Object.fromEntries(Object.entries(browserSecrets()).map(([env, values]) => [env, Object.keys(values)]).filter(([, n]) => n.length));

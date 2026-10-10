@@ -12,7 +12,7 @@ import { setPluginsWhere } from "hafen/engine/plugin-place.js";
 // (the app keeps its plugins: a problem naming one that isn't there says where to add it)
 setPluginsWhere("your plugins (Settings → Plugins) or the suite's plugins");
 
-const VERSION = "0.1.0";
+const VERSION = "0.0.1";
 // The workspace's folder in the private file system
 const WORKSPACE = "workspace";
 

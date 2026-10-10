@@ -82,11 +82,11 @@ await mkdir(EXPORT_DIR, { recursive: true });
 
 // ---------- the app, recorded ----------
 
-const env = { ...process.env, HAFEN_LAB_DATA: data, JEV_API_KEY: key };
+const env = { ...process.env, HAFEN_DATA: data, JEV_API_KEY: key };
 delete env.ELECTRON_RUN_AS_NODE;
 // The window's size as it opens (the screen's work area), so the video is the app as people see it
 // (even numbers: the video's encoder needs them)
-const probe = await electron.launch({ args: [ROOT], cwd: ROOT, env: { ...env, HAFEN_LAB_DATA: join(work, "probe") } });
+const probe = await electron.launch({ args: [ROOT], cwd: ROOT, env: { ...env, HAFEN_DATA: join(work, "probe") } });
 await probe.firstWindow();
 const opened = await probe.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].getContentBounds());
 await probe.close();

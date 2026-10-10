@@ -299,7 +299,7 @@ test.describe("none chosen, and deleted for good", () => {
       const folder = join(data, "workspace");
       // (smoke.hafen.yml has an environment named local, as the scope deleted is)
       await cp(join(ROOT, "packages/hafen/tests/fixtures/suites"), folder, { recursive: true });
-      const env = { ...process.env, HAFEN_LAB_DATA: data };
+      const env = { ...process.env, HAFEN_DATA: data };
       delete env.ELECTRON_RUN_AS_NODE;
       const secretsFile = () => readFile(join(data, "secrets.json"), "utf8");
       let app = await electron.launch({ args: [ROOT], cwd: ROOT, env });
@@ -729,7 +729,7 @@ tests:
       await cp(join(ROOT, "packages/hafen/tests/fixtures/suites"), folder, { recursive: true });
       await mkdir(join(folder, "providers"), { recursive: true });
       for (const [path, text] of Object.entries(FILES)) await writeDisk(join(folder, path), text);
-      const env = { ...process.env, HAFEN_LAB_DATA: data };
+      const env = { ...process.env, HAFEN_DATA: data };
       delete env.ELECTRON_RUN_AS_NODE;
       let app = await electron.launch({ args: [ROOT], cwd: ROOT, env });
       try {
@@ -962,7 +962,7 @@ tests:
       await writeDisk(smoke, (await readFile(smoke, "utf8")).replace("http://127.0.0.1:8791", mock.url));
       await mkdir(join(folder, "providers"), { recursive: true });
       for (const [path, text] of Object.entries(FILES)) await writeDisk(join(folder, path), text);
-      const env = { ...process.env, HAFEN_LAB_DATA: data };
+      const env = { ...process.env, HAFEN_DATA: data };
       delete env.ELECTRON_RUN_AS_NODE;
       let app = await electron.launch({ args: [ROOT], cwd: ROOT, env });
       try {

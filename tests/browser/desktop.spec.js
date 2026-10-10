@@ -15,7 +15,7 @@ const ROOT = fileURLToPath(new URL("../../", import.meta.url));
 
 test.skip(process.platform === "linux" && !process.env.DISPLAY, "needs a display (run under xvfb-run on Linux)");
 
-// The app's workspace in a data folder of a test's own (HAFEN_LAB_DATA), filled with the fixture
+// The app's workspace in a data folder of a test's own (HAFEN_DATA), filled with the fixture
 // suites before the app starts, the mock's address in them: { data, folder (the workspace) }
 async function workspaceWith(mock) {
   const data = await mkdtemp(join(tmpdir(), "hafen-data-"));
@@ -32,7 +32,7 @@ async function workspaceWith(mock) {
 test("runs a test in the desktop app, on its own workspace, and keeps the run", async () => {
   const mock = await startMock({ chunkMs: 10 });
   const { data, folder } = await workspaceWith(mock);
-  const env = { ...process.env, HAFEN_LAB_DATA: data };
+  const env = { ...process.env, HAFEN_DATA: data };
   delete env.ELECTRON_RUN_AS_NODE;
   const app = await electron.launch({ args: [ROOT], cwd: ROOT, env });
   try {
@@ -68,7 +68,7 @@ test("the desktop app edits the files in its workspace, and gets its engine back
   const mock = await startMock({ chunkMs: 10 });
   const { data, folder } = await workspaceWith(mock);
   const suite = join(folder, "smoke.hafen.yml");
-  const env = { ...process.env, HAFEN_LAB_DATA: data };
+  const env = { ...process.env, HAFEN_DATA: data };
   delete env.ELECTRON_RUN_AS_NODE;
   const app = await electron.launch({ args: [ROOT], cwd: ROOT, env });
   const disk = async (file = "smoke.hafen.yml") => parse(await readFile(join(folder, file), "utf8"));
@@ -121,7 +121,7 @@ test("the desktop app edits the files in its workspace, and gets its engine back
   }
 });
 
-test("in development on macOS the app runs as Hafen (not Electron; Hafen Lab inside, beside the hafen app), and plugins load in its engine", async () => {
+test("in development on macOS the app runs as Hafen (not Electron; its data folder apart from the hafen app's), and plugins load in its engine", async () => {
   test.skip(process.platform !== "darwin", "macOS names apps by their bundle");
   const { devElectron } = await import("../../desktop/start.js");
   const into = await mkdtemp(join(tmpdir(), "hafen-dev-"));
@@ -139,15 +139,15 @@ test("in development on macOS the app runs as Hafen (not Electron; Hafen Lab ins
   const plist = execFileSync("plutil", ["-p", join(executable, "..", "..", "Info.plist")], { encoding: "utf8" });
   expect(plist).toContain('"CFBundleName" => "Hafen"');
   expect(plist).toContain('"CFBundleDisplayName" => "Hafen"');
-  expect(plist).toContain('"CFBundleIdentifier" => "dev.hafen.lab.dev"');
+  expect(plist).toContain('"CFBundleIdentifier" => "dev.hafen.app.dev"');
   execFileSync("codesign", ["--verify", "--deep", join(executable, "..", "..", "..")]);
-  const env = { ...process.env, HAFEN_LAB_DATA: data };
+  const env = { ...process.env, HAFEN_DATA: data };
   delete env.ELECTRON_RUN_AS_NODE;
   const app = await electron.launch({ executablePath: executable, args: [ROOT], cwd: ROOT, env });
   try {
-    // Inside, Hafen Lab (its data folder's and keychain entry's name, apart from the hafen app's); seen,
-    // Hafen: the bundle (the menu bar, the Dock), the app menu, About and the window
-    expect(await app.evaluate(({ app: a }) => [a.getName(), process.execPath.includes("Hafen.app")])).toEqual(["Hafen Lab", true]);
+    // Hafen: its name, the bundle (the menu bar, the Dock), the app menu, About and the window; its data
+    // folder named by its id, apart from the hafen app's
+    expect(await app.evaluate(({ app: a }) => [a.getName(), process.execPath.includes("Hafen.app")])).toEqual(["Hafen", true]);
     const menu = await app.evaluate(({ Menu }) => Menu.getApplicationMenu().items[0].submenu.items.map((i) => i.label).filter(Boolean));
     expect(menu).toEqual(expect.arrayContaining(["About Hafen", "Hide Hafen", "Quit Hafen"]));
     expect(menu.join(" ")).not.toContain("Lab");
@@ -168,7 +168,7 @@ test("in development on macOS the app runs as Hafen (not Electron; Hafen Lab ins
 test("a run that ends while the window is in the background: the system's notification (on by default here); clicked, the window comes forward on what ran", async () => {
   const mock = await startMock({ chunkMs: 10 });
   const { data } = await workspaceWith(mock);
-  const env = { ...process.env, HAFEN_LAB_DATA: data };
+  const env = { ...process.env, HAFEN_DATA: data };
   delete env.ELECTRON_RUN_AS_NODE;
   const app = await electron.launch({ args: [ROOT], cwd: ROOT, env });
   try {
@@ -201,9 +201,76 @@ test("a run that ends while the window is in the background: the system's notifi
   }
 });
 
+// The system's keychain (which may ask the user to allow it) is used only when a secret's value is
+// needed: a value set, and, started again, the first run that needs them. Never as the app starts, nor
+// to list or forget what's kept.
+test("the desktop app uses the system's keychain only when a secret's value is needed", async () => {
+  const mock = await startMock({ chunkMs: 10 });
+  const data = await mkdtemp(join(tmpdir(), "hafen-data-"));
+  const folder = join(data, "workspace");
+  await cp(join(ROOT, "packages/hafen/tests/fixtures/suites"), folder, { recursive: true });
+  await writeFile(join(folder, "providers/keyed.yml"), `kind: http\nurl: "${mock.url}/json"\nheaders: { Authorization: "Bearer {{secret.HAFEN_COVER_KEY}}" }\nbody: { message: "{{user}}" }\nresponse: { text: $.data.reply }\n`);
+  await writeFile(join(folder, "keyed.hafen.yml"), "version: 1\nname: Keyed\nprovider: providers/keyed.yml\ntests:\n  - name: keyed hello\n    turns: [ { user: hello, expect: [ { type: status, equals: 200 } ] } ]\n");
+  const env = { ...process.env, HAFEN_DATA: data };
+  delete env.ELECTRON_RUN_AS_NODE;
+  delete env.HAFEN_COVER_KEY;
+  const lastAuth = async () => (await (await fetch(`${mock.url}/_log`)).json()).at(-1)?.headers.authorization;
+  const used = () => app.evaluate(() => globalThis.hafenKeychainUsed ?? false);
+  const start = async () => {
+    app = await electron.launch({ args: [ROOT], cwd: ROOT, env });
+    const page = await app.firstWindow();
+    await page.waitForFunction(() => !document.documentElement.classList.contains("loading"));
+    await expect(page.locator("#suiteList .list-open", { hasText: "keyed hello" })).toHaveCount(1);
+    return page;
+  };
+  const secrets = async (page) => {
+    await page.click("#openSettings");
+    await page.click("#settings-tab-secrets");
+    await showEntry(page, "", "secrets");
+  };
+  let app;
+  try {
+    // Started, and Settings → Secrets with nothing kept: not used
+    let page = await start();
+    await secrets(page);
+    expect(await used()).toBe(false);
+    // A value set: used
+    for (const [name, value] of [["HAFEN_COVER_KEY", "k-kept-1234"], ["HAFEN_SPARE_KEY", "k-spare-5678"]]) {
+      await page.fill("#secretName", name);
+      await page.fill("#secretValue", value);
+      await page.press("#secretValue", "Enter");
+      await expect(page.locator(`#secret-${name}`)).toHaveCount(1);
+    }
+    expect(await used()).toBe(true);
+    await app.close();
+    // Started again: the names listed, and one forgotten, without it
+    page = await start();
+    expect(await used()).toBe(false);
+    await secrets(page);
+    await expect(page.locator("#secret-HAFEN_COVER_KEY .vars-source")).toHaveText("Globals");
+    await page.click("#secret-HAFEN_SPARE_KEY-forget");
+    await page.click("#secret-HAFEN_SPARE_KEY-forget");
+    await expect(page.locator("#secret-HAFEN_SPARE_KEY")).toHaveCount(0);
+    expect(await used()).toBe(false);
+    // The first run that needs them: used, and the value kept is the one sent
+    await page.click("#settingsClose");
+    await page.locator("#suiteList .list-open", { hasText: "keyed hello" }).click();
+    await page.click("#testRun");
+    await expect(page.locator("#status")).toContainText("passed 1/1");
+    expect(await lastAuth()).toBe("Bearer k-kept-1234");
+    expect(await used()).toBe(true);
+    expect(Object.keys(JSON.parse(await readFile(join(data, "secrets.json"), "utf8"))[""])).toEqual(["HAFEN_COVER_KEY"]);
+  } finally {
+    await app?.close();
+    await mock.close();
+    await rm(data, { recursive: true, force: true });
+  }
+});
+
 // A {{secret.NAME}} that Settings → Secrets has no value for takes the environment variable the app was
 // started with; one Settings has (for the scope, or for every scope) wins over it; neither is in the runs
-// the app keeps. (Settings → Secrets says nothing in words, but, with no encryption, that it's unencrypted.)
+// the app keeps. (Settings → Secrets says nothing in words, but, with no encryption, that it's unencrypted
+// once one's kept.)
 test("a secret Settings hasn't got comes from the environment the desktop app was started with; one Settings has wins; neither is in the runs kept", async () => {
   const mock = await startMock({ chunkMs: 10 });
   // (the app's workspace, in a data folder of the test's own, filled before it starts)
@@ -212,7 +279,7 @@ test("a secret Settings hasn't got comes from the environment the desktop app wa
   await cp(join(ROOT, "packages/hafen/tests/fixtures/suites"), folder, { recursive: true });
   await writeFile(join(folder, "providers/keyed.yml"), `kind: http\nurl: "${mock.url}/json"\nheaders: { Authorization: "Bearer {{secret.HAFEN_COVER_KEY}}" }\nbody: { message: "{{user}}" }\nresponse: { text: $.data.reply }\n`);
   await writeFile(join(folder, "keyed.hafen.yml"), "version: 1\nname: Keyed\nprovider: providers/keyed.yml\ntests:\n  - name: keyed hello\n    turns: [ { user: hello, expect: [ { type: status, equals: 200 } ] } ]\n");
-  const env = { ...process.env, HAFEN_LAB_DATA: data, HAFEN_COVER_KEY: "k-from-env-4242" };
+  const env = { ...process.env, HAFEN_DATA: data, HAFEN_COVER_KEY: "k-from-env-4242" };
   delete env.ELECTRON_RUN_AS_NODE;
   const app = await electron.launch({ args: [ROOT], cwd: ROOT, env });
   const lastAuth = async () => (await (await fetch(`${mock.url}/_log`)).json()).at(-1)?.headers.authorization;
@@ -235,15 +302,16 @@ test("a secret Settings hasn't got comes from the environment the desktop app wa
     // Settings → Secrets, for every scope: that one wins
     await page.click("#openSettings");
     await page.click("#settings-tab-secrets");
-    // (no words, but a warning while the system offers the app no encryption)
-    const encrypted = await app.evaluate(({ safeStorage }) => safeStorage.isEncryptionAvailable());
-    if (encrypted) await expect(page.locator("#secretsNote")).toHaveCount(0);
-    else await expect(page.locator("#secretsNote")).toHaveText("Kept unencrypted: this system offers the app no encryption yet.");
+    await expect(page.locator("#secretsNote")).toHaveCount(0);
     await showEntry(page, "", "secrets");
     await page.fill("#secretName", "HAFEN_COVER_KEY");
     await page.fill("#secretValue", "k-from-app-1234");
     await page.press("#secretValue", "Enter");
     await expect(page.locator("#secret-HAFEN_COVER_KEY .vars-source")).toHaveText("Globals");
+    // (no words, but a warning while the system offers the app no encryption)
+    const encrypted = await app.evaluate(({ safeStorage }) => safeStorage.isEncryptionAvailable());
+    if (encrypted) await expect(page.locator("#secretsNote")).toHaveCount(0);
+    else await expect(page.locator("#secretsNote")).toHaveText("Kept unencrypted: this system offers the app no encryption yet.");
     await page.click("#settingsClose");
     await page.click("#testRun");
     await expect(page.locator("#status")).toContainText("passed 1/1");

@@ -1,0 +1,71 @@
+# Builds the desktop app for macOS, Windows and Linux, and publishes them as a GitHub release.
+#
+#   git tag v0.0.1 && git push origin v0.0.1    builds all three and publishes the release v0.0.1
+#   Actions → Release → Run workflow            builds all three, kept on the run, without a release
+#
+# The builds aren't signed yet: .github/release-notes.md says how to open them anyway.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build (${{ matrix.name }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS
+            os: macos-latest
+            target: --mac        # Apple silicon and Intel (desktop/builder.json)
+          - name: Windows
+            os: windows-latest
+            target: --win
+          - name: Linux
+            os: ubuntu-latest
+            target: --linux
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx vite build
+      - name: Package
+        run: npx electron-builder --config desktop/builder.json ${{ matrix.target }} --publish never
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"   # unsigned: no signing certificate is looked for
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hafen-${{ matrix.name }}
+          path: |
+            release/*.dmg
+            release/*.exe
+            release/*.AppImage
+          if-no-files-found: error
+
+  release:
+    name: Publish the release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          body_path: .github/release-notes.md
+          generate_release_notes: true
+          prerelease: ${{ startsWith(github.ref_name, 'v0.') }}
